@@ -12,6 +12,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <sched.h>
 #include <dlfcn.h>
 #include <sys/mman.h>
 
@@ -192,27 +193,61 @@ static int sc_threads(int nthreads, size_t size, uint64_t iters)
     return 0;
 }
 
-/* Larson-style: one thread allocates, another frees (cross-thread frees). */
+/* Larson-style: one thread allocates, another frees (cross-thread frees).
+ *
+ * The ring is a bounded SPSC queue over monotonic counters: the
+ * producer must never let head run more than cap ahead of tail.
+ * The original version of this scenario skipped the full check, so
+ * the producer lapped the consumer, overwrote slots that still held
+ * live pointers, and the consumer freed some blocks twice -- it
+ * aborted with a tcache double-free under stock glibc, i.e. it
+ * measured its own bug (see ADR 0025).  It also never terminated on
+ * its own: main joined the producer before setting the stop flag,
+ * so only the crash (or OOM) ended a run.  The producer now emits
+ * exactly cap*rounds blocks, waiting for room, and the consumer
+ * drains exactly that many; sc_cross verifies freed == produced. */
 typedef struct {
     void **ring;
     size_t cap;
+    uint64_t total; /* blocks to produce in all: cap * rounds */
     volatile size_t head, tail;
-    volatile int stop;
+    volatile uint64_t produced;
+    volatile int done;
     size_t size;
     uint64_t freed;
 } Cross;
 
+static void cross_pause(unsigned iter)
+{
+    if ((iter & 0xFFF) == 0xFFF) {
+        sched_yield();
+        return;
+    }
+#if defined(__x86_64__) || defined(__i386__)
+    __asm__ __volatile__("pause");
+#endif
+}
+
 static void *cross_producer(void *arg)
 {
     Cross *c = arg;
-    while (!c->stop) {
+    uint64_t n = 0;
+    for (uint64_t i = 0; i < c->total; i++) {
+        /* Wait for a free slot: head - tail must stay < cap, or we
+         * would overwrite a pointer the consumer has not freed. */
+        unsigned spin = 0;
+        size_t h = __atomic_load_n(&c->head, __ATOMIC_RELAXED);
+        while (h - __atomic_load_n(&c->tail, __ATOMIC_ACQUIRE) >= c->cap)
+            cross_pause(spin++);
         void *p = malloc(c->size);
         if (!p)
             break;
-        size_t h = c->head;
         c->ring[h % c->cap] = p;
         __atomic_store_n(&c->head, h + 1, __ATOMIC_RELEASE);
+        n++;
     }
+    __atomic_store_n(&c->produced, n, __ATOMIC_RELAXED);
+    __atomic_store_n(&c->done, 1, __ATOMIC_RELEASE);
     return NULL;
 }
 
@@ -220,12 +255,13 @@ static void *cross_consumer(void *arg)
 {
     Cross *c = arg;
     uint64_t n = 0;
-    while (1) {
-        size_t t = __atomic_load_n(&c->tail, __ATOMIC_ACQUIRE);
+    for (;;) {
+        size_t t = __atomic_load_n(&c->tail, __ATOMIC_RELAXED);
         size_t h = __atomic_load_n(&c->head, __ATOMIC_ACQUIRE);
         if (t == h) {
-            if (c->stop && t == h)
+            if (__atomic_load_n(&c->done, __ATOMIC_ACQUIRE))
                 break;
+            cross_pause((unsigned)n);
             continue;
         }
         void *p = c->ring[t % c->cap];
@@ -242,20 +278,27 @@ static int sc_cross(size_t size, uint64_t cap, uint64_t rounds)
 {
     Cross c;
     c.cap = cap;
+    c.total = cap * rounds;
     c.head = 0;
     c.tail = 0;
-    c.stop = 0;
+    c.produced = 0;
+    c.done = 0;
     c.size = size;
     c.freed = 0;
     c.ring = malloc(cap * sizeof(void *));
+    if (!c.ring)
+        return 1;
     pthread_t prod, cons;
     pthread_create(&prod, NULL, cross_producer, &c);
     pthread_create(&cons, NULL, cross_consumer, &c);
     pthread_join(prod, NULL);
-    c.stop = 1;
     pthread_join(cons, NULL);
     free(c.ring);
     g_cross_ops = c.freed;
+    /* The scenario is only meaningful if every produced block was
+     * freed exactly once. */
+    if (c.freed != __atomic_load_n(&c.produced, __ATOMIC_RELAXED))
+        return 1;
     return 0;
 }
 

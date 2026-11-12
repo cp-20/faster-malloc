@@ -5,6 +5,7 @@
 
 # Benchmark binaries
 /bench/micro
+/bench/macro
 /bench/mt
 /bench/stress
 /bench/instr

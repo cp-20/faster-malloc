@@ -485,8 +485,14 @@ What the JIT does demonstrate is real and useful:
   never returned to the OS account for that. mimalloc's 3.7 MB is the best
   of the lot. Round 2 (ADR 0015) gave v2 a `malloc_trim` that actually
   releases spans — after a trim, a freed 157 MB working set drops to
-  ~7 MB RSS — but a trim only helps when something calls it; the peak
-  itself is a cache-bounding problem that remains open.
+  ~7 MB RSS — but a trim only helps when something calls it. Round 3
+  bounded the retention itself: the large-block cache budget dropped
+  from 4 GiB to 64 MiB per thread (ADR 0019) and thread exit now drains
+  per-thread state (ADR 0017; 83 MB → 3 MB stranded after 72 short-lived
+  threads). In the round-3 app matrix, Python's peak fell from 565 MB to
+  506 MB (glibc 440 MB) and Node's from 544 MB to 512 MB (glibc 438 MB);
+  the remaining excess is small-span retention, which is still only
+  released by `malloc_trim`.
 * **Locality on reuse.** glibc and mimalloc have fewer D1 misses than v2 on
   the churn workload (1264 and 1815 against 1731) because they reuse the
   same physical page over and over, while v2's blocks come from many
@@ -513,10 +519,17 @@ What the JIT does demonstrate is real and useful:
    regrouping at refill time instead of at flush.)*
 2. **Return memory to the OS** under pressure, and implement `malloc_trim`
    properly. *(Round 2: `malloc_trim` done — ADR 0015; automatic return
-   under pressure measured and rejected in ADR 0014.)*
+   under pressure measured and rejected in ADR 0014. Round 3: retention
+   bounded instead — ADR 0017 thread-exit drain, ADR 0019 cache budget;
+   automatic small-span return remains the open problem.)*
 3. **Make the JIT's dispatch branchless** — a jump table indexed by
    `size >> 4` would replace N range tests with one indirect branch, which
    might make specialisation profitable for diverse workloads too.
+4. ~~**Grow large blocks with mremap instead of copying**~~ — *(Round 3:
+   tried three ways, rejected with measurements — ADR 0018. The large
+   cache already plays the role glibc's retained heap plays, and the
+   moving variant's naive form is unsafe: the span header can land
+   before the moved mapping.)*
 
 ---
 

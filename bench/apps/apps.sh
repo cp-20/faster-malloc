@@ -173,9 +173,10 @@ run_redis() {
     fi
     T=$(echo "$start $end" | awk '{printf "%.3f", $2-$1}')
     record redis "$alloc"
-    local setrps getrps
-    setrps=$(echo "$out" | grep -o 'SET: [0-9.]* requests per second' | grep -o '[0-9.]*')
-    getrps=$(echo "$out" | grep -o 'GET: [0-9.]* requests per second' | grep -o '[0-9.]*')
+    local setrps getrps rates
+    rates=$(echo "$out" | grep -o 'throughput summary: [0-9.]*' | grep -o '[0-9.]*$')
+    setrps=$(echo "$rates" | sed -n 1p)
+    getrps=$(echo "$rates" | sed -n 2p)
     echo "  redis/$alloc set=${setrps:-?} get=${getrps:-?} rps" >&2
 }
 

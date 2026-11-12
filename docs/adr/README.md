@@ -29,3 +29,6 @@ mark were recorded when the work was done.
 | [0014](0014-free-list-shaping.md) | Free-list shaping: span-grouped recycling into a per-thread stash | Rejected after measurement |
 | [0015](0015-malloc-trim-span-census.md) | malloc_trim that actually returns spans: the central-list census | Accepted |
 | [0016](0016-entries-callable-before-constructor.md) | Entry points must be callable before the library constructor runs (Node.js/JIT startup crash) | Accepted |
+| [0017](0017-thread-exit-drain.md) | Drain per-thread caches when a thread exits | Accepted |
+| [0018](0018-mremap-realloc-growth-rejected.md) | Realloc growth via mremap: rejected (the cache already does this job) | Rejected after measurement |
+| [0019](0019-large-cache-budget.md) | Large-block cache budget: 4 GiB → 64 MiB | Accepted |

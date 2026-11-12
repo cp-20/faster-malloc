@@ -90,7 +90,13 @@ typedef struct FM_Span {
     uint32_t cls;       /* size class, or LARGE_CLASS */
     uint32_t magic;
     uint32_t nblocks;
-    uint32_t pad0;
+    uint32_t dead_mark; /* ADR 0020: ms timestamp of the first census
+                         * that found this span entirely free; 0 =
+                         * unmarked.  A marked span is unmapped by the
+                         * automatic release only once the mark is
+                         * FM_RELEASE_AGE_MS old.  Written by census
+                         * threads and cleared on refill; plain
+                         * heuristic data, races are benign. */
     uintptr_t map_base; /* start of the mapping (for munmap) */
     size_t map_size;
     size_t user_size;   /* bytes requested (large / aligned) */
@@ -110,10 +116,30 @@ struct FM_Batch {
 
 typedef struct FM_Central {
     _Atomic(FM_Batch *) head;
-    char pad[64 - sizeof(_Atomic(FM_Batch *))];
+    /* Approximate number of batches on the stack, maintained by the
+     * (already slow) push/pop paths.  The automatic span release
+     * (ADR 0020) uses it as a gate: a class whose central stack is
+     * nearly empty has nothing worth censusing.  It is approximate
+     * only in the presence of concurrent updates, which is fine for
+     * a gate. */
+    _Atomic uint32_t depth;
+    /* ADR 0020 automatic-release bookkeeping: when this class was
+     * last censused (ms, monotonic) and the adaptive backoff level
+     * (censuses that find nothing worth doing space themselves out
+     * exponentially, so a busy class whose spans never die is not
+     * walked at full rate forever). */
+    _Atomic uint32_t last_census_ms;
+    _Atomic uint32_t backoff;
+    char pad[64 - sizeof(_Atomic(FM_Batch *)) - 3 * sizeof(_Atomic uint32_t)];
 } FM_Central;
 
 extern FM_Central fm_central[CLASS_COUNT];
+/* Per-thread flush counter per class: the automatic span release
+ * runs its census once every FM_RELEASE_EVERY flushes of a class.
+ * fm_in_census suppresses the trigger while a census (trim or
+ * release) is already running on this thread. */
+extern __thread uint32_t fm_flush_seq[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
+extern __thread int fm_in_census __attribute__((tls_model("initial-exec")));
 extern __thread FM_Batch *fm_batch_pool __attribute__((tls_model("initial-exec")));
 
 /* Large-block cache (ADR 0011): per-thread cache of freed large blocks,
@@ -136,6 +162,33 @@ extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec"
  * "unknown" (legacy publishers); consumers must then walk. */
 #define FM_COUNT_PURE 0x80000000u
 #define FM_COUNT_MASK 0x7FFFFFFFu
+
+/* Automatic release tuning (ADR 0020).  A census opportunity arises
+ * once per FM_RELEASE_EVERY flushes of a class in one thread; all
+ * classes are then considered.  A class is actually censused only
+ * when its central
+ * stack holds at least FM_RELEASE_MIN_DEPTH batches and its
+ * (adaptive) interval has elapsed.  A span found entirely free is
+ * first *marked*; it is unmapped only by a later census that finds
+ * it still entirely free with a mark at least FM_RELEASE_AGE_MS
+ * old -- the decay that keeps a working set cycling on a
+ * millisecond period out of the mmap/fault cycle that sank eager
+ * release in ADR 0014 (the cyclic patterns in the bench suite
+ * cycle every ~3 ms; real shrinkage stays dead for seconds).
+ * FM_RELEASE_KEEP spans per class are always retained as burst
+ * absorption. */
+#define FM_RELEASE_EVERY 16u
+#define FM_RELEASE_MIN_DEPTH 4u
+#define FM_RELEASE_KEEP 2u
+#define FM_RELEASE_AGE_MS 100u
+#define FM_RELEASE_INTERVAL_MS 10u
+
+static inline uint32_t fm_now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
+}
 
 /* ------------------------------------------------------------------ */
 /* batch pool                                                          */
@@ -188,6 +241,7 @@ static inline void fm_central_push(uint32_t cls, FM_Batch *b)
     } while (!atomic_compare_exchange_weak_explicit(&fm_central[cls].head, &old, b,
                                                     memory_order_release,
                                                     memory_order_relaxed));
+    atomic_fetch_add_explicit(&fm_central[cls].depth, 1, memory_order_relaxed);
 }
 
 /* Publish a chain of blocks as one batch, recording its length and
@@ -277,6 +331,9 @@ static inline void *fm_span_new(uint32_t cls, void **tail_out, uint32_t *count_o
 
 __attribute__((noinline)) static void fm_flush_bin(uint32_t cls);
 static void fm_arm_thread_exit(void);
+/* Automatic span release (ADR 0020): defined with the trim census
+ * below; called from fm_flush_bin on its cadence. */
+static void fm_auto_release_tick(uint32_t flushed_cls);
 
 /*
  * (Historical note: publishing used to be a private O(1) hand-off,
@@ -306,6 +363,11 @@ __attribute__((noinline)) void *fm_refill_class(uint32_t cls)
                                                        memory_order_acquire,
                                                        memory_order_relaxed))
                 continue; /* b was reloaded with the current head */
+            atomic_fetch_sub_explicit(&fm_central[cls].depth, 1, memory_order_relaxed);
+            /* A span-pure batch going back into service witnesses
+             * its span alive: cancel any dead mark (ADR 0020). */
+            if ((b->count & FM_COUNT_MASK) && (b->count & FM_COUNT_PURE))
+                ((FM_Span *)((uintptr_t)b->head & SPAN_MASK))->dead_mark = 0;
             fm_head[cls] = b->head;
             fm_tail[cls] = b->tail;
             fm_batch_release(b);
@@ -387,10 +449,20 @@ __attribute__((noinline)) static void fm_flush_bin(uint32_t cls)
      * would need the walk -- so the trim census walks these batches,
      * which is fine: trim is allowed to be slow. */
     fm_publish2(h, t, cls, 0, 0);
+
+    /* Automatic span release (ADR 0020): every FM_RELEASE_EVERY
+     * flushes of this class, offer the release machinery a tick.
+     * The tick itself decides -- per class, behind depth, rate and
+     * age gates -- whether anything is worth censusing, so this
+     * stays a couple of TLS/atomic touches on an already cold path. */
+    if (!fm_in_census &&
+        ((++fm_flush_seq[cls] & (FM_RELEASE_EVERY - 1)) == 0))
+        fm_auto_release_tick(cls);
 }
 
 /* ------------------------------------------------------------------ */
-/* memory return: the trim census (ADR 0015)                           */
+/* memory return: the trim census (ADR 0015) and the automatic         */
+/* span release built on it (ADR 0020)                                 */
 /* ------------------------------------------------------------------ */
 
 /*
@@ -492,8 +564,22 @@ static FM_CensusEnt *fm_census_find(FM_Census *c, uintptr_t span)
     return e->span == span ? e : NULL;
 }
 
-__attribute__((noinline)) static size_t fm_trim_class(uint32_t cls)
+/* Set by the most recent census: how many spans it newly marked
+ * dead, and how many it found marked but not yet aged out.  The
+ * automatic release's backoff reads them (ADR 0020). */
+static uint32_t fm_census_marked, fm_census_waiting;
+
+/* Census one class and unmap its provably-dead spans, retaining up
+ * to `keep` dead spans (their blocks stay on the central stack for
+ * reuse).  instant != 0 is the malloc_trim behaviour of ADR 0015
+ * (every fully-free span dies now); instant == 0 is the automatic
+ * release of ADR 0020, where a fully-free span must also carry a
+ * dead mark at least FM_RELEASE_AGE_MS old. */
+__attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t keep,
+                                                      int instant)
 {
+    int was_in_census = fm_in_census;
+    fm_in_census = 1; /* the flush below must not re-trigger release */
     fm_flush_bin(cls);
 
     /* Detach the whole central stack atomically.  Batches published
@@ -502,8 +588,11 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls)
      * shrink what the census can see. */
     FM_Batch *all = atomic_exchange_explicit(&fm_central[cls].head, NULL,
                                              memory_order_acq_rel);
-    if (!all)
+    atomic_store_explicit(&fm_central[cls].depth, 0, memory_order_relaxed);
+    if (!all) {
+        fm_in_census = was_in_census;
         return 0;
+    }
 
     FM_Census cen;
     cen.ents = NULL;
@@ -516,6 +605,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls)
             fm_central_push(cls, all);
             all = nx;
         }
+        fm_in_census = was_in_census;
         return 0;
     }
 
@@ -531,12 +621,20 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls)
         }
     }
 
-    /* A span is dead when every one of its blocks is here. */
+    /* A span is a candidate when every one of its blocks is here.
+     * Instant mode kills candidates outright.  Automatic mode only
+     * *marks* a candidate the first time; it dies once a later
+     * census finds it still a candidate with an aged mark.  A span
+     * seen with blocks missing is alive -- clear its mark. */
+    uint32_t now = instant ? 0 : fm_now_ms();
+    fm_census_marked = 0;
+    fm_census_waiting = 0;
     for (size_t i = 0; i < cen.cap; i++) {
         FM_CensusEnt *e = &cen.ents[i];
         if (!e->span)
             continue;
-        uint32_t nb = ((FM_Span *)e->span)->nblocks;
+        FM_Span *sp = (FM_Span *)e->span;
+        uint32_t nb = sp->nblocks;
 #ifdef FM_DEBUG
         if (e->cnt > nb) {
             fprintf(stderr, "[fm] CENSUS OVERCOUNT cls=%u span=%p cnt=%u "
@@ -545,7 +643,35 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls)
             abort();
         }
 #endif
-        e->dead = (e->cnt == nb);
+        if (e->cnt == nb) {
+            if (instant) {
+                e->dead = 1;
+            } else if (!sp->dead_mark) {
+                sp->dead_mark = now ? now : 1;
+                fm_census_marked++;
+            } else if ((uint32_t)(now - sp->dead_mark) >= FM_RELEASE_AGE_MS) {
+                e->dead = 1;
+            } else {
+                fm_census_waiting++;
+            }
+        } else {
+            sp->dead_mark = 0;
+        }
+    }
+
+    /* Retention quota (ADR 0020): a census in its automatic form
+     * keeps up to `keep` of the dead spans -- their blocks stay on
+     * the central stack, immediately reusable -- and unmaps only
+     * the excess.  malloc_trim passes keep == 0 and releases all. */
+    if (keep) {
+        uint32_t kept = 0;
+        for (size_t i = 0; i < cen.cap && kept < keep; i++) {
+            FM_CensusEnt *e = &cen.ents[i];
+            if (e->span && e->dead) {
+                e->dead = 0;
+                kept++;
+            }
+        }
     }
 
     /* Rebuild: keep survivors, drop blocks of dead spans. */
@@ -611,14 +737,57 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls)
         survivors = nx;
     }
     fm_census_destroy(&cen);
+    fm_in_census = was_in_census;
     return released;
+}
+
+/* Consider one class for automatic release (ADR 0020): census it
+ * in the retaining, ageing form if its central stack is deep enough
+ * and its adaptive interval has elapsed.  A census that finds no
+ * fully-free spans at all backs the interval off exponentially --
+ * in a busy multithreaded class whose spans never quite die, the
+ * census walk and the detach window it opens are pure cost, so
+ * they should happen rarely; a census that marks, waits on, or
+ * releases spans resets the interval to the base rate. */
+static void fm_release_maybe(uint32_t cls, uint32_t now)
+{
+    FM_Central *c = &fm_central[cls];
+    if (atomic_load_explicit(&c->depth, memory_order_relaxed) <
+        FM_RELEASE_MIN_DEPTH)
+        return;
+    uint32_t backoff = atomic_load_explicit(&c->backoff, memory_order_relaxed);
+    uint32_t last = atomic_load_explicit(&c->last_census_ms, memory_order_relaxed);
+    if (last && (uint32_t)(now - last) < (FM_RELEASE_INTERVAL_MS << backoff))
+        return;
+    atomic_store_explicit(&c->last_census_ms, now, memory_order_relaxed);
+    size_t released = fm_trim_class(cls, FM_RELEASE_KEEP, 0);
+    if (released == 0 && fm_census_marked == 0 && fm_census_waiting == 0) {
+        if (backoff < 5)
+            atomic_store_explicit(&c->backoff, backoff + 1, memory_order_relaxed);
+    } else if (backoff) {
+        atomic_store_explicit(&c->backoff, 0, memory_order_relaxed);
+    }
+}
+
+static void fm_auto_release_tick(uint32_t flushed_cls)
+{
+    (void)flushed_cls;
+    uint32_t now = fm_now_ms();
+    /* Consider every class, not just the one whose flush ticked: a
+     * class that stops being flushed would otherwise never be
+     * visited again, and its dead spans are exactly the ones worth
+     * releasing.  The per-class gates are two atomic loads, so a
+     * full sweep per tick is cheap; the census behind them is what
+     * the gates protect. */
+    for (uint32_t cls = 0; cls < CLASS_COUNT; cls++)
+        fm_release_maybe(cls, now);
 }
 
 static inline size_t fm_trim_spans(void)
 {
     size_t released = 0;
     for (uint32_t cls = 0; cls < CLASS_COUNT; cls++)
-        released += fm_trim_class(cls);
+        released += fm_trim_class(cls, 0, 1);
     return released;
 }
 

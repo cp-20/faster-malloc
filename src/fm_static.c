@@ -18,15 +18,6 @@ __thread uint32_t fm_cnt[CLASS_COUNT] __attribute__((tls_model("initial-exec")))
 __thread FM_Batch *fm_batch_pool __attribute__((tls_model("initial-exec")));
 __thread void *fm_lcache_head[FM_LCACHE_BUCKETS] __attribute__((tls_model("initial-exec")));
 __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));
-__thread uintptr_t fm_stash_span[CLASS_COUNT][FM_STASH_SLOTS] __attribute__((tls_model("initial-exec")));
-__thread void *fm_stash_head[CLASS_COUNT][FM_STASH_SLOTS] __attribute__((tls_model("initial-exec")));
-__thread void *fm_stash_tail[CLASS_COUNT][FM_STASH_SLOTS] __attribute__((tls_model("initial-exec")));
-__thread uint32_t fm_stash_cnt[CLASS_COUNT][FM_STASH_SLOTS] __attribute__((tls_model("initial-exec")));
-__thread uint32_t fm_stash_total[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
-__thread uintptr_t fm_spare_span[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
-__thread void *fm_spare_head[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
-__thread void *fm_spare_tail[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
-__thread uint32_t fm_spare_cnt[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 
 void *fm_generic_malloc(size_t n) { return fm_malloc(n); }
 void *(*fm_generic_malloc_ptr)(size_t) = fm_generic_malloc;

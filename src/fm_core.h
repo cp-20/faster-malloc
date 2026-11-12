@@ -17,21 +17,24 @@
  * of batches: a refill takes a whole batch with one CAS, a flush publishes a
  * whole batch with one CAS.  No lock is ever taken on the allocation path.
  *
- * Shaping (ADR 0014)
+ * Shaping (ADR 0014) -- tried, measured, not adopted
  * ------------------
- * A flush no longer publishes the local list in free order.  It walks the
- * list once (the flush is already off the hot path) and groups the blocks
- * by span.  The groups go into a small per-thread *span stash* -- a few
- * slots per class, each holding the free blocks of one span -- and only
- * groups that fit nowhere are published, still span-pure, to the central
- * list.  Refills drain the stash's largest group first, so reuse empties
- * span after span instead of skimming a few blocks off every span at
- * once: the pages a burst of allocations lands on stay few and hot.
- *
- * A group that covers its whole span proves the span has no live blocks
- * anywhere (every block of it is in this thread's hands), so the span is
- * unmapped on the spot.  That, plus the census in fm_trim_spans(), is
- * what lets the allocator give memory back (ADR 0015).
+ * A flush publishes the local list in free order, so a batch can mix
+ * blocks from many spans and reuse sprays across all of them (the
+ * bench/macro `locality` scenario measures the spray directly: a
+ * reallocation burst lands on ~513 of the pool's 528 pages).  Round 2
+ * implemented span-grouped recycling -- group the flushed list by
+ * span into a per-thread stash, drain largest-group-first at refill
+ * -- and it worked mechanically (burst footprint 513 -> 68 pages)
+ * but cost an extra pointer chase per recycled block, and on every
+ * timed workload that tax exceeded the locality it bought (the macro
+ * workloads' free order already clusters by span, so there was
+ * little left to win).  ADR 0014 has the full experiment, including
+ * the two failure modes that had to be fixed first (an O(span) walk
+ * per flush, and eager span unmapping).  What round 2 kept is the
+ * part with no hot-path cost: batches record their length and
+ * span-purity, and malloc_trim (ADR 0015) uses a census over the
+ * central list to unmap spans it can prove entirely free.
  *
  * Counting
  * --------
@@ -121,39 +124,6 @@ extern __thread void *fm_lcache_head[FM_LCACHE_BUCKETS]
     __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));
 
-/* Span stash (ADR 0014): per-thread, per-class slots, each holding the
- * free blocks of exactly one span, accumulated across flushes.  Cold
- * path only (flush / refill / trim), so plain arrays are fine here. */
-#define FM_STASH_SLOTS 16
-#define FM_STASH_MAX_BLOCKS 8192
-extern __thread uintptr_t fm_stash_span[CLASS_COUNT][FM_STASH_SLOTS]
-    __attribute__((tls_model("initial-exec")));
-extern __thread void *fm_stash_head[CLASS_COUNT][FM_STASH_SLOTS]
-    __attribute__((tls_model("initial-exec")));
-extern __thread void *fm_stash_tail[CLASS_COUNT][FM_STASH_SLOTS]
-    __attribute__((tls_model("initial-exec")));
-extern __thread uint32_t fm_stash_cnt[CLASS_COUNT][FM_STASH_SLOTS]
-    __attribute__((tls_model("initial-exec")));
-extern __thread uint32_t fm_stash_total[CLASS_COUNT]
-    __attribute__((tls_model("initial-exec")));
-
-/* Spare span (ADR 0015): one *completed* span per class is parked
- * instead of unmapped, as release hysteresis.  Workloads that free a
- * whole span and immediately need one again (a game frame's
- * transients) would otherwise pay an mmap + page faults per cycle;
- * the parked span is served first by the next refill, and a second
- * completion while one is parked releases the new arrival.  Trim
- * drains the spare too, so retention is bounded by one span per
- * class per thread. */
-extern __thread uintptr_t fm_spare_span[CLASS_COUNT]
-    __attribute__((tls_model("initial-exec")));
-extern __thread void *fm_spare_head[CLASS_COUNT]
-    __attribute__((tls_model("initial-exec")));
-extern __thread void *fm_spare_tail[CLASS_COUNT]
-    __attribute__((tls_model("initial-exec")));
-extern __thread uint32_t fm_spare_cnt[CLASS_COUNT]
-    __attribute__((tls_model("initial-exec")));
-
 /* Batch count field: block count in the low bits; the top bit marks a
  * span-pure batch (every block from one span).  A count of 0 means
  * "unknown" (legacy publishers); consumers must then walk. */
@@ -199,7 +169,8 @@ static inline void fm_batch_release(FM_Batch *b)
  * of one), never an arbitrary fragment: publishing is O(1) because
  * the tail pointer is already known, and a refill takes a whole batch,
  * again O(1).  What changed in ADR 0014 is only how a flush *builds*
- * the batches -- see fm_shape_recycle.
+ * the batches as they are built (ADR 0014 kept only this much of
+ * the shaping work: the bookkeeping the trim census needs).
  */
 
 static inline void fm_central_push(uint32_t cls, FM_Batch *b)
@@ -294,240 +265,20 @@ static inline void *fm_span_new(uint32_t cls, void **tail_out, uint32_t *count_o
 }
 
 /* ------------------------------------------------------------------ */
-/* shaping: span-grouped recycling (ADR 0014) and span release (0015)  */
-/* ------------------------------------------------------------------ */
-
-/* Unmap a span whose blocks are all in hand.  The caller must hold
- * `cnt` distinct free blocks of the span and cnt must equal the span's
- * block count: then no block of the span can be live or held anywhere
- * else (each block exists exactly once across all lists), so the
- * mapping can go.  Header fields are read into locals first -- the
- * header lives inside the span being unmapped. */
-static inline int fm_release_full_span(uintptr_t span, uint32_t cnt)
-{
-    FM_Span *sp = (FM_Span *)span;
-    if (cnt != sp->nblocks)
-        return 0;
-    uintptr_t base = sp->map_base;
-    size_t len = sp->map_size;
-    munmap((void *)base, len);
-    return 1;
-}
-
-/* A span has just been completed: every one of its blocks is in this
- * chain.  Park the first completed span of the class as the spare
- * (release hysteresis, ADR 0015); release any further completion. */
-static inline void fm_span_completed(uint32_t cls, uintptr_t span, void *head,
-                                     void *tail, uint32_t cnt)
-{
-    if (fm_spare_span[cls] == 0) {
-        fm_spare_span[cls] = span;
-        fm_spare_head[cls] = head;
-        fm_spare_tail[cls] = tail;
-        fm_spare_cnt[cls] = cnt;
-        return;
-    }
-    fm_release_full_span(span, cnt);
-}
-
-/* Offer one span-pure group of blocks to the stash.  Returns 1 if the
- * group was consumed (stashed, parked as the spare, or released as a
- * completed span), 0 if the caller should publish it instead. */
-static inline int fm_stash_insert(uint32_t cls, uintptr_t span, void *head,
-                                  void *tail, uint32_t cnt)
-{
-    int empty = -1;
-    for (int i = 0; i < FM_STASH_SLOTS; i++) {
-        if (fm_stash_span[cls][i] == span) {
-            *(void **)fm_stash_tail[cls][i] = head;
-            fm_stash_tail[cls][i] = tail;
-            fm_stash_cnt[cls][i] += cnt;
-            fm_stash_total[cls] += cnt;
-            if (fm_stash_cnt[cls][i] == ((FM_Span *)span)->nblocks) {
-                /* The stash now holds the whole span. */
-                void *whead = fm_stash_head[cls][i];
-                void *wtail = fm_stash_tail[cls][i];
-                uint32_t whole = fm_stash_cnt[cls][i];
-                fm_stash_span[cls][i] = 0;
-                fm_stash_head[cls][i] = NULL;
-                fm_stash_tail[cls][i] = NULL;
-                fm_stash_cnt[cls][i] = 0;
-                fm_stash_total[cls] -= whole;
-                fm_span_completed(cls, span, whead, wtail, whole);
-            }
-            return 1;
-        }
-        if (empty < 0 && fm_stash_span[cls][i] == 0)
-            empty = i;
-    }
-    if (cnt == ((FM_Span *)span)->nblocks) {
-        /* Arrives already complete: never enters the stash. */
-        fm_span_completed(cls, span, head, tail, cnt);
-        return 1;
-    }
-    if (empty >= 0 && fm_stash_total[cls] + cnt <= FM_STASH_MAX_BLOCKS) {
-        fm_stash_span[cls][empty] = span;
-        fm_stash_head[cls][empty] = head;
-        fm_stash_tail[cls][empty] = tail;
-        fm_stash_cnt[cls][empty] = cnt;
-        fm_stash_total[cls] += cnt;
-        return 1;
-    }
-    return 0;
-}
-
-/* Take the stash's largest group of `cls` into the local list.
- * Returns 1 if a group was installed in fm_head/fm_tail. */
-static inline int fm_stash_take(uint32_t cls)
-{
-    int best = -1;
-    uint32_t bestcnt = 0;
-    for (int i = 0; i < FM_STASH_SLOTS; i++) {
-        if (fm_stash_cnt[cls][i] > bestcnt) {
-            bestcnt = fm_stash_cnt[cls][i];
-            best = i;
-        }
-    }
-    if (best < 0)
-        return 0;
-    fm_head[cls] = fm_stash_head[cls][best];
-    fm_tail[cls] = fm_stash_tail[cls][best];
-    fm_stash_total[cls] -= bestcnt;
-    fm_stash_span[cls][best] = 0;
-    fm_stash_head[cls][best] = NULL;
-    fm_stash_tail[cls][best] = NULL;
-    fm_stash_cnt[cls][best] = 0;
-    return 1;
-}
-
-typedef struct FM_Group {
-    uintptr_t span;
-    void *head;
-    void *tail;
-    uint32_t cnt;  /* pass 1: blocks counted; pass 2: blocks spliced */
-    uint32_t seen; /* pass 1 count, kept for the dispatch total */
-} FM_Group;
-
-#define FM_FLUSH_GROUPS 32
-
-/* Find the group for `span`, claiming an empty slot for it if the
- * probe window has one.  NULL when the window is full of other spans
- * (the block is then treated as mixed).  Slots are only ever claimed,
- * never freed, during one recycle, so both passes agree. */
-static inline FM_Group *fm_group_for(FM_Group *groups, uintptr_t span)
-{
-    unsigned h = (unsigned)(span >> 16) & (FM_FLUSH_GROUPS - 1);
-    for (int probe = 0; probe < 4; probe++) {
-        FM_Group *cand = &groups[(h + probe) & (FM_FLUSH_GROUPS - 1)];
-        if (cand->span == span)
-            return cand;
-        if (cand->span == 0) {
-            cand->span = span;
-            return cand;
-        }
-    }
-    return NULL;
-}
-
-/* Recycle a detached local list: group its blocks by span, hand the
- * groups to the stash (which parks or releases completed spans), and
- * publish whatever the stash cannot take, still span-pure.  Blocks
- * whose span falls out of the group table go to the central list as
- * one mixed batch, as before.
- *
- * Two passes, deliberately.  Pass 1 only *loads*: it counts blocks
- * per span without storing to any block, and it warms every block's
- * first word into cache.  If the whole list turns out to be one span
- * (the common bulk-free case: a tree teardown, a frame's transients)
- * the list is already exactly the group chain and pass 2 is skipped
- * entirely.  Otherwise pass 2 splices the links -- now cache-warm --
- * into per-span chains. */
-__attribute__((noinline)) static void fm_shape_recycle(uint32_t cls, void *head,
-                                                       void *tail)
-{
-    FM_Group groups[FM_FLUSH_GROUPS];
-    memset(groups, 0, sizeof groups);
-    uint32_t total = 0;
-    int overflow = 0;
-
-    for (void *p = head; p; p = *(void **)p) {
-        FM_Group *g = fm_group_for(groups, (uintptr_t)p & SPAN_MASK);
-        if (g)
-            g->seen++;
-        else
-            overflow = 1;
-        total++;
-    }
-
-    if (!overflow) {
-        FM_Group *the = NULL;
-        int ndistinct = 0;
-        for (int i = 0; i < FM_FLUSH_GROUPS; i++) {
-            if (groups[i].seen) {
-                ndistinct++;
-                the = &groups[i];
-            }
-        }
-        if (ndistinct == 1 && the->seen == total) {
-            /* Uniform list: it is already this span's chain. */
-            if (!fm_stash_insert(cls, the->span, head, tail, total))
-                fm_publish2(head, tail, cls, total, 1);
-            return;
-        }
-    }
-
-    void *mixed_head = NULL, *mixed_tail = NULL;
-    uint32_t mixed_cnt = 0;
-    void *p = head;
-    while (p) {
-        void *next = *(void **)p;
-        FM_Group *g = fm_group_for(groups, (uintptr_t)p & SPAN_MASK);
-        if (g) {
-            if (g->cnt)
-                *(void **)g->tail = p;
-            else
-                g->head = p;
-            g->tail = p;
-            g->cnt++;
-        } else {
-            if (mixed_tail)
-                *(void **)mixed_tail = p;
-            else
-                mixed_head = p;
-            mixed_tail = p;
-            mixed_cnt++;
-        }
-        p = next;
-    }
-
-    for (int i = 0; i < FM_FLUSH_GROUPS; i++) {
-        FM_Group *g = &groups[i];
-        if (!g->cnt)
-            continue;
-        *(void **)g->tail = NULL;
-        if (!fm_stash_insert(cls, g->span, g->head, g->tail, g->cnt))
-            fm_publish2(g->head, g->tail, cls, g->cnt, 1);
-    }
-    if (mixed_head) {
-        *(void **)mixed_tail = NULL;
-        fm_publish2(mixed_head, mixed_tail, cls, mixed_cnt, 0);
-    }
-}
-
-/* ------------------------------------------------------------------ */
 /* refill / flush                                                      */
 /* ------------------------------------------------------------------ */
 
 __attribute__((noinline)) static void fm_flush_bin(uint32_t cls);
 
 /*
- * (Historical note: a flush used to publish the whole local list with
- * an O(1) hand-off, deliberately never walking it -- the blocks of a
- * free list are scattered across the heap, so each step is a likely
- * cache miss.  ADR 0014 reverses that call for the flush path: the
- * walk is what buys span grouping, span release and the stash, and it
- * runs at most once per kClassLimit frees.  Publishing itself is now
- * fm_publish2, above.)
+ * (Historical note: publishing used to be a private O(1) hand-off,
+ * fm_publish, that recorded nothing about the batch.  It is now
+ * fm_publish2, which also records the batch's length and span-purity
+ * when the publisher knows them for free -- the refill below does,
+ * for the rest of a fresh span.  A flush still never walks its list:
+ * the blocks of a free list are scattered across the heap, so each
+ * step is a likely cache miss, and ADR 0014 measured exactly how
+ * expensive buying that walk back is.)
  */
 
 /* Take the next block of a class, refilling from the central list or from a
@@ -537,30 +288,7 @@ __attribute__((noinline)) void *fm_refill_class(uint32_t cls)
 {
     uint32_t limit = kClassLimit[cls];
 
-    /* The parked spare span first (ADR 0015): a whole span's blocks,
-     * the most concentrated refill there is. */
-    if (fm_spare_span[cls]) {
-        fm_head[cls] = fm_spare_head[cls];
-        fm_tail[cls] = fm_spare_tail[cls];
-        fm_spare_span[cls] = 0;
-        fm_spare_head[cls] = NULL;
-        fm_spare_tail[cls] = NULL;
-        fm_spare_cnt[cls] = 0;
-        void *p = fm_head[cls];
-        fm_head[cls] = *(void **)p;
-        return p;
-    }
-
-    /* The span stash next (ADR 0014): its largest group is one span's
-     * blocks, so draining it keeps this burst of allocations on one
-     * span's pages instead of skimming every span in the central list. */
-    if (fm_stash_take(cls)) {
-        void *p = fm_head[cls];
-        fm_head[cls] = *(void **)p;
-        return p;
-    }
-
-    /* Try the central list next: take a whole batch, O(1). */
+    /* Try the central list first: take a whole batch, O(1). */
     {
         FM_Batch *b = atomic_load_explicit(&fm_central[cls].head, memory_order_relaxed);
         while (b) {
@@ -598,13 +326,10 @@ __attribute__((noinline)) void *fm_refill_class(uint32_t cls)
     fm_cnt[cls] = 0;
 
     if (total > keep) {
-        /* The rest of the fresh span is one span-pure group: offer it
-         * to the stash, where the next refill will drain this same
-         * span before touching any other; publish it if the stash
-         * cannot take it. */
-        if (!fm_stash_insert(cls, (uintptr_t)head & SPAN_MASK, rest, tail,
-                             total - keep))
-            fm_publish2(rest, tail, cls, total - keep, 1);
+        /* The rest of the fresh span is one span-pure group with a
+         * known count -- recorded on the batch (ADR 0015), which is
+         * what lets the trim census account for it without walking. */
+        fm_publish2(rest, tail, cls, total - keep, 1);
     }
 
     void *p = fm_head[cls];
@@ -645,12 +370,13 @@ __attribute__((noinline)) static void fm_flush_bin(uint32_t cls)
     fm_cnt[cls] = 0;
     if (!h)
         return;
-    /* Shaped recycling (ADR 0014): group by span, park or release
-     * completed spans, stash the groups, publish the overflow
-     * span-pure.  The old code published the whole list in free order
-     * with one CAS; this walks it, on a path that runs at most once
-     * per kClassLimit frees. */
-    fm_shape_recycle(cls, h, t);
+    /* Publish the whole list in free order with one CAS, as before
+     * ADR 0014: grouping this list by span was implemented and
+     * measured, and the walk cost more than the locality it bought
+     * (see the ADR).  The count is not recorded -- computing it
+     * would need the walk -- so the trim census walks these batches,
+     * which is fine: trim is allowed to be slow. */
+    fm_publish2(h, t, cls, 0, 0);
 }
 
 /* ------------------------------------------------------------------ */
@@ -661,13 +387,13 @@ __attribute__((noinline)) static void fm_flush_bin(uint32_t cls)
  * malloc_trim's job: find spans that are entirely free and unmap them.
  * At trim time we can afford to walk.  The census below counts, per
  * span, how many of its blocks sit in the central list (this thread's
- * local list and stash are flushed into it first).  A span whose
- * central count equals its block count has no live blocks and no
- * blocks held anywhere else either -- every block exists exactly once
- * across all the allocator's lists, so if all of them are here, none
- * are anywhere else.  Those spans are unmapped; everything else is
- * put back.  Other threads' local lists and stashes are out of reach,
- * which only ever makes the count too small -- the safe direction.
+ * local list is flushed into it first).  A span whose central count
+ * equals its block count has no live blocks and no blocks held
+ * anywhere else either -- every block exists exactly once across all
+ * the allocator's lists, so if all of them are here, none are
+ * anywhere else.  Those spans are unmapped; everything else is put
+ * back.  Other threads' local lists are out of reach, which only
+ * ever makes the count too small -- the safe direction.
  */
 
 typedef struct FM_CensusEnt {
@@ -759,27 +485,6 @@ static FM_CensusEnt *fm_census_find(FM_Census *c, uintptr_t span)
 __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls)
 {
     fm_flush_bin(cls);
-    /* Move this thread's spare span and stash into the central list
-     * so the census accounts for those blocks too. */
-    if (fm_spare_span[cls]) {
-        fm_publish2(fm_spare_head[cls], fm_spare_tail[cls], cls,
-                    fm_spare_cnt[cls], 1);
-        fm_spare_span[cls] = 0;
-        fm_spare_head[cls] = NULL;
-        fm_spare_tail[cls] = NULL;
-        fm_spare_cnt[cls] = 0;
-    }
-    for (int i = 0; i < FM_STASH_SLOTS; i++) {
-        if (fm_stash_span[cls][i]) {
-            fm_publish2(fm_stash_head[cls][i], fm_stash_tail[cls][i], cls,
-                        fm_stash_cnt[cls][i], 1);
-            fm_stash_total[cls] -= fm_stash_cnt[cls][i];
-            fm_stash_span[cls][i] = 0;
-            fm_stash_head[cls][i] = NULL;
-            fm_stash_tail[cls][i] = NULL;
-            fm_stash_cnt[cls][i] = 0;
-        }
-    }
 
     /* Detach the whole central stack atomically.  Batches published
      * after this point land on the fresh stack; batches another

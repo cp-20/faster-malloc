@@ -124,12 +124,15 @@ typedef struct FM_Central {
      * a gate. */
     _Atomic uint32_t depth;
     /* ADR 0020 automatic-release bookkeeping: when this class was
-     * last censused (ms, monotonic) and the adaptive backoff level
-     * (censuses that find nothing worth doing space themselves out
-     * exponentially, so a busy class whose spans never die is not
-     * walked at full rate forever). */
+     * last censused (ms, monotonic) and its current census interval
+     * (ms).  The interval is set from the cost of the last census --
+     * proportional to the number of blocks it had to walk -- and
+     * doubled whenever a census finds nothing to do, so a busy
+     * class with a huge central stack (jq building a DOM) spaces
+     * its censuses out to seconds while a small class stays
+     * responsive.  0 means "not yet censused". */
     _Atomic uint32_t last_census_ms;
-    _Atomic uint32_t backoff;
+    _Atomic uint32_t interval_ms;
     char pad[64 - sizeof(_Atomic(FM_Batch *)) - 3 * sizeof(_Atomic uint32_t)];
 } FM_Central;
 
@@ -182,6 +185,18 @@ extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec"
 #define FM_RELEASE_KEEP 2u
 #define FM_RELEASE_AGE_MS 100u
 #define FM_RELEASE_INTERVAL_MS 10u
+#define FM_RELEASE_MAX_INTERVAL_MS 5000u
+/* The automatic census sets the class's next interval from how
+ * many blocks it had to walk (one ms per 100 walked blocks,
+ * doubling when it finds nothing, capped at 5 s): the walk is the
+ * census's real cost, so a class with a huge, constantly-turning-
+ * over stack (jq's DOM phases) spaces its censuses out until the
+ * walk is a negligible duty cycle, while a small dead stack is
+ * revisited quickly.  An earlier revision also capped how many
+ * batches a census detaches; that broke the census's premise --
+ * a span is provably dead only when ALL its blocks are visible,
+ * and a capped detach sees a scattered fraction of every span --
+ * so the interval carries the whole load. */
 
 static inline uint32_t fm_now_ms(void)
 {
@@ -565,9 +580,11 @@ static FM_CensusEnt *fm_census_find(FM_Census *c, uintptr_t span)
 }
 
 /* Set by the most recent census: how many spans it newly marked
- * dead, and how many it found marked but not yet aged out.  The
- * automatic release's backoff reads them (ADR 0020). */
-static uint32_t fm_census_marked, fm_census_waiting;
+ * dead, how many it found marked but not yet aged out, and how many
+ * blocks it had to walk one by one (span-pure batches with a known
+ * count are accounted wholesale and do not count).  The automatic
+ * release reads them to set the class's next interval (ADR 0020). */
+static uint32_t fm_census_marked, fm_census_waiting, fm_census_walked;
 
 /* Census one class and unmap its provably-dead spans, retaining up
  * to `keep` dead spans (their blocks stay on the central stack for
@@ -611,13 +628,16 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
 
     /* Count free blocks per span.  Span-pure batches with a recorded
      * count are accounted wholesale; anything else is walked. */
+    fm_census_walked = 0;
     for (FM_Batch *b = all; b; b = b->next) {
         uint32_t cnt = b->count & FM_COUNT_MASK;
         if (cnt && (b->count & FM_COUNT_PURE)) {
             fm_census_add(&cen, (uintptr_t)b->head & SPAN_MASK, cnt);
         } else {
-            for (void *p = b->head; p; p = *(void **)p)
+            for (void *p = b->head; p; p = *(void **)p) {
+                fm_census_walked++;
                 fm_census_add(&cen, (uintptr_t)p & SPAN_MASK, 1);
+            }
         }
     }
 
@@ -743,30 +763,37 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
 
 /* Consider one class for automatic release (ADR 0020): census it
  * in the retaining, ageing form if its central stack is deep enough
- * and its adaptive interval has elapsed.  A census that finds no
- * fully-free spans at all backs the interval off exponentially --
- * in a busy multithreaded class whose spans never quite die, the
- * census walk and the detach window it opens are pure cost, so
- * they should happen rarely; a census that marks, waits on, or
- * releases spans resets the interval to the base rate. */
+ * and its interval has elapsed.  The interval is then re-derived
+ * from the census just done: proportional to the blocks it walked
+ * (the census's real cost), doubled when it found nothing at all,
+ * capped at FM_RELEASE_MAX_INTERVAL_MS.  A huge stack that is
+ * being actively recycled (jq's DOM phases) is mostly *not* dead,
+ * and walking it is the tax this round originally shipped with --
+ * spacing those censuses to seconds makes the tax negligible
+ * while leaving small dead stacks on the fast cadence their
+ * release needs. */
 static void fm_release_maybe(uint32_t cls, uint32_t now)
 {
     FM_Central *c = &fm_central[cls];
     if (atomic_load_explicit(&c->depth, memory_order_relaxed) <
         FM_RELEASE_MIN_DEPTH)
         return;
-    uint32_t backoff = atomic_load_explicit(&c->backoff, memory_order_relaxed);
+    uint32_t interval = atomic_load_explicit(&c->interval_ms,
+                                              memory_order_relaxed);
     uint32_t last = atomic_load_explicit(&c->last_census_ms, memory_order_relaxed);
-    if (last && (uint32_t)(now - last) < (FM_RELEASE_INTERVAL_MS << backoff))
+    if (last && (uint32_t)(now - last) <
+                    (interval ? interval : FM_RELEASE_INTERVAL_MS))
         return;
     atomic_store_explicit(&c->last_census_ms, now, memory_order_relaxed);
     size_t released = fm_trim_class(cls, FM_RELEASE_KEEP, 0);
-    if (released == 0 && fm_census_marked == 0 && fm_census_waiting == 0) {
-        if (backoff < 5)
-            atomic_store_explicit(&c->backoff, backoff + 1, memory_order_relaxed);
-    } else if (backoff) {
-        atomic_store_explicit(&c->backoff, 0, memory_order_relaxed);
-    }
+    uint32_t next = fm_census_walked / 100;
+    if (next < FM_RELEASE_INTERVAL_MS)
+        next = FM_RELEASE_INTERVAL_MS;
+    if (released == 0 && fm_census_marked == 0 && fm_census_waiting == 0)
+        next *= 2;
+    if (next > FM_RELEASE_MAX_INTERVAL_MS)
+        next = FM_RELEASE_MAX_INTERVAL_MS;
+    atomic_store_explicit(&c->interval_ms, next, memory_order_relaxed);
 }
 
 static void fm_auto_release_tick(uint32_t flushed_cls)

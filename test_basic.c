@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <errno.h>
 #include <malloc.h>
 
 int main(void)
@@ -264,6 +265,32 @@ int main(void)
             }
             free(live[i]);
         }
+    }
+    /* API edges real applications hit (round 3 audit): multiplication
+     * overflow must fail cleanly, invalid alignments must be rejected
+     * without touching the out pointer, and usable_size must cover
+     * aligned blocks. */
+    {
+        if (calloc(SIZE_MAX / 2, 3) != NULL) { printf("calloc overflow\n"); return 1; }
+        void *p = malloc(100);
+        if (!p) { printf("api malloc null\n"); return 1; }
+        if (reallocarray(p, SIZE_MAX / 2, 3) != NULL) { printf("reallocarray overflow\n"); return 1; }
+        if (malloc_usable_size(p) < 100) { printf("block lost after reallocarray overflow\n"); return 1; }
+        free(p);
+        void *q = (void *)(uintptr_t)0x1;
+        if (posix_memalign(&q, 3, 100) != EINVAL || q != (void *)(uintptr_t)0x1) {
+            printf("posix_memalign align=3\n"); return 1;
+        }
+        if (posix_memalign(&q, 24, 100) != EINVAL) { printf("posix_memalign align=24\n"); return 1; }
+        if (posix_memalign(&q, 4096, 5000) != 0 || ((uintptr_t)q & 4095) != 0 ||
+            malloc_usable_size(q) < 5000) { printf("posix_memalign 4096\n"); return 1; }
+        free(q);
+        void *a = aligned_alloc(4096, 8192);
+        if (!a || ((uintptr_t)a & 4095) != 0 || malloc_usable_size(a) < 8192) {
+            printf("aligned_alloc usable\n"); return 1;
+        }
+        free(a);
+        if (malloc_usable_size(NULL) != 0) { printf("usable_size(NULL)\n"); return 1; }
     }
     printf("ok\n");
     return 0;

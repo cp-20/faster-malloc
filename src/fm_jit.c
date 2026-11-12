@@ -129,7 +129,21 @@ static inline void fm_profile(size_t n)
 
 typedef void *(*entry_fn)(size_t);
 
-static _Atomic(entry_fn) g_entry;
+void *fm_jit_generic(size_t n);
+
+/*
+ * The entry point is initialised at load time, NOT by the constructor.
+ * Code in other libraries' constructors can call malloc before this
+ * library's constructor runs (glibc initialises a preloaded library
+ * after the executable's dependencies), and a zero entry pointer turns
+ * that call into a jump to NULL -- this is what crashed Node.js at
+ * startup, where libnode's C++ static initialisers allocate during
+ * their constructors.  fm_jit_generic is safe to call that early: it
+ * touches only atomics and this thread's TLS, which the loader has
+ * already set up.  The constructor still makes the final choice of
+ * entry point (and can replace this default).
+ */
+static _Atomic(entry_fn) g_entry = fm_jit_generic;
 static void *g_code;
 static uint32_t g_hot_cls[JIT_SLOTS];
 static int g_hot_count;
@@ -418,6 +432,11 @@ static void jit_compile(void)
 
 static int g_jit_enabled = 1;
 static int g_profile_enabled = 1;
+/* Set at the end of the constructor.  jit_compile reads state the
+ * constructor prepares (g_tls_head_off above all), so the profiling
+ * entry must not trigger a compile before then -- allocations made by
+ * other libraries' constructors are profiled, but never compiled from. */
+static _Atomic int g_initialised;
 
 /* The allocation fast path, shared by the generic and the profiling entry. */
 static inline void *fm_fast_path(size_t n);
@@ -460,7 +479,9 @@ __attribute__((noinline)) static size_t fm_sample(size_t n)
     if (__builtin_expect(g_give_up, 0))
         return n; /* the JIT has stepped aside; stop profiling */
     fm_profile(n);
-    if (__builtin_expect((++g_profile_events & (JIT_TRIGGER - 1)) == 0, 0))
+    if (__builtin_expect((++g_profile_events & (JIT_TRIGGER - 1)) == 0, 0) &&
+        __builtin_expect(atomic_load_explicit(&g_initialised,
+                                              memory_order_relaxed), 1))
         jit_compile();
     return n;
 }
@@ -484,7 +505,7 @@ __attribute__((constructor)) static void fm_init(void)
     e = getenv("FM_JIT_HOT");
     if (e) g_hot_target = atoi(e);
     e = getenv("FM_JIT_MINSHARE");
-    if (e) g_min_share = (uint32_t)(atoi(e) * 100);
+    if (e) g_min_share = (uint32_t)atoi(e); /* a percent, like the default */
     jit_init_offsets();
     /* Force the thread-local sample counter to be initialised for this
      * thread; other threads get it from the module's TLS init image. */
@@ -498,6 +519,7 @@ __attribute__((constructor)) static void fm_init(void)
                                          ? fm_jit_generic
                                          : fm_generic_malloc),
                           memory_order_release);
+    atomic_store_explicit(&g_initialised, 1, memory_order_release);
 }
 
 /* The exported malloc dispatches through g_entry.  The indirect jump is

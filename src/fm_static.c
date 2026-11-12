@@ -16,6 +16,8 @@ __thread void *fm_head[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 __thread void *fm_tail[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 __thread uint32_t fm_cnt[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 __thread FM_Batch *fm_batch_pool __attribute__((tls_model("initial-exec")));
+__thread void *fm_lcache_head[FM_LCACHE_BUCKETS] __attribute__((tls_model("initial-exec")));
+__thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));
 
 void *fm_generic_malloc(size_t n) { return fm_malloc(n); }
 void *(*fm_generic_malloc_ptr)(size_t) = fm_generic_malloc;
@@ -30,11 +32,16 @@ void *calloc(size_t n, size_t sz)
         return NULL;
     }
     size_t total = n * sz;
+    if (total > SMALL_MAX) {
+        int zeroed = 1;
+        void *p = fm_large_alloc2(total, &zeroed);
+        if (p && !zeroed)
+            memset(p, 0, total); /* cache hit: contents are stale */
+        return p;
+    }
     void *p = fm_malloc(total);
     if (!p)
         return NULL;
-    if (total > SMALL_MAX)
-        return p; /* fresh mmap: already zero */
     memset(p, 0, total);
     return p;
 }
@@ -80,6 +87,11 @@ void *pvalloc(size_t n)
 }
 
 size_t malloc_usable_size(void *p) { return fm_usable_size(p); }
-int malloc_trim(int flags) { (void)flags; return 1; }
+int malloc_trim(int flags)
+{
+    (void)flags;
+    fm_large_cache_drain();
+    return 1;
+}
 int mallopt(int param, int value) { (void)param; (void)value; return 1; }
 void malloc_stats(void) {}

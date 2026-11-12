@@ -6,7 +6,7 @@ LIBS = libfastmalloc.so libfastmalloc2.so libjitmalloc.so
 
 all: $(LIBS) bench
 
-bench: bench/micro bench/mt bench/stress bench/instr bench/check test_basic
+bench: bench/micro bench/macro bench/mt bench/stress bench/instr bench/check test_basic
 
 src/size_classes.h: src/gen_classes.py
 	python3 src/gen_classes.py src/size_classes.h
@@ -26,6 +26,9 @@ libjitmalloc.so: src/fm_jit.c src/jit_stubs.S src/fm_core.h src/size_classes2.h
 bench/micro: bench/micro.c
 	$(CC) -O2 -g -o $@ bench/micro.c -lpthread -ldl
 
+bench/macro: bench/macro.c
+	$(CC) -O2 -g -o $@ bench/macro.c -lpthread
+
 bench/mt: bench/mt.c
 	$(CC) -O2 -g -o $@ bench/mt.c -lpthread
 
@@ -43,6 +46,6 @@ test_basic: test_basic.c
 
 clean:
 	rm -f $(LIBS) src/size_classes.h src/size_classes2.h \
-      bench/micro bench/mt bench/stress bench/instr bench/check test_basic
+      bench/micro bench/macro bench/mt bench/stress bench/instr bench/check test_basic
 
 .PHONY: all clean

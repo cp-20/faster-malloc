@@ -73,7 +73,8 @@ typedef struct FM_Span {
     size_t map_size;
     size_t user_size;   /* bytes requested (large / aligned) */
     size_t align;       /* alignment requested (aligned allocs) */
-    char reserved[64 - 48];
+    uintptr_t lnext;    /* next span in the large-block cache bucket */
+    char reserved[64 - 56];
 } FM_Span;
 
 typedef struct FM_Batch FM_Batch;
@@ -92,6 +93,17 @@ typedef struct FM_Central {
 
 extern FM_Central fm_central[CLASS_COUNT];
 extern __thread FM_Batch *fm_batch_pool __attribute__((tls_model("initial-exec")));
+
+/* Large-block cache (ADR 0011): per-thread cache of freed large blocks,
+ * bucketed by the highest set bit of the mapping size, so a cached block
+ * is never more than 2x the size of the request it can serve.  Without
+ * it every large allocation is a fresh mmap and every free an munmap,
+ * which measured ~9000 ns/op against glibc's 28 on this host. */
+#define FM_LCACHE_BUCKETS 48
+#define FM_LCACHE_MAX_BYTES (4ull << 30)
+extern __thread void *fm_lcache_head[FM_LCACHE_BUCKETS]
+    __attribute__((tls_model("initial-exec")));
+extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));
 
 /* ------------------------------------------------------------------ */
 /* batch pool                                                          */
@@ -344,20 +356,130 @@ static inline uint32_t fm_class_of(size_t size)
 /* large / aligned allocations                                         */
 /* ------------------------------------------------------------------ */
 
-__attribute__((noinline)) static void *fm_large_alloc(size_t size)
+/* Map memory for a large allocation WITHOUT trimming: the mapping is
+ * over-sized by up to one span so the header can sit at a 64 KiB-aligned
+ * base inside it, and the head slack simply stays mapped as part of the
+ * block (it is never touched, so it costs address space only).  The
+ * header records the raw mapping in map_base/map_size, so free releases
+ * everything with one munmap.  The trimmed fm_map_aligned costs three
+ * syscalls per allocation (mmap + two munmaps); this costs one, which
+ * matters: measured against glibc's one-mmap large path, the trims
+ * were most of v2's large-allocation deficit. */
+static inline char *fm_map_large(size_t bytes, uintptr_t *raw_out, size_t *len_out)
 {
-    char *base = fm_map_aligned(size);
+    size_t map_len = bytes + HEADER_SIZE + SPAN_SIZE;
+    char *raw = mmap(NULL, map_len, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (raw == MAP_FAILED)
+        return NULL;
+    *raw_out = (uintptr_t)raw;
+    *len_out = map_len;
+    return (char *)FM_ALIGN_UP((uintptr_t)raw, SPAN_SIZE);
+}
+
+/* Free a large block: cache it for reuse when it is a plain large
+ * allocation (aligned allocations and anything whose user pointer is
+ * not at the standard offset keep the munmap path), subject to the
+ * per-bucket depth and the per-thread byte cap. */
+/* Usable length of a large block's mapping, measured from the header:
+ * the raw mapping may start up to one span before the header (the
+ * untrimmed head slack of fm_map_large), and only the part from the
+ * header on can serve a request.  Bucketing and reuse decisions must
+ * use this, never the raw map_size: with the slack included, a cached
+ * block can look up to 64 KiB bigger than it is, and reusing it would
+ * hand out memory that runs past the end of the mapping. */
+static inline size_t fm_large_usable(const FM_Span *sp)
+{
+    return sp->map_size - ((uintptr_t)sp - sp->map_base);
+}
+
+static inline void fm_large_free(FM_Span *sp, void *p)
+{
+    if (sp->align == 0 && (uintptr_t)p == (uintptr_t)sp + HEADER_SIZE) {
+        size_t ms = sp->map_size;
+        int b = 63 - __builtin_clzll(fm_large_usable(sp));
+        if (b < FM_LCACHE_BUCKETS &&
+            fm_lcache_bytes + ms <= FM_LCACHE_MAX_BYTES) {
+            sp->lnext = (uintptr_t)fm_lcache_head[b];
+            fm_lcache_head[b] = sp;
+            fm_lcache_bytes += ms;
+            return;
+        }
+    }
+    munmap((void *)sp->map_base, sp->map_size);
+}
+
+/* Release every cached large block of this thread to the OS.
+ * Backs malloc_trim: the cache is a retention policy, and trim is the
+ * release valve that makes the policy safe to keep. */
+static inline size_t fm_large_cache_drain(void)
+{
+    size_t released = 0;
+    for (int b = 0; b < FM_LCACHE_BUCKETS; b++) {
+        FM_Span *sp = (FM_Span *)fm_lcache_head[b];
+        fm_lcache_head[b] = NULL;
+        while (sp) {
+            FM_Span *next = (FM_Span *)sp->lnext;
+            released += sp->map_size;
+            munmap((void *)sp->map_base, sp->map_size);
+            sp = next;
+        }
+    }
+    fm_lcache_bytes = 0;
+    return released;
+}
+
+/* Allocate a large block.  *zeroed (when non-NULL) reports whether the
+ * memory is known to be zero-filled: fresh anonymous mappings are,
+ * cache hits are not.  calloc depends on this distinction. */
+__attribute__((noinline)) static void *fm_large_alloc2(size_t size, int *zeroed)
+{
+    size_t need_map = FM_ALIGN_UP(size + HEADER_SIZE, FM_PAGE_SIZE);
+    int nb = 63 - __builtin_clzll(need_map);
+    /* Search the need's own bucket, then the next one up: a block's
+     * usable length can spill one bucket above its request size
+     * because of the untrimmed head slack. */
+    for (int b = nb; b <= nb + 1 && b < FM_LCACHE_BUCKETS; b++) {
+        /* Walk a few entries of the bucket list for one large enough;
+         * blocks in a bucket differ by less than 2x, so the head
+         * usually fits. */
+        FM_Span **link = (FM_Span **)&fm_lcache_head[b];
+        for (int i = 0; i < 8 && *link; i++) {
+            FM_Span *sp = *link;
+            if (fm_large_usable(sp) >= need_map) {
+                *link = (FM_Span *)sp->lnext;
+                fm_lcache_bytes -= sp->map_size;
+                sp->user_size = size;
+                sp->lnext = 0;
+                if (zeroed)
+                    *zeroed = 0;
+                return (void *)((char *)sp + HEADER_SIZE);
+            }
+            link = (FM_Span **)&sp->lnext;
+        }
+    }
+    uintptr_t raw = 0;
+    size_t raw_len = 0;
+    char *base = fm_map_large(size, &raw, &raw_len);
     if (!base)
         return NULL;
     FM_Span *sp = (FM_Span *)base;
     sp->cls = LARGE_CLASS;
     sp->magic = FM_SPAN_MAGIC;
     sp->nblocks = 1;
-    sp->map_base = (uintptr_t)base;
-    sp->map_size = FM_ALIGN_UP(size + HEADER_SIZE, FM_PAGE_SIZE);
+    sp->map_base = raw;
+    sp->map_size = raw_len;
     sp->user_size = size;
     sp->align = 0;
+    sp->lnext = 0;
+    if (zeroed)
+        *zeroed = 1;
     return (void *)(base + HEADER_SIZE);
+}
+
+__attribute__((noinline)) static void *fm_large_alloc(size_t size)
+{
+    return fm_large_alloc2(size, NULL);
 }
 
 __attribute__((noinline)) static void *fm_aligned_alloc_impl(size_t align, size_t size)
@@ -528,7 +650,7 @@ static inline void fm_free(void *p)
         if (++fm_cnt[cls] >= kClassLimit[cls])
             fm_flush_bin(cls);
     } else {
-        munmap((void *)sp->map_base, sp->map_size);
+        fm_large_free(sp, p);
     }
 }
 
@@ -583,7 +705,7 @@ static inline void *fm_realloc(void *p, size_t size)
     if (!q)
         return NULL;
     memcpy(q, p, sp->user_size);
-    munmap((void *)sp->map_base, sp->map_size);
+    fm_large_free(sp, p);
     return q;
 }
 

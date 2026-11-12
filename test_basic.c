@@ -63,6 +63,28 @@ int main(void)
     g = realloc(g, 100000);
     if (g[0] != 9) { printf("grow data lost\n"); return 1; }
     free(g);
+    /* large-block cache safety (ADR 0011): a dirty freed large block
+     * must never leak stale contents through calloc, and a reused
+     * block must be fully writable up to the requested size */
+    for (int round = 0; round < 20; round++) {
+        unsigned char *d = malloc(65536);
+        if (!d) { printf("large malloc null\n"); return 1; }
+        memset(d, 0xAA, 65536);
+        free(d);
+        unsigned char *z = calloc(1, 65536);
+        if (!z) { printf("large calloc null\n"); return 1; }
+        for (int i = 0; i < 65536; i++)
+            if (z[i]) { printf("large calloc not zero\n"); return 1; }
+        z = realloc(z, 200000);
+        if (!z) { printf("large realloc null\n"); return 1; }
+        memset(z, 0xBB, 200000); /* full write: catches undersized reuse */
+        free(z);
+        unsigned char *z2 = calloc(1, 200000);
+        if (!z2) { printf("large calloc2 null\n"); return 1; }
+        for (int i = 0; i < 200000; i++)
+            if (z2[i]) { printf("large calloc2 not zero\n"); return 1; }
+        free(z2);
+    }
     printf("ok\n");
     return 0;
 }

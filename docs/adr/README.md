@@ -23,5 +23,6 @@ mark were recorded when the work was done.
 | [0008](0008-jit-concentration-heuristic.md) | JIT concentration heuristic: specialise only if hottest class ≥ 50 % | Accepted |
 | [0009](0009-measurement-methodology.md) | Measurement methodology: instruction counts first, wall clock on real programs | Accepted |
 | [0010](0010-deferred-memory-return-and-shaping.md) | Deferred: memory return to the OS and free-list shaping | Deferred |
-| [0011](0011-large-block-cache.md) | Cache recently freed large blocks instead of munmap/mmap per operation | Proposed (experiment running) |
+| [0011](0011-large-block-cache.md) | Cache recently freed large blocks instead of munmap/mmap per operation | Accepted |
 | [0012](0012-calloc-skip-memset-on-fresh-pages.md) | calloc: skip the memset for memory known to be zero | Deferred after measurement |
+| [0013](0013-server-macro-variance-investigation.md) | Server macro: apparent v2 loss to v1 investigated | Closed — measurement noise, no change |

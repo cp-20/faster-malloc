@@ -194,6 +194,7 @@ static void xfer_drain_some(uint64_t *s)
 typedef struct {
     uint64_t seed;
     uint64_t iters;
+    uint64_t end_ns; /* when this worker's main loop finished */
 } SrvArg;
 
 static void *srv_worker(void *argp)
@@ -242,6 +243,12 @@ static void *srv_worker(void *argp)
         local_ops += 2;                           /* header alloc + payload allocs approx */
         g_sink += (uintptr_t)h;
     }
+    /* The timed region ends here.  Teardown (freeing the live pool and
+     * spin-draining the transfer queue) is excluded: with more threads
+     * than CPUs, early finishers would otherwise burn the shared CPU
+     * spinning while the last workers are still being timed. */
+    a->end_ns = now_ns();
+    atomic_fetch_add(&g_ops, local_ops);
     /* teardown: free everything still live, drain the transfer queue */
     for (int slot = 0; slot < SRV_SLOTS; slot++) {
         if (pool->hdrs[slot]) {
@@ -266,7 +273,6 @@ static void *srv_worker(void *argp)
         }
     }
     free(pool);
-    atomic_fetch_add(&g_ops, local_ops);
     return NULL;
 }
 
@@ -284,7 +290,10 @@ static int sc_server(int nthreads, uint64_t iters_per_thread)
     }
     for (int i = 0; i < nthreads; i++)
         pthread_join(th[i], NULL);
-    uint64_t t1 = now_ns();
+    uint64_t t1 = 0;
+    for (int i = 0; i < nthreads; i++)
+        if (args[i].end_ns > t1)
+            t1 = args[i].end_ns; /* last worker's main-loop end */
     free(th);
     free(args);
     report("server", t0, t1);

@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <malloc.h>
 
 int main(void)
 {
@@ -84,6 +85,56 @@ int main(void)
         for (int i = 0; i < 200000; i++)
             if (z2[i]) { printf("large calloc2 not zero\n"); return 1; }
         free(z2);
+    }
+    /* span release and malloc_trim (ADRs 0014/0015): allocate enough
+     * same-class blocks to fill several spans, free them all (which
+     * completes the spans), trim, then allocate the same amount again
+     * and verify every block is fully writable -- a span released
+     * while any block was still live, or a census that dropped live
+     * blocks, corrupts this. */
+    {
+        enum { M = 20000 }; /* 20000 x 64 B = 20 spans of blocks */
+        static void *q[20000];
+        for (int round = 0; round < 3; round++) {
+            for (int i = 0; i < M; i++) {
+                q[i] = malloc(64);
+                if (!q[i]) { printf("trim-phase malloc null\n"); return 1; }
+                memset(q[i], 0x40 + round, 64);
+            }
+            for (int i = 0; i < M; i++)
+                if (((unsigned char *)q[i])[0] != 0x40 + round ||
+                    ((unsigned char *)q[i])[63] != 0x40 + round) {
+                    printf("trim-phase data lost\n");
+                    return 1;
+                }
+            for (int i = 0; i < M; i++)
+                free(q[i]);
+            malloc_trim(0);
+        }
+        /* mixed classes + a live set held ACROSS the trim: the census
+         * must not release spans that still have live blocks */
+        void *live[500];
+        for (int i = 0; i < 500; i++) {
+            live[i] = malloc(48 + (size_t)(i % 5) * 16);
+            if (!live[i]) { printf("live malloc null\n"); return 1; }
+            memset(live[i], 0x5A, 48);
+        }
+        for (int i = 0; i < M; i++) {
+            q[i] = malloc(64);
+            if (!q[i]) { printf("trim-phase2 malloc null\n"); return 1; }
+            memset(q[i], 0x77, 64);
+        }
+        for (int i = 0; i < M; i++)
+            free(q[i]);
+        malloc_trim(0);
+        for (int i = 0; i < 500; i++) {
+            if (((unsigned char *)live[i])[0] != 0x5A ||
+                ((unsigned char *)live[i])[47] != 0x5A) {
+                printf("live block corrupted by trim\n");
+                return 1;
+            }
+            free(live[i]);
+        }
     }
     printf("ok\n");
     return 0;

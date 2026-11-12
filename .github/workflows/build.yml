@@ -1,0 +1,60 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential valgrind
+
+      - name: Build
+        run: make
+
+      - name: Correctness (basic)
+        run: |
+          ./test_basic
+          for lib in libfastmalloc.so libfastmalloc2.so libjitmalloc.so; do
+            echo "--- $lib ---"
+            LD_PRELOAD=$PWD/$lib ./test_basic
+          done
+
+      - name: Correctness (randomised stress, multithreaded)
+        run: |
+          for lib in libfastmalloc.so libfastmalloc2.so libjitmalloc.so; do
+            echo "--- $lib ---"
+            LD_PRELOAD=$PWD/$lib ./bench/stress
+          done
+
+      - name: Correctness (valgrind memcheck)
+        run: |
+          for lib in libfastmalloc2.so libjitmalloc.so; do
+            echo "--- $lib ---"
+            LD_PRELOAD=$PWD/$lib valgrind --error-exitcode=9 --quiet ./bench/stress
+          done
+
+      - name: Instruction counts
+        run: |
+          # glibc and the two of ours are enough to catch a regression; the
+          # competing allocators are not installed on the runner.
+          for lib in "" libfastmalloc2.so libjitmalloc.so; do
+            if [ -z "$lib" ]; then
+              valgrind --tool=callgrind --callgrind-out-file=cg.out --quiet \
+                ./bench/instr churn 100000 >/dev/null 2>&1
+            else
+              LD_PRELOAD=$PWD/$lib valgrind --tool=callgrind \
+                --callgrind-out-file=cg.out --quiet \
+                ./bench/instr churn 100000 >/dev/null 2>&1
+            fi
+            printf "%-20s %s instructions\n" "${lib:-glibc}" \
+              "$(grep '^summary:' cg.out | awk '{print $2}')"
+          done

@@ -1,0 +1,85 @@
+/*
+ * fm_static.c -- the non-JIT build of the v2 allocator.
+ */
+#define _GNU_SOURCE
+#include <errno.h>
+#include <stdint.h>
+#include <stddef.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <unistd.h>
+
+#include "fm_core.h"
+
+FM_Central fm_central[CLASS_COUNT];
+__thread void *fm_head[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
+__thread void *fm_tail[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
+__thread uint32_t fm_cnt[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
+__thread FM_Batch *fm_batch_pool __attribute__((tls_model("initial-exec")));
+
+void *fm_generic_malloc(size_t n) { return fm_malloc(n); }
+void *(*fm_generic_malloc_ptr)(size_t) = fm_generic_malloc;
+
+void *malloc(size_t n) { return fm_malloc(n); }
+void free(void *p) { fm_free(p); }
+
+void *calloc(size_t n, size_t sz)
+{
+    if (n != 0 && sz > SIZE_MAX / n) {
+        errno = ENOMEM;
+        return NULL;
+    }
+    size_t total = n * sz;
+    void *p = fm_malloc(total);
+    if (!p)
+        return NULL;
+    if (total > SMALL_MAX)
+        return p; /* fresh mmap: already zero */
+    memset(p, 0, total);
+    return p;
+}
+
+void *realloc(void *p, size_t n) { return fm_realloc(p, n); }
+
+void *reallocarray(void *p, size_t n, size_t sz)
+{
+    if (n != 0 && sz > SIZE_MAX / n) {
+        errno = ENOMEM;
+        return NULL;
+    }
+    return fm_realloc(p, n * sz);
+}
+
+int posix_memalign(void **out, size_t align, size_t n)
+{
+    if (align % sizeof(void *) != 0 || (align & (align - 1)) != 0) {
+        *out = NULL;
+        return EINVAL;
+    }
+    void *p = fm_aligned_alloc_impl(align, n);
+    if (!p)
+        return ENOMEM;
+    *out = p;
+    return 0;
+}
+
+void *aligned_alloc(size_t align, size_t n)
+{
+    if ((align & (align - 1)) != 0)
+        return NULL;
+    return fm_aligned_alloc_impl(align, n);
+}
+
+void *memalign(size_t align, size_t n) { return fm_aligned_alloc_impl(align, n); }
+void *valloc(size_t n) { return fm_aligned_alloc_impl(FM_PAGE_SIZE, n); }
+
+void *pvalloc(size_t n)
+{
+    size_t rounded = FM_ALIGN_UP(n, FM_PAGE_SIZE);
+    return fm_aligned_alloc_impl(FM_PAGE_SIZE, rounded);
+}
+
+size_t malloc_usable_size(void *p) { return fm_usable_size(p); }
+int malloc_trim(int flags) { (void)flags; return 1; }
+int mallopt(int param, int value) { (void)param; (void)value; return 1; }
+void malloc_stats(void) {}

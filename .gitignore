@@ -1,0 +1,21 @@
+# Build outputs
+*.so
+*.o
+*.a
+
+# Benchmark binaries
+/bench/micro
+/bench/mt
+/bench/stress
+/bench/instr
+/bench/check
+/test_basic
+
+# Editor / OS noise
+*.swp
+*~
+.DS_Store
+
+# Callgrind output
+callgrind.out.*
+cachegrind.out.*

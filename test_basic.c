@@ -1,3 +1,11 @@
+/* test_basic — correctness battery for the v2-family builds
+ * (libfastmalloc2.so, libjitmalloc.so).  Two sections assert
+ * v2-specific semantics that v1 deliberately does not implement —
+ * large-cache mapping reuse / realloc pointer stability (ADR 0011,
+ * 0018) — so under libfastmalloc.so (v1) this program is expected
+ * to stop at "large-cache mapping not reused".  Everything before
+ * that point, and the API-edge section's equivalents (verified
+ * separately under v1), apply to all builds. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

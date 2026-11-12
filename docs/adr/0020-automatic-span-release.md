@@ -149,12 +149,56 @@ outside `malloc_trim`). The 100 ms age and the interval/backoff
 constants are single-point choices on a noisy shared VM, not
 tuned optima.
 
+## Revision (same round): the jq census tax and its fix
+
+The first full app matrix on the build above exposed a cost none
+of the round's earlier instruments could see: **jq slowed to
+1.40× glibc** (from 0.80× in round 3), with the JIT build equally
+slow and v1 — no census machinery — unaffected in the same
+interleaved window. Bisection (the round-3 build in the same
+session: 1.77 s; this build with the release tick compiled out:
+1.97 s; with the tick live: 2.69 s) pinned it on the census
+itself. jq's DOM phases leave central stacks *hundreds of
+thousands of blocks* deep that are mostly **not** dead; bulk
+frees keep setting marks, so the nothing-found backoff never
+engaged, and a full walk of a monster stack ran every ~10 ms per
+class. The macro jsondoc scenario never grows stacks that deep,
+which is why the suite stayed green while a real app paid.
+
+Two fixes were tried:
+
+1. **Capped detach** (a census detaches at most 16 batches):
+   rejected on measurement. A span is provably dead only when
+   *all* its blocks are visible to the census; detaching 16 of a
+   class's ~60 batches shows it a scattered ~quarter of every
+   span, so almost nothing was ever marked — the decay probe
+   stalled at 116 MB after 500 ms. The census's premise is the
+   whole stack; bounding the *work per visit* has to happen in
+   time, not in coverage.
+2. **Cost-proportional interval** (shipped): the backoff counter
+   is replaced by a stored per-class interval derived from the
+   last census's walked-block count — 1 ms per 100 blocks walked,
+   doubled when a census finds nothing, capped at 5 s. The walk
+   is the census's real cost (~22 ns/block), so the worst-case
+   duty cycle is bounded by construction at roughly 1/450 of a
+   class's runtime, whatever its stack depth; small stacks keep
+   a fast cadence because their walks are cheap.
+
+Post-fix, in one session: jq v2 **1.77 s** (glibc 1.91, round-3
+build 1.77 — parity with the pre-feature build); the decay probe
+still releases fully (135 MB → 9.5 MB) with the landing at
+~300 ms instead of ~200 ms — the probe's ~15k-block stacks now
+carry a ~150 ms walk-proportional floor, the honest price of
+the bound. The final full matrix and macro suite were re-run on
+the fixed build for the round doc.
+
 ## Decision
 
-**Accepted.** `fm_trim_class` gains the retaining/ageing form;
-`FM_Central` gains the depth counter and census bookkeeping the
-gates need (the push/pop paths were already touching that cache
-line); the trim census's proof obligations are unchanged, and the
-FM_DEBUG over-count assertion held across the full battery
-(test_basic, stress ×3, check, mt, earlyinit, tlsexit) for both
-builds.
+**Accepted, as revised.** `fm_trim_class` gains the
+retaining/ageing form; `FM_Central` gains the depth counter and
+census bookkeeping the gates need (the push/pop paths were
+already touching that cache line); the trim census's proof
+obligations are unchanged, and the FM_DEBUG over-count assertion
+held across the full battery (test_basic, stress ×3, check, mt,
+earlyinit, tlsexit) for both builds, before and after the
+revision.

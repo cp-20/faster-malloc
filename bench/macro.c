@@ -21,6 +21,21 @@
  *   game      a game loop: per-frame allocations (events, particles,
  *             transient entities) freed in bulk at frame end, plus a
  *             persistent entity pool with spawn/despawn churn.
+ *   locality  reuse locality, measured directly instead of inferred
+ *             from timing: a working set is freed completely, in a
+ *             scrambled (strided) order like object-graph teardown,
+ *             then a burst one eighth its size is reallocated.  The
+ *             metric is the number of distinct 4 KiB pages the burst's
+ *             blocks land on -- the footprint a CPU's caches and TLB
+ *             must hold for that burst.  An allocator that groups
+ *             freed blocks by span serves the burst from a few spans;
+ *             one that recycles them in free order sprays it across
+ *             the whole set.  Fewer pages = better shaping.
+ *   trim      memory return: build a large mixed working set, free it
+ *             all, then call malloc_trim(0) and report the resident
+ *             set at each stage (live / after free / after trim), so
+ *             an allocator's willingness to give memory back is a
+ *             number, not an impression.
  *
  * Every scenario is deterministic (fixed per-thread xorshift seeds), runs
  * under any allocator via LD_PRELOAD, and prints one JSON line:
@@ -72,6 +87,23 @@ static size_t rss_kb(void)
     size_t rss = 0;
     while (fgets(line, sizeof line, f)) {
         if (strncmp(line, "VmHWM:", 6) == 0) {
+            sscanf(line + 6, "%zu", &rss);
+            break;
+        }
+    }
+    fclose(f);
+    return rss;
+}
+
+static size_t rss_now_kb(void)
+{
+    FILE *f = fopen("/proc/self/status", "r");
+    if (!f)
+        return 0;
+    char line[256];
+    size_t rss = 0;
+    while (fgets(line, sizeof line, f)) {
+        if (strncmp(line, "VmRSS:", 6) == 0) {
             sscanf(line + 6, "%zu", &rss);
             break;
         }
@@ -739,6 +771,141 @@ static int sc_game(int frames)
 }
 
 /* ================================================================== */
+/* locality: page concentration of a reallocation burst                */
+/* ================================================================== */
+
+#define LOC_N 32768 /* blocks in the working set (64 B each) */
+#define LOC_SZ 64
+
+static int cmp_uintptr(const void *a, const void *b)
+{
+    uintptr_t x = *(const uintptr_t *)a, y = *(const uintptr_t *)b;
+    return (x > y) - (x < y);
+}
+
+static int sc_locality(int bursts)
+{
+    const int M = LOC_N / 8; /* burst size: 4096 blocks = 256 KiB */
+    void **ws = calloc(LOC_N, sizeof(void *));
+    uintptr_t *addr = malloc((size_t)M * sizeof(uintptr_t));
+    if (!ws || !addr)
+        return 1;
+    /* Build the working set: LOC_N blocks, all touched. */
+    for (int i = 0; i < LOC_N; i++) {
+        ws[i] = malloc(LOC_SZ);
+        if (!ws[i])
+            return 1;
+        memset(ws[i], 1, LOC_SZ);
+    }
+    uint64_t timed_ns = 0;
+    uint64_t pages_total = 0;
+    for (int b = 0; b < bursts; b++) {
+        uint64_t t0 = now_ns();
+        /* Free the whole set in a scrambled (strided) order, the way
+         * object-graph teardown scrambles address order.  7919 is odd,
+         * so k*7919 mod 2^15 is a permutation. */
+        for (int k = 0; k < LOC_N; k++) {
+            int idx = (int)(((uint64_t)k * 7919) % LOC_N);
+            free(ws[idx]);
+            ws[idx] = NULL;
+        }
+        /* The burst: reallocate an eighth of the set, touch it all. */
+        for (int k = 0; k < M; k++) {
+            void *p = malloc(LOC_SZ);
+            if (!p)
+                return 1;
+            memset(p, 2, LOC_SZ);
+            ws[k] = p;
+            addr[k] = (uintptr_t)p;
+        }
+        uint64_t t1 = now_ns();
+        timed_ns += t1 - t0;
+        /* Metric, untimed: distinct 4 KiB pages the burst landed on.
+         * The burst is 256 KiB of blocks, so 64 pages is the floor. */
+        qsort(addr, (size_t)M, sizeof(uintptr_t), cmp_uintptr);
+        uint64_t pages = 0;
+        uintptr_t prev = 0;
+        for (int k = 0; k < M; k++) {
+            uintptr_t pg = addr[k] >> 12;
+            if (pg != prev) {
+                pages++;
+                prev = pg;
+            }
+        }
+        pages_total += pages;
+        /* Top the working set back up (untimed, pages not counted). */
+        for (int k = M; k < LOC_N; k++) {
+            ws[k] = malloc(LOC_SZ);
+            if (!ws[k])
+                return 1;
+            memset(ws[k], 1, LOC_SZ);
+        }
+    }
+    uint64_t ops = (uint64_t)bursts * (LOC_N + M);
+    printf("{\"scenario\":\"locality\",\"ops\":%llu,\"ns_per_op\":%.3f,"
+           "\"secs\":%.3f,\"rss_kb\":%zu,\"pages_per_burst\":%.1f}\n",
+           (unsigned long long)ops, (double)timed_ns / (double)ops,
+           (double)timed_ns / 1e9, rss_kb(),
+           bursts ? (double)pages_total / bursts : 0.0);
+    fflush(stdout);
+    for (int i = 0; i < LOC_N; i++)
+        free(ws[i]);
+    free(ws);
+    free(addr);
+    return 0;
+}
+
+/* ================================================================== */
+/* trim: build a working set, free it, malloc_trim, watch RSS          */
+/* ================================================================== */
+
+#include <malloc.h>
+
+static int sc_trim(int cycles)
+{
+    static const size_t sizes[] = {32, 64, 128, 256, 512, 1024, 2048, 4096};
+    const int nsmall = 120000, nlarge = 200;
+    void **ptrs = calloc((size_t)nsmall + nlarge, sizeof(void *));
+    if (!ptrs)
+        return 1;
+    size_t rss_live = 0, rss_freed = 0, rss_trim = 0;
+    for (int c = 0; c < cycles; c++) {
+        for (int i = 0; i < nsmall; i++) {
+            size_t z = sizes[i % 8] + (size_t)(i % 13);
+            ptrs[i] = malloc(z);
+            if (!ptrs[i])
+                return 1;
+            memset(ptrs[i], 1, z);
+        }
+        for (int i = 0; i < nlarge; i++) {
+            ptrs[nsmall + i] = malloc(128 * 1024);
+            if (!ptrs[nsmall + i])
+                return 1;
+            memset(ptrs[nsmall + i], 2, 128 * 1024);
+        }
+        if (c == cycles - 1)
+            rss_live = rss_now_kb();
+        for (int i = 0; i < nsmall + nlarge; i++) {
+            free(ptrs[i]);
+            ptrs[i] = NULL;
+        }
+        if (c == cycles - 1) {
+            rss_freed = rss_now_kb();
+            malloc_trim(0);
+            rss_trim = rss_now_kb();
+        }
+    }
+    printf("{\"scenario\":\"trim\",\"ops\":%d,\"ns_per_op\":0,\"secs\":0,"
+           "\"rss_kb\":%zu,\"rss_live_kb\":%zu,\"rss_after_free_kb\":%zu,"
+           "\"rss_after_trim_kb\":%zu}\n",
+           cycles * (nsmall + nlarge), rss_kb(), rss_live, rss_freed,
+           rss_trim);
+    fflush(stdout);
+    free(ptrs);
+    return 0;
+}
+
+/* ================================================================== */
 
 int main(int argc, char **argv)
 {
@@ -749,7 +916,9 @@ int main(int argc, char **argv)
                 "  compiler <translation-units>\n"
                 "  jsondoc  <documents>\n"
                 "  kvstore  <operations>\n"
-                "  game     <frames>\n");
+                "  game     <frames>\n"
+                "  locality <bursts>\n"
+                "  trim     <cycles>\n");
         return 2;
     }
     const char *sc = argv[1];
@@ -766,6 +935,10 @@ int main(int argc, char **argv)
         return sc_kvstore(argc > 2 ? strtoull(argv[2], NULL, 10) : 1000000);
     if (!strcmp(sc, "game"))
         return sc_game(argc > 2 ? atoi(argv[2]) : 1500);
+    if (!strcmp(sc, "locality"))
+        return sc_locality(argc > 2 ? atoi(argv[2]) : 10);
+    if (!strcmp(sc, "trim"))
+        return sc_trim(argc > 2 ? atoi(argv[2]) : 1);
     fprintf(stderr, "unknown scenario %s\n", sc);
     return 2;
 }

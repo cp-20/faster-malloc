@@ -20,3 +20,4 @@
 # Callgrind output
 callgrind.out.*
 cachegrind.out.*
+bench/apps/work/

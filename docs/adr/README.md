@@ -28,3 +28,4 @@ mark were recorded when the work was done.
 | [0013](0013-server-macro-variance-investigation.md) | Server macro: apparent v2 loss to v1 investigated | Closed — measurement noise, no change |
 | [0014](0014-free-list-shaping.md) | Free-list shaping: span-grouped recycling into a per-thread stash | Rejected after measurement |
 | [0015](0015-malloc-trim-span-census.md) | malloc_trim that actually returns spans: the central-list census | Accepted |
+| [0016](0016-entries-callable-before-constructor.md) | Entry points must be callable before the library constructor runs (Node.js/JIT startup crash) | Accepted |

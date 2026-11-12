@@ -483,8 +483,10 @@ What the JIT does demonstrate is real and useful:
 * **Memory footprint.** On espresso, v2's peak RSS is 9.0 MB against
   glibc's 3.4 MB. The per-thread local caches and the fact that spans are
   never returned to the OS account for that. mimalloc's 3.7 MB is the best
-  of the lot. A production allocator would need a `malloc_trim` that
-  actually releases spans, and a way to bound the per-thread caches.
+  of the lot. Round 2 (ADR 0015) gave v2 a `malloc_trim` that actually
+  releases spans — after a trim, a freed 157 MB working set drops to
+  ~7 MB RSS — but a trim only helps when something calls it; the peak
+  itself is a cache-bounding problem that remains open.
 * **Locality on reuse.** glibc and mimalloc have fewer D1 misses than v2 on
   the churn workload (1264 and 1815 against 1731) because they reuse the
   same physical page over and over, while v2's blocks come from many
@@ -494,16 +496,24 @@ What the JIT does demonstrate is real and useful:
   affinity for where it was allocated. This is the "free-list shaping"
   insight from the literature that v2 does not implement, and it is the
   most likely source of the remaining gap on workloads with long-lived,
-  repeatedly reallocated objects.
+  repeatedly reallocated objects. Round 2 implemented it anyway and
+  measured both sides (ADR 0014): the reuse footprint collapsed from
+  513 to 68 pages, and every timed workload got slightly slower — in
+  these workloads free order already clusters blocks by span, so
+  there was little scatter left to buy back. Rejected, with the
+  numbers kept.
 
 ### What I would do next
 
 1. **Free-list shaping**: keep freed blocks in a per-thread "page" of one
    size class so that a thread reuses the same memory, giving the locality
    that mimalloc gets from its page abstraction. This is the single biggest
-   known gap between v2 and mimalloc.
+   known gap between v2 and mimalloc. *(Round 2: tried, measured,
+   rejected as the default path — ADR 0014. The untried variant is
+   regrouping at refill time instead of at flush.)*
 2. **Return memory to the OS** under pressure, and implement `malloc_trim`
-   properly.
+   properly. *(Round 2: `malloc_trim` done — ADR 0015; automatic return
+   under pressure measured and rejected in ADR 0014.)*
 3. **Make the JIT's dispatch branchless** — a jump table indexed by
    `size >> 4` would replace N range tests with one indirect branch, which
    might make specialisation profitable for diverse workloads too.
@@ -529,6 +539,8 @@ bench/
   stress.c         randomised correctness stress test (shadow memory)
   check.c          standalone model of the free-list invariants
   micro.c          wall-clock microbenchmarks
+  macro.c          macro workloads (server/compiler/jsondoc/kvstore/game)
+                   plus the round-2 locality and trim scenarios
   suite.sh         the complete evaluation
   cache.sh         cachegrind comparison
   cgrun.sh         callgrind comparison
@@ -542,6 +554,16 @@ bench/
   cg_annotate.py   parses cachegrind summaries
 
 test_basic.c       basic correctness (sizes, alignment, realloc, calloc)
+
+demo/
+  index.html       interactive simulation of the v2 design (open in a
+                   browser; the benchmark tables on it are the real
+                   measurements from this repo)
+
+docs/
+  adr/             architecture decision records, incl. rejected
+                   experiments (0014 shaping, 0015 malloc_trim)
+  round2-2026-11-12.md   the round-2 log (locality, trim, demo)
 ```
 
 ### Correctness

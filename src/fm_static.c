@@ -15,6 +15,7 @@ FM_Central fm_central[CLASS_COUNT];
 __thread void *fm_head[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 __thread void *fm_tail[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 __thread uint32_t fm_cnt[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
+__thread int fm_exit_armed __attribute__((tls_model("initial-exec")));
 __thread FM_Batch *fm_batch_pool __attribute__((tls_model("initial-exec")));
 __thread void *fm_lcache_head[FM_LCACHE_BUCKETS] __attribute__((tls_model("initial-exec")));
 __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));

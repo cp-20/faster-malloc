@@ -64,6 +64,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <pthread.h>
 #ifdef FM_DEBUG
 #include <stdio.h>
 #endif
@@ -82,6 +83,8 @@ static inline void *fm_malloc(size_t size);
 extern __thread void *fm_head[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 extern __thread void *fm_tail[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 extern __thread uint32_t fm_cnt[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
+/* Exit hook state: 0 = not armed, 1 = armed, 2 = destructor running (disarmed). */
+extern __thread int fm_exit_armed __attribute__((tls_model("initial-exec")));
 
 typedef struct FM_Span {
     uint32_t cls;       /* size class, or LARGE_CLASS */
@@ -119,7 +122,11 @@ extern __thread FM_Batch *fm_batch_pool __attribute__((tls_model("initial-exec")
  * it every large allocation is a fresh mmap and every free an munmap,
  * which measured ~9000 ns/op against glibc's 28 on this host. */
 #define FM_LCACHE_BUCKETS 48
-#define FM_LCACHE_MAX_BYTES (4ull << 30)
+/* Byte budget for the per-thread large-block cache.  64 MiB: the round-3
+ * sweep (ADR 0019) found the old 4 GiB budget was the main driver of the
+ * allocator's peak-RSS excess in real apps; 64 MiB keeps every measured
+ * churn workload at full speed while cutting most of that excess. */
+#define FM_LCACHE_MAX_BYTES (64ull << 20)
 extern __thread void *fm_lcache_head[FM_LCACHE_BUCKETS]
     __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));
@@ -269,6 +276,7 @@ static inline void *fm_span_new(uint32_t cls, void **tail_out, uint32_t *count_o
 /* ------------------------------------------------------------------ */
 
 __attribute__((noinline)) static void fm_flush_bin(uint32_t cls);
+static void fm_arm_thread_exit(void);
 
 /*
  * (Historical note: publishing used to be a private O(1) hand-off,
@@ -286,6 +294,7 @@ __attribute__((noinline)) static void fm_flush_bin(uint32_t cls);
  * needs no callee-saved registers and no stack frame. */
 __attribute__((noinline)) void *fm_refill_class(uint32_t cls)
 {
+    fm_arm_thread_exit();
     uint32_t limit = kClassLimit[cls];
 
     /* Try the central list first: take a whole batch, O(1). */
@@ -339,6 +348,7 @@ __attribute__((noinline)) void *fm_refill_class(uint32_t cls)
 
 __attribute__((noinline)) static void fm_flush_bin(uint32_t cls)
 {
+    fm_arm_thread_exit();
 #ifdef FM_DEBUG
     {
         /* Walk the local list and verify every block belongs to a span of
@@ -640,7 +650,7 @@ static inline uint32_t fm_class_of(size_t size)
  * were most of v2's large-allocation deficit. */
 static inline char *fm_map_large(size_t bytes, uintptr_t *raw_out, size_t *len_out)
 {
-    size_t map_len = bytes + HEADER_SIZE + SPAN_SIZE;
+    size_t map_len = FM_ALIGN_UP(bytes + HEADER_SIZE + SPAN_SIZE, FM_PAGE_SIZE);
     char *raw = mmap(NULL, map_len, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (raw == MAP_FAILED)
@@ -707,6 +717,7 @@ static inline size_t fm_large_cache_drain(void)
  * cache hits are not.  calloc depends on this distinction. */
 __attribute__((noinline)) static void *fm_large_alloc2(size_t size, int *zeroed)
 {
+    fm_arm_thread_exit();
     size_t need_map = FM_ALIGN_UP(size + HEADER_SIZE, FM_PAGE_SIZE);
     int nb = 63 - __builtin_clzll(need_map);
     /* Search the need's own bucket, then the next one up: a block's
@@ -821,6 +832,44 @@ static inline int fm_is_aligned_ptr(const void *p)
         return 0;
     const FM_Span *sp = (const FM_Span *)((const char *)p - HEADER_SIZE);
     return sp->magic == FM_ALIGNED_MAGIC;
+}
+
+/* ------------------------------------------------------------------ */
+/* thread-exit drain                                                   */
+/* ------------------------------------------------------------------ */
+
+/* Return this thread's free blocks to the central lists and release its
+ * cached mappings.  Use only core helpers: TLS teardown must not malloc. */
+static void fm_thread_exit_flush(void)
+{
+    for (uint32_t c = 0; c < CLASS_COUNT; c++)
+        if (fm_head[c])
+            fm_flush_bin(c);
+    fm_large_cache_drain();
+}
+
+static pthread_key_t fm_exit_key;
+static pthread_once_t fm_exit_once = PTHREAD_ONCE_INIT;
+
+static void fm_exit_key_dtor(void *v)
+{
+    (void)v;
+    if (fm_exit_armed == 2) return;
+    /* Flush calls the arming slow path too; disarm before touching any bin
+     * so pthread_setspecific is never called during this drain. */
+    fm_exit_armed = 2;
+    fm_thread_exit_flush();
+}
+
+static void fm_exit_make_key(void) { pthread_key_create(&fm_exit_key, fm_exit_key_dtor); }
+
+static void fm_arm_thread_exit(void)
+{
+    if (fm_exit_armed != 0) return;
+    /* Mark armed first: pthread initialization can reenter the allocator. */
+    fm_exit_armed = 1;
+    pthread_once(&fm_exit_once, fm_exit_make_key);
+    pthread_setspecific(fm_exit_key, (const void *)&fm_exit_key);
 }
 
 /* ------------------------------------------------------------------ */
@@ -972,8 +1021,22 @@ static inline void *fm_realloc(void *p, size_t size)
         fm_free(p);
         return q;
     }
-    if (size <= sp->user_size)
+    if (sp->align == 0) {
+        size_t old_len = sp->map_size;
+        char *old_raw = (char *)sp->map_base;
+        size_t off = (size_t)((char *)p - old_raw);
+        /* Grow in place when the existing mapping already has room:
+         * the common case after a large-cache reuse handed out an
+         * oversized mapping.  Capacity is measured from the user
+         * pointer to the end of the mapping.  (mremap-based growth
+         * was tried three ways and rejected -- ADR 0018.) */
+        if (size <= old_len - off) {
+            sp->user_size = size;
+            return p;
+        }
+    } else if (size <= sp->user_size) {
         return p;
+    }
     void *q = sp->align ? fm_aligned_alloc_impl(sp->align, size) : fm_large_alloc(size);
     if (!q)
         return NULL;

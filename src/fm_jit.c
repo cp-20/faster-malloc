@@ -90,6 +90,7 @@ FM_Central fm_central[CLASS_COUNT];
 __thread void *fm_head[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 __thread void *fm_tail[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 __thread uint32_t fm_cnt[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
+__thread int fm_exit_armed __attribute__((tls_model("initial-exec")));
 __thread FM_Batch *fm_batch_pool __attribute__((tls_model("initial-exec")));
 __thread void *fm_lcache_head[FM_LCACHE_BUCKETS] __attribute__((tls_model("initial-exec")));
 __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));
@@ -554,6 +555,10 @@ void free(void *p)
     if (__builtin_expect(cls != LARGE_CLASS, 1)) {
         void *old = fm_head[cls];
         *(void **)p = old;
+#ifdef FM_DEBUG
+        /* The core's realloc path checks the same free-block canary. */
+        ((uint64_t *)p)[1] = 0xDEADDEADDEADDEADull;
+#endif
         fm_head[cls] = p;
         if (!old)
             fm_tail[cls] = p;

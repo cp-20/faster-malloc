@@ -1,7 +1,17 @@
 # 0010 — Deferred: memory return to the OS and free-list shaping
 
-*Status: Deferred. Provenance: Reconstructed (2026-11-12, from README
-§6, "Where v2 is not the best" and "What I would do next").*
+*Status: Partially resolved by round 2 (2026-11-12). Provenance:
+Reconstructed (2026-11-12, from README §6, "Where v2 is not the
+best" and "What I would do next").*
+
+*Round 2 outcome: item 1 (memory return) is delivered for the
+explicit-trim path by ADR 0015 — spans are unmapped by
+`malloc_trim`, not automatically; automatic release on the free
+path was measured and rejected (ADR 0014). Item 2 (free-list
+shaping) was implemented, measured, and rejected as the default
+recycling path by ADR 0014; it remains open in the weaker form
+recorded there (refill-side regrouping, or revisiting on hardware
+with cache counters).*
 
 ## Context
 

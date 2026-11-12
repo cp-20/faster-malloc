@@ -55,3 +55,18 @@ bench compiler 600
 bench jsondoc  6000
 bench kvstore  2000000
 bench game     15000
+bench locality 10
+
+# trim: the interesting output is the RSS trajectory, not ns/op, so the
+# raw JSON lines are printed (one run per allocator is enough -- the
+# numbers are page counts, not timings).
+for a in "${ORDER[@]}"; do
+    lib="${LIBS[$a]}"
+    if [ -n "$lib" ] && [ ! -f "$lib" ]; then continue; fi
+    if [ -n "$lib" ]; then
+        out=$(LD_PRELOAD="$PWD/$lib" timeout 300 ./bench/macro trim 1 2>/dev/null)
+    else
+        out=$(timeout 300 ./bench/macro trim 1 2>/dev/null)
+    fi
+    printf 'trim       %-6s %s\n' "$a" "$out"
+done

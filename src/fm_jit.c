@@ -607,8 +607,11 @@ size_t malloc_usable_size(void *p) { return fm_usable_size(p); }
 int malloc_trim(int flags)
 {
     (void)flags;
-    fm_large_cache_drain();
-    return 1;
+    /* ADR 0015: drain the large-block cache and unmap every small
+     * span the trim census can prove entirely free. */
+    size_t released = fm_large_cache_drain();
+    released += fm_trim_spans();
+    return released ? 1 : 0;
 }
 int mallopt(int param, int value) { (void)param; (void)value; return 1; }
 void malloc_stats(void) {}

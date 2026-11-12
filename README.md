@@ -43,7 +43,8 @@ allocate locally and **2.5× faster** when a block is freed by a different
 thread than allocated it.
 
 The full numbers, the methodology and the honest comparison — including
-where v2 *loses* — are in [Results](#5-results).
+where v2 *loses* — are in [Results](#5-results). The raw benchmark output
+is in [`docs/results.md`](docs/results.md).
 
 ---
 
@@ -575,3 +576,12 @@ make bench                            # benchmarks only
 ./bench/suite.sh                      # the complete evaluation
 LD_PRELOAD=$PWD/libfastmalloc2.so ./yourprogram
 ```
+
+The CI workflow builds the libraries, runs the correctness tests (including
+the multithreaded stress test under valgrind memcheck) and re-measures the
+instruction counts on every push, which is an independent check of the
+numbers on different hardware.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

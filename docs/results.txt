@@ -1,0 +1,75 @@
+
+1. Instruction counts (callgrind) -- exact, noise-free
+workload                       glibc    tcmalloc    jemalloc    mimalloc          v1          v2
+jit                                                                                             
+churn 300000 64             42748472    30553633    24908000    34154391    21976432    15577790    15167516
+churn 300000 8              41848450    30550692    24767483    31832688    21994826    15596184    15185910
+churn 200000 1024           28548499    22452459    18907798    30258792    16284566    11641494    10548861
+churnmix 200000             30949251    24874395    19851201    25858544    17163086    12903211    13228924
+mixed 150000                30553572    23844564    19331839    14292674    16239827    13071022    13347837
+retain 150000               23026111    19318199    14913222     9463985    11896198     8673797     8556475
+cross 150000                23176552    19496439    14985117     9610493    12044714     8823757     8706435
+
+2. Cache and branch behaviour (cachegrind)
+
+churn 300000 64
+allocator             Ir    D1_miss    LL_miss     D1mr%         Bcm%
+glibc           42750061       1264       1044     0.003   3732 0.065
+tcmalloc        30562108      15984       7995     0.052  15354 0.207
+jemalloc        24916995      15970       8258     0.064  17236 0.621
+mimalloc        34156057       1815       1407     0.005   9556 0.194
+v1              21978049       1465       1103     0.007   7665 0.325
+v2              15579431       1731       1108     0.011   5346 0.219
+jit             15169178       2416       1682     0.016   5825 0.236
+
+churnmix 200000
+allocator             Ir    D1_miss    LL_miss     D1mr%         Bcm%
+glibc           30950840       1268       1046     0.004   3755 0.098
+tcmalloc        24882870      16049       7996     0.064  15375 0.244
+jemalloc        19860156      16026       8272     0.081  17469 0.883
+mimalloc        25860226       2240       1412     0.009  99273 2.928
+v1              17164703      38326       1102     0.223   7318 0.459
+v2              12904852      30533       1108     0.237   5803 0.352
+jit             13230583       5857       1675     0.044   6266 0.374
+
+3. Real programs -- wall clock (min of 3) and peak RSS
+
+cfrac (factoring, 44-digit)
+allocator          sec     rss_kb
+glibc             4.18       3400
+tcmalloc          3.70       8976
+jemalloc          3.70       5560
+mimalloc          3.64       3352
+v1                3.61       3608
+v2                3.56       3528
+jit               3.59       3668
+
+espresso (boolean minimisation)
+allocator          sec     rss_kb
+glibc             4.22       3384
+tcmalloc          3.81       9416
+jemalloc          3.85       5868
+mimalloc          3.73       3688
+v1                3.86       8832
+v2                3.69       9080
+jit               3.84       8924
+
+barnes (n-body, 164k bodies, 123 steps)
+allocator          sec     rss_kb
+glibc             3.14      58236
+tcmalloc          3.16      66044
+jemalloc          3.16      60964
+mimalloc          3.16      58268
+v1                3.25      58452
+v2                3.14      58508
+jit               3.15      58480
+
+4. Multi-threaded (server-style)
+allocator        local s      xfree s
+glibc              0.048        0.122
+tcmalloc           0.032        0.132
+jemalloc           0.041        0.100
+mimalloc           0.046        0.088
+v1                 0.030        0.055
+v2                 0.026        0.054
+jit                0.027        0.059

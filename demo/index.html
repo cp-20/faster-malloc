@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>faster-malloc v2 — inside the allocator</title>
+<style>
+:root{--ink:#192c2b;--muted:#5a6c69;--line:#d3ded9;--paper:#f5f7f3;--white:#fff;--accent:#087f6c;--dark:#075348;--soft:#e7f3ed;--mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input,select{font:inherit}button,select{cursor:pointer}button:disabled{cursor:default;opacity:.5}button:focus-visible,select:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(--accent);outline-offset:3px}button{border:1px solid var(--line);border-radius:5px;background:var(--white);color:var(--ink);padding:8px 15px;font-weight:600}button:hover{border-color:var(--accent);background:var(--soft)}button.primary{background:var(--accent);color:white;border-color:var(--accent)}button.primary:hover{background:var(--dark)}select{width:100%;border:1px solid var(--line);border-radius:5px;background:white;color:var(--ink);padding:9px 30px 9px 10px;min-height:40px}input[type=range]{accent-color:var(--accent);width:100%;margin:9px 0}h1,h2,h3,p{margin:0}h1{font-size:clamp(30px,4vw,48px);letter-spacing:-1.8px;font-weight:650;line-height:1.12}h2{font-size:23px;letter-spacing:-.6px}h3{font-size:15px;font-weight:650}.mono,output,td,th:not(:first-child){font-family:var(--mono);font-variant-numeric:tabular-nums}.muted{color:var(--muted)}.small{font-size:12px}.eyebrow{text-transform:uppercase;letter-spacing:1.6px;font-size:11px;font-weight:750;color:var(--accent)}.pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:650;white-space:nowrap}.pill.active{background:var(--soft);border-color:#a4cbba;color:var(--dark)}.dot{height:6px;width:6px;border-radius:50%;background:var(--accent);display:inline-block}
+.shell{max-width:1440px;margin:auto;padding:24px 32px 40px}.masthead{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:18px;margin-bottom:28px}.brand{display:flex;align-items:center;gap:11px;font-weight:700;letter-spacing:-.4px}.brand-mark{font:700 16px var(--mono);color:var(--accent);background:var(--soft);padding:5px 8px;border:1px solid #b7d3c5;border-radius:4px}.masthead .meta{display:flex;gap:16px;color:var(--muted);font-size:12px}.intro{display:flex;gap:30px;justify-content:space-between;align-items:end;margin-bottom:22px}.intro .eyebrow{margin-bottom:10px}.intro p{max-width:550px;color:var(--muted);margin-top:12px;font-size:15px}.index{font:12px var(--mono);color:var(--accent);white-space:nowrap;padding-bottom:4px}.notice{border-left:3px solid var(--accent);background:var(--soft);padding:12px 16px;margin-bottom:25px;max-width:1100px;font-size:13px}.notice strong{font-weight:650}.section-heading{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:14px}.section-heading .label{display:flex;align-items:center;gap:12px}.section-num{font:12px var(--mono);color:var(--accent)}
+.controls{background:white;border:1px solid var(--line);border-radius:7px;padding:16px;margin-bottom:14px}.control-grid{display:grid;grid-template-columns:1.1fr 1.8fr .55fr 1fr;gap:18px}.control-label{display:flex;justify-content:space-between;font-size:11px;letter-spacing:.5px;font-weight:700;color:var(--muted);margin-bottom:7px;text-transform:uppercase}.control-label output{color:var(--accent);text-transform:none;letter-spacing:0}.mode-switch{display:flex;border:1px solid var(--line);border-radius:5px;padding:3px;min-height:40px;gap:3px}.mode-switch button{flex:1;padding:5px 6px;border:0;font-size:12px;font-weight:500;background:transparent;line-height:1.25}.mode-switch button[aria-pressed=true]{background:var(--dark);color:white}.mode-switch small{display:block;font-size:10px;opacity:.8}.control-actions{display:flex;align-items:center;gap:8px;border-top:1px solid #e8eeea;padding-top:13px;margin-top:15px;flex-wrap:wrap}.control-actions .hint{margin-left:auto;max-width:360px;font-size:11px;color:var(--muted);text-align:right}.trim-button{margin-left:12px;font-family:var(--mono);font-size:12px}
+.sim-grid{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:14px;align-items:start}.board{min-width:0;background:white;border:1px solid var(--line);border-radius:7px;overflow:hidden}.board-head{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}.board-head .phase{font-size:12px;color:var(--muted);margin-left:auto;text-align:right}.event-line{background:#f4f8f5;border-bottom:1px solid var(--line);padding:12px 16px;min-height:67px;display:flex;gap:12px;align-items:center}.event-kind{font:700 10px var(--mono);color:var(--accent);border:1px solid #bbd6c9;padding:4px 6px;border-radius:3px;min-width:68px;text-align:center;flex-shrink:0}.event-text{font-size:12px;line-height:1.5}.mechanisms{display:grid;grid-template-columns:1.1fr 1fr;gap:12px;padding:14px 14px 0}.mechanism{border:1px solid var(--line);border-radius:5px;min-width:0}.mechanism-head{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-bottom:1px solid var(--line);font-size:12px;font-weight:650}.mechanism-head span{font:10px var(--mono);color:var(--muted)}.panel-body{padding:8px 10px;min-height:90px;max-height:210px;overflow:auto;scrollbar-width:thin}.empty{font-size:11px;color:var(--muted);padding:12px 0}.thread-label{font:700 10px var(--mono);color:var(--accent);margin:3px 0 6px;display:flex;justify-content:space-between;gap:8px}.local-row{padding:5px 0 7px;border-bottom:1px solid #edf1ed;font-size:10px}.local-meta{display:flex;justify-content:space-between;gap:4px}.local-meta b{font-family:var(--mono);font-weight:600}.list-preview{font:10px var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:3px 0}.meter{height:3px;background:#e8eeea;overflow:hidden;border-radius:1px}.meter i{display:block;height:100%;background:var(--accent);transition:width .12s linear}.counter{display:flex;justify-content:space-between;color:var(--muted);font:9px var(--mono);margin-top:3px}.central-class{padding-bottom:8px}.central-title{font:10px var(--mono);margin-bottom:4px;display:flex;justify-content:space-between}.batch-stack{display:flex;flex-direction:column;gap:3px;border-left:2px solid #c0d8cc;padding-left:6px}.chip{font:10px var(--mono);border:1px solid #c5d9ce;border-radius:3px;background:var(--soft);padding:3px 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.chip.mixed{border-style:dashed;background:#f6f9f6}.stash{grid-column:1/-1}.stash .panel-body{max-height:105px;min-height:45px;display:flex;align-items:start;align-content:start;flex-wrap:wrap;gap:5px}.stash.enabled{border-color:#91bba7}.stash .empty{padding:3px 0}.stash .chip{max-width:100%;background:#f2f8f4}.memory{padding:16px 14px}.memory-header{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}.memory-header h3{font-size:12px}.legend{display:flex;align-items:center;gap:9px;font-size:10px;color:var(--muted)}.legend span{display:flex;gap:4px;align-items:center}.swatch{width:8px;height:8px;border:1px solid #96b5a7;display:inline-block}.swatch.live{background:var(--accent);border-color:var(--accent)}.swatch.burst{outline:2px solid var(--dark);outline-offset:1px}.span-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;max-height:350px;overflow:auto;align-items:start;padding:2px 3px 4px;scrollbar-width:thin}.span-grid:empty::before{content:'No spans yet. Step or Run to carve the first 64 KiB span.';grid-column:1/-1;padding:25px 12px;color:var(--muted);font-size:12px;border:1px dashed var(--line);width:100%;text-align:center}.span{border:1px solid #bbcdc1;border-radius:4px;padding:8px;min-width:0;background:white;transition:opacity .5s,transform .5s,border-color .2s}.span.hot{border-color:var(--accent);box-shadow:0 0 0 1px #b5d3c3}.span.releasing{opacity:0;transform:scale(.85);pointer-events:none}.span-top{display:flex;justify-content:space-between;gap:4px;font:10px var(--mono);margin-bottom:8px}.span-top b{color:var(--accent)}.cells{display:grid;grid-template-columns:repeat(32,minmax(0,1fr));gap:2px;min-height:8px}.block{aspect-ratio:1;min-height:3px;border:1px solid #c2d4c8}.block.live{background:var(--accent);border-color:var(--accent)}.proportion{height:20px;border:1px solid #b7cec0;background:white;position:relative;overflow:hidden}.proportion .used{height:100%;background:var(--accent);transition:width .12s linear}.proportion .bar-label{position:absolute;inset:0;text-align:center;font:9px/18px var(--mono);color:var(--dark);background:#ffffffb8;width:max-content;max-width:100%;padding:0 3px;margin:auto}.span-bottom{font:9px var(--mono);color:var(--muted);display:flex;justify-content:space-between;margin-top:7px;gap:3px}.pages{display:grid;grid-template-columns:repeat(16,1fr);gap:2px;margin-top:7px}.page{height:5px;background:#e7eee8;border:1px solid #d4e0d7}.page.touched{background:#9ac5b1;border-color:var(--dark)}.memory-note{font-size:10px;color:var(--muted);margin-top:7px}.large-area{border-top:1px solid var(--line);padding:12px 14px}.large-area h3{font-size:12px;display:flex;justify-content:space-between}.large-list{display:flex;flex-direction:column;gap:5px;margin-top:7px;max-height:130px;overflow:auto}.large-bar{border:1px solid var(--accent);background:var(--soft);min-width:200px;max-width:100%;padding:5px 8px;display:flex;justify-content:space-between;gap:6px;font:10px var(--mono);border-radius:3px}.large-bar.cached{border-style:dashed;background:white;color:var(--muted)}.large-bar.releasing{opacity:0;transition:opacity .5s}.log{border-top:1px solid var(--line);padding:9px 14px;font-size:11px;color:var(--muted)}.log summary{cursor:pointer}.log ol{padding-left:22px;margin:7px 0;line-height:1.8;font:10px/1.8 var(--mono)}
+.aside{display:flex;flex-direction:column;gap:12px}.info-card{background:white;border:1px solid var(--line);border-radius:6px;padding:15px}.info-card .eyebrow{font-size:10px;letter-spacing:1px;margin-bottom:9px}.explainer{font-size:12px;line-height:1.65;color:var(--muted)}.mode-note{margin-top:10px;padding-top:9px;border-top:1px solid var(--line);font-size:11px;color:var(--dark)}.stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:13px 10px}.stat label{display:block;font-size:10px;color:var(--muted);line-height:1.3;margin-bottom:4px}.stat output{font-size:20px;letter-spacing:-.7px;line-height:1.2}.stat.compact output{font-size:15px}.stat.wide{grid-column:1/-1;border-top:1px solid var(--line);padding-top:10px}.stat .sub{font:10px var(--mono);color:var(--muted);margin-top:3px}.mapping-meter{display:flex;height:6px;margin-top:8px;background:#e5eee6}.mapping-meter i{background:var(--accent);height:100%;transition:width .2s}.burst-card{background:var(--soft);border-color:#bad5c6}.burst-result{display:flex;align-items:baseline;gap:6px}.burst-result output{font-size:38px;color:var(--dark);line-height:1.2}.burst-result span{font-size:11px;color:var(--muted)}.burst-compare{margin-top:12px;font-size:10px}.compare-row{display:grid;grid-template-columns:83px 1fr 25px;gap:7px;align-items:center;margin-bottom:7px}.compare-row b{font:11px var(--mono);text-align:right}.compare-bar{height:7px;background:#d1e4d8}.compare-bar i{display:block;height:100%;background:#70ab91;transition:width .2s}.compare-row.grouped .compare-bar i{background:var(--dark)}.burst-caption{font-size:10px;color:var(--muted);line-height:1.6;margin-top:7px}.sim-footnote{font-size:11px;color:var(--muted);margin:12px 0 32px;max-width:1050px}
+.data-intro{color:var(--muted);font-size:13px;max-width:820px;margin:8px 0 18px}.data-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.data-card{border:1px solid var(--line);border-radius:7px;background:white;padding:19px 21px;min-width:0}.data-card h3{font-size:16px;margin:5px 0 6px;letter-spacing:-.3px}.data-card .description{font-size:12px;color:var(--muted);margin-bottom:14px}.table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:12px}th{text-align:right;font-size:10px;color:var(--muted);font-weight:500;border-bottom:1px solid var(--line);padding:6px 7px}td{text-align:right;padding:6px 7px;border-bottom:1px solid #edf1ed}th:first-child,td:first-child{text-align:left;padding-left:0;font-family:inherit}tr.highlight{background:var(--soft);color:var(--dark)}tr.highlight td:first-child{padding-left:6px;font-weight:700}.chart{margin:15px 0 5px}.chart svg{width:100%;height:auto;display:block;overflow:visible}.chart text{font-family:var(--mono);font-size:11px;fill:var(--muted)}.chart .chart-label{font-family:system-ui,sans-serif;fill:var(--ink)}.chart .value{fill:var(--ink)}.source{font-size:10px;color:var(--muted);margin-top:12px;line-height:1.6}.result-note{font-size:12px;line-height:1.65;border-left:2px solid var(--accent);padding-left:11px;margin-top:14px;color:var(--dark)}.cache-result{margin-top:18px;padding-top:13px;border-top:1px solid var(--line)}.cache-result h4{font-size:12px;margin:0 0 6px}.chart-key{display:flex;gap:14px;font-size:10px;margin-top:8px;color:var(--muted)}.chart-key i{width:8px;height:8px;display:inline-block;margin-right:5px;background:#adcebb}.chart-key .after{background:var(--accent)}footer{border-top:1px solid var(--line);margin-top:28px;padding-top:14px;display:flex;justify-content:space-between;gap:15px;color:var(--muted);font-size:11px}noscript{display:block;padding:20px;border:1px solid var(--accent);margin-bottom:20px}
+@keyframes release-span{from{opacity:1;transform:scale(1)}to{opacity:0;transform:scale(.86)}}
+.span.releasing,.large-bar.releasing{animation:release-span 600ms ease-in both}
+@media(min-width:1250px){.span-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.sim-grid{grid-template-columns:minmax(0,1fr) 300px}}
+@media(max-width:1050px){.shell{padding:20px}.control-grid{grid-template-columns:1fr 1.7fr .55fr}.speed-control{grid-column:1/-1;display:flex;align-items:center;gap:15px}.speed-control .control-label{min-width:150px;margin:0}.speed-control input{margin:0}.sim-grid{grid-template-columns:minmax(0,1fr) 250px}.mechanisms{grid-template-columns:1fr 1fr;gap:8px;padding:10px 10px 0}.memory{padding:12px 10px}.span-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.control-actions .hint{max-width:270px}.data-card{padding:16px}}
+@media(max-width:760px){.shell{padding:15px}.masthead{margin-bottom:22px}.masthead .meta span:last-child,.index{display:none}.intro{display:block}.notice{font-size:12px}.control-grid{grid-template-columns:1fr .55fr;gap:12px}.mode-control{grid-column:1/-1;grid-row:2}.speed-control{grid-row:3}.control-actions .hint{flex-basis:100%;max-width:none;text-align:left;margin:3px 0 0}.trim-button{margin-left:auto}.control-actions button{padding:7px 10px}.sim-grid{grid-template-columns:1fr}.aside{display:grid;grid-template-columns:1fr 1fr;align-items:start}.stats-card{grid-column:2;grid-row:1/3}.stats-grid{gap:14px}.data-grid{grid-template-columns:1fr}.span-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.section-heading .pill{display:none}.board-head .phase{max-width:60%}footer{flex-direction:column;gap:5px}}
+@media(max-width:460px){.aside{display:flex}.span-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.mechanisms{grid-template-columns:1fr}.stash{grid-column:1}.panel-body{max-height:160px}.mode-switch button{font-size:11px}.legend{gap:6px}.masthead .meta{font-size:10px}.stats-grid{grid-template-columns:repeat(2,1fr)}.trim-button{margin-left:0}.data-card{padding:14px}.event-line{align-items:start}.intro h1{letter-spacing:-1px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="masthead">
+    <div class="brand"><span class="brand-mark">[fm]</span> faster-malloc <span class="pill">v2 / design lab</span></div>
+    <div class="meta"><span>Self-contained · offline</span><span>64 KiB spans / 129 classes</span></div>
+  </header>
+  <div class="intro">
+    <div><div class="eyebrow">Inside the allocator</div><h1>Allocate. Free. Find the pattern.</h1><p>Follow a block from a thread’s local list to shared memory, then change how it finds its way back.</p></div>
+    <div class="index">01 / SIMULATE &nbsp; 02 / MEASURE</div>
+  </div>
+  <div class="notice"><strong>A simulation of the allocator's design (not the allocator itself).</strong> Simulation timings are illustrative; the benchmark tables further down are real measurements from this repository.</div>
+  <noscript>Enable JavaScript to run the simulation and draw the charts. All benchmark tables below are still readable.</noscript>
+  <main>
+    <section aria-labelledby="sim-title">
+      <div class="section-heading"><div class="label"><span class="section-num">01</span><h2 id="sim-title">The moving parts</h2></div><span class="pill active"><span class="dot"></span> Deterministic simulation</span></div>
+      <div class="controls">
+        <div class="control-grid">
+          <div><label class="control-label" for="workload">Workload</label><select id="workload"><option value="compiler">Compiler</option><option value="json">JSON doc</option><option value="kv">KV churn</option><option value="game">Game</option><option value="locality">Scrambled reuse (locality)</option></select></div>
+          <div class="mode-control"><div class="control-label" id="mode-label">Recycling mode</div><div class="mode-switch" role="group" aria-labelledby="mode-label"><button id="mode-free" aria-pressed="true">Free-order<small>v2 today</small></button><button id="mode-grouped" aria-pressed="false">Span-grouped<small>round-2 experiment</small></button></div></div>
+          <div><label class="control-label" for="threads">Threads</label><select id="threads"><option value="1">1</option><option value="2">2</option></select></div>
+          <div class="speed-control"><label class="control-label" for="speed">Speed <output id="speed-label">256 ops/s</output></label><input id="speed" type="range" min="0" max="7" value="4" aria-describedby="speed-note"></div>
+        </div>
+        <div class="control-actions"><button id="step">Step</button><button id="run" class="primary">Run</button><button id="reset">Reset</button><button id="trim" class="trim-button">malloc_trim()</button><span class="hint" id="speed-note">Step advances one action. Settings reset the run; mode switches keep burst comparisons.</span></div>
+      </div>
+      <div class="sim-grid">
+        <div class="board">
+          <div class="board-head"><h3>Allocator state</h3><span class="pill" id="run-state">Paused</span><span class="phase" id="phase">Ready</span></div>
+          <div class="event-line" aria-live="off"><span class="event-kind" id="event-kind">READY</span><span class="event-text" id="event-text">Step or Run to begin.</span></div>
+          <div class="mechanisms">
+            <section class="mechanism"><div class="mechanism-head">Thread local lists <span>push / pop</span></div><div id="locals" class="panel-body"></div></section>
+            <section class="mechanism"><div class="mechanism-head">Shared central stacks <span>top first ↓</span></div><div id="central" class="panel-body"></div></section>
+            <section class="mechanism stash" id="stash-panel"><div class="mechanism-head">Per-thread span stash <span>largest group first</span></div><div id="stash" class="panel-body"></div></section>
+          </div>
+          <section class="memory">
+            <div class="memory-header"><h3>Mapped spans <span class="muted small" id="span-count">/ 0</span></h3><div class="legend"><span><i class="swatch live"></i> live</span><span><i class="swatch"></i> free</span><span><i class="swatch burst"></i> burst page</span></div></div>
+            <div class="span-grid" id="spans"></div>
+            <div class="memory-note">One class per span · floor((65,536 − 64) / class size) blocks · &gt;256 blocks shown as a proportional bar. The 16 marks under each span are its 4 KiB pages.</div>
+          </section>
+          <section class="large-area"><h3>Large mappings <span class="muted small">&gt;32 KiB · dashed = cached</span></h3><div id="large" class="large-list"></div></section>
+          <details class="log"><summary>Recent mechanism events</summary><ol id="event-log"></ol></details>
+        </div>
+        <aside class="aside">
+          <div class="info-card"><div class="eyebrow">What am I looking at?</div><p class="explainer" id="explainer"></p><p class="mode-note" id="mode-note"></p></div>
+          <div class="info-card stats-card"><div class="eyebrow">Live counters</div><div class="stats-grid">
+            <div class="stat"><label for="stat-ops">Operations</label><output id="stat-ops">0</output></div>
+            <div class="stat"><label for="stat-hit">Local-list hit rate</label><output id="stat-hit">—</output></div>
+            <div class="stat"><label for="stat-refills">Refills</label><output id="stat-refills">0</output></div>
+            <div class="stat"><label for="stat-flushes">Flushes</label><output id="stat-flushes">0</output></div>
+            <div class="stat"><label for="stat-batches">Central batches</label><output id="stat-batches">0</output></div>
+            <div class="stat"><label for="stat-spans">Spans mapped</label><output id="stat-spans">0</output></div>
+            <div class="stat wide compact"><label for="stat-mapped">Bytes mapped / bytes live</label><output id="stat-mapped">0 B / 0 B</output><div class="mapping-meter" aria-hidden="true"><i id="live-meter"></i></div><div class="sub" id="fragmentation">Fragmentation: 0.0% unused mapped</div></div>
+            <div class="stat compact"><label for="stat-cache">Large cache hits / misses</label><output id="stat-cache">0 / 0</output></div>
+            <div class="stat compact"><label for="stat-cross">Cross-thread frees</label><output id="stat-cross">0</output></div>
+            <div class="stat wide compact"><label for="stat-trim">Trimmed spans / total bytes released</label><output id="stat-trim">0 / 0 B</output><div class="sub" id="trim-report" role="status">No census yet.</div></div>
+          </div><p class="source">Operations count alloc/free/realloc calls. Hit rate covers small-block acquisitions. Unused mapped bytes include free blocks, class rounding, headers and caches.</p></div>
+          <div class="info-card burst-card"><div class="eyebrow">Page footprint / last burst</div><div class="burst-result"><output id="burst-pages">—</output><span id="burst-state">select locality to measure</span></div><div class="burst-compare"><div class="compare-row"><span>Free-order</span><div class="compare-bar"><i id="free-bar"></i></div><b id="free-pages">—</b></div><div class="compare-row grouped"><span>Span-grouped</span><div class="compare-bar"><i id="grouped-bar"></i></div><b id="grouped-pages">—</b></div></div><p class="burst-caption" id="burst-caption">Select Scrambled reuse, run to the burst, then switch modes and replay the same seed. A mode change keeps the last result from each mode.</p></div>
+        </aside>
+      </div>
+      <p class="sim-footnote">Model notes: up to 512 B, classes round to 16 B; the ladder then widens from 32 B to 1,024 B steps through 32 KiB. Class 0 handles zero-byte requests, giving 129 class indices. Local limits are max(4, min(256, floor(65,536 / class size))). The counter tracks frees since refill/flush, not list length. Grouping models the experiment’s full-list mechanism, without its bounded-walk tuning. Two-thread trim is coordinated here: both threads flush their locals and stashes; native malloc_trim can only flush the calling thread’s locals. Browser speed is illustrative.</p>
+    </section>
+    <section aria-labelledby="data-title">
+      <div class="section-heading"><div class="label"><span class="section-num">02</span><h2 id="data-title">Real measured data</h2></div><span class="pill">Repository measurements · lower is better</span></div>
+      <p class="data-intro">These are recorded benchmark results, independent of the simulation above. Instruction counts, wall-clock timings, page counts and RSS answer different questions; each chart keeps its own units.</p>
+      <div class="data-grid">
+        <article class="data-card"><div class="eyebrow">01 / Instruction counts</div><h3>Less work on the allocation path</h3><p class="description">Callgrind instructions per operation. The chart shows 64 B churn.</p><div class="table-wrap"><table><thead><tr><th>Allocator</th><th>Churn 64 B</th><th>Mixed (random)</th></tr></thead><tbody><tr><td>glibc</td><td>142</td><td>204</td></tr><tr><td>tcmalloc</td><td>102</td><td>159</td></tr><tr><td>jemalloc</td><td>83</td><td>129</td></tr><tr><td>mimalloc</td><td>114</td><td>95</td></tr><tr><td>v1</td><td>73</td><td>108</td></tr><tr class="highlight"><td>v2</td><td>52</td><td>87</td></tr><tr><td>jit</td><td>51</td><td>89</td></tr></tbody></table></div><div class="chart" id="chart-instructions"></div><p class="source">Source: README.md, “Results at a glance”; callgrind counts per operation, rounded as reported.</p></article>
+        <article class="data-card"><div class="eyebrow">02 / Macro workloads</div><h3>Application-shaped allocation</h3><p class="description">Round 1, interleaved minimum. Time in ns/op.</p><div class="table-wrap"><table><thead><tr><th>Workload</th><th>glibc</th><th>v1</th><th>v2</th><th>jit</th></tr></thead><tbody><tr><td>Compiler</td><td>76.2</td><td>52.3</td><td>37.4</td><td>38.5</td></tr><tr><td>JSON doc</td><td>137.5</td><td>112.1</td><td>105.0</td><td>107.4</td></tr><tr><td>KV store</td><td>598.4</td><td>495.5</td><td>499.3</td><td>503.6</td></tr><tr><td>Game</td><td>78.7</td><td>25.8</td><td>21.7</td><td>22.7</td></tr></tbody></table></div><div class="chart" id="chart-macro"></div><div class="cache-result"><h4>Large 64 KiB · round-1 cache change</h4><table><thead><tr><th>glibc</th><th>v2 before</th><th>v2 after</th></tr></thead><tbody><tr><td class="mono">27.6</td><td>~9,000</td><td>9.4</td></tr></tbody></table><p class="result-note">A per-thread cache lets later large requests reuse a mapping, avoiding repeated map/unmap calls.</p></div><p class="source">Source: docs/opencode-2026-11-12.md, round-1 macro measurements and large-cache result. Timings depend on workload and host.</p></article>
+        <article class="data-card"><div class="eyebrow">03 / Locality experiment · ADR 0014</div><h3>Grouping works. Does it pay?</h3><p class="description">Distinct 4 KiB pages touched per 4,096-block burst from a scrambled 32,768 × 64 B pool.</p><table><thead><tr><th>Recycling</th><th>Pages / burst</th></tr></thead><tbody><tr><td>Free-order</td><td>512.9</td></tr><tr class="highlight"><td>Span-grouped</td><td>67.8</td></tr><tr><td>Theoretical floor</td><td>64</td></tr></tbody></table><div class="chart" id="chart-locality"></div><p class="result-note">Grouping worked mechanically, but cost more time than it bought on timed workloads. v2 keeps free-order recycling.</p><p class="source">Source: docs/adr/0014-free-list-shaping.md, round 2. This measured pool and burst are 16× larger than the interactive example; the page counts should not match.</p></article>
+        <article class="data-card"><div class="eyebrow">04 / malloc_trim · ADR 0015</div><h3>Give the peak back</h3><p class="description">Process RSS in MB after freeing a ~157 MB working set, then explicitly requesting trim.</p><table><thead><tr><th>Allocator</th><th>After free</th><th>After trim</th></tr></thead><tbody><tr><td>glibc</td><td>124.8</td><td>2.8</td></tr><tr><td>v2 before</td><td>161.6</td><td>135.2</td></tr><tr class="highlight"><td>v2 after</td><td>161.7</td><td>7.0</td></tr></tbody></table><div class="chart" id="chart-trim"></div><div class="chart-key"><span><i></i>After free</span><span><i class="after"></i>After trim</span></div><p class="result-note">The census releases a span only when all its blocks are accounted for in the central list. A span with even one live block stays mapped.</p><p class="source">Source: docs/adr/0015-malloc-trim-span-census.md, round 2. RSS includes process overhead; trim addresses retention after a peak, not peak memory use.</p></article>
+      </div>
+    </section>
+  </main>
+  <footer><span><strong>faster-malloc v2</strong> · allocator design, made visible</span><span>One file. No dependencies. No network requests.</span></footer>
+</div>
+<script>
+'use strict';
+// Mirrors gen_classes2.py, including the separate zero-size class.
+const SPAN = 65536, HEADER = 64, PAGE = 4096;
+const SIZES = [16];
+for (let n = 16; n <= 512; n += 16) SIZES.push(n);
+for (let base = 512; base < 32768; base *= 2)
+  for (let i = 1; i <= 16; i++) SIZES.push(base + i * base / 16);
+const LIMITS = SIZES.map(n => Math.max(4, Math.min(256, Math.floor(SPAN / n))));
+const $ = id => document.getElementById(id);
+const number = n => n.toLocaleString('en-US');
+const bytes = n => n < 1024 ? `${number(n)} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KiB` : `${(n / 1048576).toFixed(2)} MiB`;
+const sid = id => `S${String(id).padStart(2, '0')}`;
+const speeds = [1, 4, 16, 64, 256, 1024, 4096, 16384];
+const history = {free: [], grouped: []};
+let mode = 'free', selected = 'compiler', threadCount = 1, sim, workload;
+let running = false, lastTime = 0, credit = 0, lastPaint = 0, pendingGhosts = false;
+function classOf(n) {
+  if (n <= 512) return Math.ceil(n / 16);
+  if (n > 32768) return -1;
+  let lo = 33, hi = SIZES.length - 1;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (SIZES[mid] < n) lo = mid + 1; else hi = mid; }
+  return lo;
+}
+function makeThread() {
+  return {local: SIZES.map(() => []), frees: SIZES.map(() => 0), stash: SIZES.map(() => new Map()), stashBytes: 0, large: []};
+}
+function newSim() {
+  return {threads: Array.from({length: threadCount}, makeThread), central: SIZES.map(() => []), spans: new Map(), large: new Map(),
+    nextSpan: 1, nextLarge: 1, ops: 0, smallAllocs: 0, hits: 0, refills: 0, flushes: 0, cacheHits: 0, cacheMisses: 0,
+    mapped: 0, live: 0, releasedSpans: 0, releasedBytes: 0, crossFrees: 0, phase: 'Ready', seed: 0x1a2b3c4d,
+    event: {kind: 'READY', text: 'Step or Run to begin. Each allocation request rounds up to a size class.'}, logs: [],
+    burst: null, lastBurst: null, completedBursts: 0, trimReport: 'No census yet.'};
+}
+function random(n) {
+  let x = sim.seed; x ^= x << 13; x ^= x >>> 17; x ^= x << 5;
+  sim.seed = x >>> 0; return Math.floor(sim.seed / 4294967296 * n);
+}
+function shuffle(list) { for (let i = list.length - 1; i > 0; i--) { const j = random(i + 1); [list[i], list[j]] = [list[j], list[i]]; } return list; }
+function event(kind, text, log = false) {
+  sim.event = {kind, text};
+  if (log) { sim.logs.unshift(`${number(sim.ops)} · ${kind} · ${text}`); sim.logs.length = Math.min(8, sim.logs.length); }
+}
+function publish(c, blocks) { if (blocks.length) sim.central[c].push(blocks); }
+function flush(t, c, toCentral = false) {
+  const thread = sim.threads[t], blocks = thread.local[c];
+  thread.local[c] = []; thread.frees[c] = 0;
+  if (!blocks.length) return;
+  sim.flushes++;
+  if (mode === 'free' || toCentral) {
+    publish(c, blocks);
+    event('FLUSH', `T${t + 1}: publish the entire ${blocks.length}-block ${SIZES[c]} B list as one batch.`, true);
+  } else {
+    // Array end is the head of every list. Merge each span's blocks across flushes.
+    const groups = new Map();
+    for (const b of blocks) { if (!groups.has(b.span.id)) groups.set(b.span.id, []); groups.get(b.span.id).push(b); }
+    for (const [id, group] of groups) {
+      const stash = thread.stash[c], existing = stash.get(id);
+      if ((existing || stash.size < 16) && thread.stashBytes + group.length * SIZES[c] <= 8 * 1048576) {
+        if (existing) existing.push(...group); else stash.set(id, group);
+        thread.stashBytes += group.length * SIZES[c];
+      } else publish(c, group); // Experiment's stash capacity / byte budget overflow.
+    }
+    event('GROUP', `T${t + 1}: flush ${blocks.length} blocks into ${groups.size} span groups; merge them in its private stash.`, true);
+  }
+}
+function refill(t, c) {
+  const thread = sim.threads[t], stash = thread.stash[c];
+  sim.refills++; thread.frees[c] = 0;
+  if (mode === 'grouped' && stash.size) {
+    let best = null;
+    for (const [id, group] of stash) if (!best || group.length > best[1].length) best = [id, group];
+    stash.delete(best[0]); thread.stashBytes -= best[1].length * SIZES[c]; thread.local[c] = best[1];
+    event('STASH', `T${t + 1}: refill from the largest stash group, ${sid(best[0])} × ${best[1].length}.`, true);
+  } else if (sim.central[c].length) {
+    thread.local[c] = sim.central[c].pop();
+    event('REFILL', `T${t + 1}: pop one whole ${SIZES[c]} B batch (${thread.local[c].length} blocks) from the central stack.`, true);
+  } else {
+    const size = SIZES[c], count = Math.floor((SPAN - HEADER) / size), id = sim.nextSpan++;
+    const span = {id, c, size, count, live: 0, mapped: true, hot: performance.now(), pages: new Set()};
+    span.blocks = Array.from({length: count}, (_, index) => ({span, index, live: false, requested: 0, owner: t}));
+    sim.spans.set(id, span); sim.mapped += SPAN;
+    const keep = Math.min(LIMITS[c], count);
+    thread.local[c] = span.blocks.slice(0, keep).reverse();
+    publish(c, span.blocks.slice(keep).reverse());
+    event('MAP', `Carve ${sid(id)}: ${count} × ${size} B. T${t + 1} keeps ${keep}; publish the remaining ${count - keep} as one span-pure batch.`, true);
+  }
+}
+function allocate(size, t) {
+  const c = classOf(size);
+  if (c < 0) return allocateLarge(size, t);
+  sim.smallAllocs++;
+  const thread = sim.threads[t];
+  if (thread.local[c].length) { sim.hits++; event('LOCAL HIT', `T${t + 1}: ${size} B → class ${c} (${SIZES[c]} B). Pop the local head; no shared access.`); }
+  else refill(t, c);
+  const b = thread.local[c].pop();
+  b.live = true; b.requested = size; b.owner = t; b.span.live++; b.span.hot = performance.now(); sim.live += size;
+  if (sim.burst) {
+    // Spans are 64 KiB-aligned. Include the header in each block's page address.
+    const first = Math.floor((HEADER + b.index * b.span.size) / PAGE);
+    const last = Math.floor((HEADER + (b.index + 1) * b.span.size - 1) / PAGE);
+    for (let p = first; p <= last; p++) { sim.burst.add(b.span.id * 16 + p); b.span.pages.add(p); }
+  }
+  return b;
+}
+function allocateLarge(size, t) {
+  const thread = sim.threads[t], bucket = Math.floor(Math.log2(size));
+  const found = thread.large.findIndex(b => Math.floor(Math.log2(b.capacity)) === bucket && b.capacity >= size);
+  let b;
+  if (found >= 0) {
+    b = thread.large.splice(found, 1)[0]; sim.cacheHits++;
+    event('CACHE HIT', `T${t + 1}: reuse large mapping L${b.id} for ${bytes(size)}; no new mapping.`, true);
+  } else {
+    const capacity = Math.ceil(size / PAGE) * PAGE, mappedBytes = Math.ceil((size + HEADER + SPAN) / PAGE) * PAGE;
+    b = {large: true, id: sim.nextLarge++, capacity, mappedBytes, mapped: true};
+    sim.large.set(b.id, b); sim.mapped += mappedBytes; sim.cacheMisses++;
+    event('LARGE MAP', `T${t + 1}: ${bytes(size)} exceeds 32 KiB. Map L${b.id} separately (${bytes(mappedBytes)} including alignment allowance).`, true);
+  }
+  b.live = true; b.owner = t; b.requested = size; sim.live += size; return b;
+}
+function release(b, t) {
+  if (!b || !b.live) throw new Error('Workload attempted an invalid free');
+  b.live = false; sim.live -= b.requested;
+  const cross = b.owner !== t;
+  if (cross) sim.crossFrees++;
+  if (b.large) {
+    b.cacheThread = t; sim.threads[t].large.push(b);
+    event(cross ? 'TRANSFER' : 'CACHE', `T${t + 1}: free L${b.id} into its large-block cache${cross ? ` (allocated by T${b.owner + 1})` : ''}.`, true);
+  } else {
+    const c = b.span.c, thread = sim.threads[t];
+    b.span.live--; b.span.hot = performance.now(); thread.local[c].push(b); thread.frees[c]++;
+    event(cross ? 'TRANSFER' : 'FREE', `T${t + 1}: push ${sid(b.span.id)}:${b.index} onto its ${SIZES[c]} B local list${cross ? `; allocated by T${b.owner + 1}` : ''}.`, cross);
+    if (thread.frees[c] >= LIMITS[c]) flush(t, c);
+  }
+}
+function resize(b, size, t) {
+  const capacity = b.large ? b.capacity : b.span.size;
+  if (size <= capacity) {
+    sim.live += size - b.requested; b.requested = size;
+    event('REALLOC', `T${t + 1}: grow/shrink to ${size} B inside the existing ${bytes(capacity)} block. No move.`); return b;
+  }
+  const fresh = allocate(size, t); release(b, t);
+  event('REALLOC', `T${t + 1}: ${bytes(size)} no longer fits. Allocate a new block, simulate copying, and free the old block.`, true); return fresh;
+}
+function trim() {
+  const dead = new Set(), counts = new Map(); let released = 0, largeCount = 0;
+  // A coordinated stop-the-world census: make every simulated thread's free blocks visible.
+  sim.threads.forEach((thread, t) => {
+    SIZES.forEach((_, c) => {
+      flush(t, c, true);
+      for (const group of thread.stash[c].values()) publish(c, group);
+      thread.stash[c].clear();
+    });
+    thread.stashBytes = 0;
+    for (const b of thread.large) { b.mapped = false; b.releasedAt = performance.now(); released += b.mappedBytes; largeCount++; }
+    thread.large = [];
+  });
+  for (const stack of sim.central) for (const batch of stack) for (const b of batch) counts.set(b.span.id, (counts.get(b.span.id) || 0) + 1);
+  for (const [id, count] of counts) {
+    const span = sim.spans.get(id);
+    if (span.mapped && span.live === 0 && count === span.count) {
+      dead.add(id); span.mapped = false; span.releasedAt = performance.now(); released += SPAN;
+    }
+  }
+  sim.central = sim.central.map(stack => stack.map(batch => batch.filter(b => !dead.has(b.span.id))).filter(batch => batch.length));
+  sim.mapped -= released; sim.releasedSpans += dead.size; sim.releasedBytes += released;
+  sim.trimReport = `Last census: ${dead.size} spans + ${largeCount} large mappings; ${bytes(released)} released.`;
+  event('CENSUS', sim.trimReport + ' Live spans stay mapped.', true);
+  pendingGhosts = released > 0;
+  paint(); // First paint includes the newly released spans at full opacity.
+}
+const A = (size, t = 0) => ({kind: 'alloc', size, t});
+const F = (b, t = 0) => ({kind: 'free', b, t});
+const R = (b, size, t = 0) => ({kind: 'realloc', b, size, t});
+const N = text => ({kind: 'note', text});
+function* compiler() {
+  for (let unit = 1; ; unit++) {
+    const t = (unit - 1) % threadCount, tree = [], count = 100 + random(81);
+    yield N(`Unit ${unit} · build a node tree on T${t + 1}`);
+    for (let i = 0; i < count; i++) {
+      const node = {b: yield A(48 + random(10) * 16, t), children: []};
+      if (i) tree[Math.floor((i - 1) / 3)].children.push(node);
+      tree.push(node);
+    }
+    yield N(`Unit ${unit} · walk ${count} nodes (no allocator calls)`);
+    const walk = [tree[0]]; let visited = 0;
+    while (walk.length) { const node = walk.pop(); visited++; walk.push(...node.children); }
+    yield N(`Unit ${unit} · ${visited} nodes walked; bulk teardown`);
+    for (const node of tree.reverse()) yield F(node.b, t);
+  }
+}
+function* jsonDocs() {
+  const cache = [];
+  for (let doc = 1; ; doc++) {
+    const t = (doc - 1) % threadCount, nodes = [];
+    yield N(`Document ${doc} · build object tree / cache ${cache.length} of 3`);
+    for (let i = 0, n = 20 + random(21); i < n; i++) nodes.push({b: yield A(32 + random(15) * 16, t), parent: i ? Math.floor((i - 1) / 3) : -1});
+    yield N(`Document ${doc} · serialise with realloc growth`);
+    let buffer = yield A(128, t);
+    for (const size of (doc % 8 === 0 ? [160, 768, 4096, 16384, 49152, 70000] : [160, 512, 1800, 7400])) buffer = yield R(buffer, size, t);
+    const blocks = [...nodes.map(n => n.b), buffer];
+    if (doc % 16 === 0) {
+      if (cache.length === 3) { yield N(`Document ${doc} · evict oldest retained tree`); for (const b of cache.shift()) yield F(b, b.owner); }
+      cache.push(blocks); yield N(`Document ${doc} · retain every 16th tree / cache ${cache.length} of 3`);
+    } else { yield N(`Document ${doc} · free temporary tree and serialised buffer`); for (const b of blocks) yield F(b, t); }
+  }
+}
+function freeThread(b, i) { return threadCount === 2 && i % 9 === 0 ? 1 - b.owner : b.owner; }
+function* kvChurn() {
+  const table = new Map();
+  yield N('Table warm-up · 192-key space / 80 initial entries');
+  for (let key = 0; key < 80; key++) {
+    const t = key % threadCount;
+    table.set(key, {key: yield A(48, t), value: yield A(128 + random(64) * 16, t)});
+  }
+  for (let i = 1; ; i++) {
+    const key = random(192), entry = table.get(key), t = i % threadCount;
+    if (i % 32 === 1) yield N(`KV churn · ${table.size} live entries / insert, update, delete`);
+    if (!entry) table.set(key, {key: yield A(48, t), value: yield A(128 + random(128) * 16, t)});
+    else if (random(4) === 0) {
+      yield F(entry.key, freeThread(entry.key, i)); yield F(entry.value, freeThread(entry.value, i)); table.delete(key);
+    } else {
+      const size = Math.min(98304, Math.floor(entry.value.requested * 1.6) + 16);
+      entry.value = yield R(entry.value, size, t);
+    }
+  }
+}
+function* game() {
+  const entities = [];
+  yield N('World warm-up · persistent entity pool');
+  for (let i = 0; i < 64; i++) entities.push(yield A(96 + random(7) * 16, i % threadCount));
+  const sizes = [32, 48, 64, 96, 128, 192, 256, 384, 768, 1536];
+  for (let frame = 1; ; frame++) {
+    const t = (frame - 1) % threadCount, temps = [], count = 400 + random(401);
+    yield N(`Frame ${frame} · ${count} transient allocations on T${t + 1}`);
+    for (let i = 0; i < count; i++) temps.push(yield A(sizes[random(sizes.length)], t));
+    temps.push(yield A(65536, t)); // One large frame buffer exposes the mapping cache.
+    yield N(`Frame ${frame} · frame-end bulk free${threadCount === 2 ? ' / occasional worker handoff' : ''}`);
+    for (let i = 0; i < temps.length; i++) yield F(temps[i], freeThread(temps[i], i));
+    yield N(`Frame ${frame} · persistent entity churn`);
+    for (let i = 0; i < 8; i++) {
+      const index = random(entities.length), b = entities[index];
+      yield F(b, freeThread(b, i + frame)); entities[index] = yield A(96 + random(7) * 16, t);
+    }
+  }
+}
+function* locality() {
+  for (let trial = 1; ; trial++) {
+    const t = (trial - 1) % threadCount, pool = [], burst = [];
+    yield N(`Trial ${trial} · allocate 2,048 × 64 B on T${t + 1}`);
+    for (let i = 0; i < 2048; i++) pool.push(yield A(64, t));
+    yield N(`Trial ${trial} · free all 2,048 in a seeded scrambled order`);
+    for (const b of shuffle(pool)) yield F(b, t);
+    yield {kind: 'burst-start', text: `Trial ${trial} · reallocate a 256-block burst`};
+    for (let i = 0; i < 256; i++) burst.push(yield A(64, t));
+    yield {kind: 'burst-end', text: `Trial ${trial} · burst complete; compare modes or Run for another trial`};
+    for (const b of burst) yield F(b, t);
+  }
+}
+const WORKLOADS = {compiler, json: jsonDocs, kv: kvChurn, game, locality};
+let response;
+function step() {
+  const next = workload.next(response); response = undefined;
+  if (next.done) { setRunning(false); return; }
+  const a = next.value;
+  if (a.kind === 'note') { sim.phase = a.text; event('WORKLOAD', a.text); }
+  else if (a.kind === 'burst-start') {
+    sim.phase = a.text; sim.burst = new Set();
+    for (const span of sim.spans.values()) span.pages.clear();
+    event('BURST', 'Count distinct 4 KiB pages from actual simulated block addresses, including each span’s 64 B header.', true);
+  } else if (a.kind === 'burst-end') {
+    sim.phase = a.text; sim.lastBurst = sim.burst.size; sim.burst = null; sim.completedBursts++;
+    history[mode].push(sim.lastBurst); if (history[mode].length > 8) history[mode].shift();
+    event('FOOTPRINT', `${sim.lastBurst} distinct pages touched by 256 × 64 B (${mode === 'free' ? 'free-order' : 'span-grouped'}). Auto-paused at burst end.`, true);
+    setRunning(false);
+  } else {
+    sim.ops++;
+    if (a.kind === 'alloc') response = allocate(a.size, a.t);
+    else if (a.kind === 'free') release(a.b, a.t);
+    else if (a.kind === 'realloc') response = resize(a.b, a.size, a.t);
+  }
+}
+function setRunning(value) {
+  running = value; credit = 0; lastTime = performance.now();
+  $('run').textContent = value ? 'Pause' : 'Run'; $('step').disabled = value;
+  $('run-state').textContent = value ? 'Running' : 'Paused'; $('run-state').classList.toggle('active', value);
+}
+function reset(keepHistory = false, preview = false) {
+  setRunning(false); sim = newSim(); workload = WORKLOADS[selected](); response = undefined; pendingGhosts = false;
+  if (!keepHistory) { history.free = []; history.grouped = []; }
+  if (preview) {
+    for (let i = 0; i < 73; i++) step();
+    event('PREVIEW', 'Paused preview: a compiler unit is building its tree. Step to inspect the next action, or Run to watch teardown.');
+  }
+  explain(); paint();
+}
+function explain() {
+  const texts = {
+    compiler: 'Each unit builds a tree of 48–192 B nodes, walks it, then frees the tree in bulk. Watch the hollow blocks fill back up as the next unit reuses them. Allocations and teardown tend to stay together, so free order already offers useful locality.',
+    json: 'Small object trees grow a serialised buffer with realloc; a buffer that outgrows its class moves and frees the old block. Every 16th document stays in a three-document cache, with oldest-first eviction. Occasional large documents use separate mappings and expose the large-block cache.',
+    kv: 'A long-lived table inserts, updates and deletes entries across 192 keys. Values grow with realloc, while surviving entries pin parts of older spans. With two threads, workers sometimes free another thread’s blocks into their own lists.',
+    game: 'Every frame allocates 400–800 temporary objects and one large frame buffer, then frees them in bulk. A separate entity pool stays alive and changes gradually. With two threads, occasional handoffs put freed blocks in the receiving worker’s local lists.',
+    locality: 'Allocate 2,048 blocks of 64 B, scramble all frees, then request a 256-block burst. Dark page marks show exactly which 4 KiB pages the burst touches. Run until it auto-pauses, switch recycling mode, and replay the same seed to compare concentration.'
+  };
+  $('explainer').textContent = texts[selected];
+  $('mode-note').textContent = mode === 'free' ? 'Free-order · v2 today: a flush publishes the whole local list as one central batch, which can mix several spans after scrambled frees.' : 'Span-grouped · experiment: a flush merges blocks by span in a private stash, and refills take its largest group before trying the shared central stack.';
+  $('mode-free').setAttribute('aria-pressed', String(mode === 'free'));
+  $('mode-grouped').setAttribute('aria-pressed', String(mode === 'grouped'));
+  $('stash-panel').classList.toggle('enabled', mode === 'grouped');
+}
+function batchLabel(batch) {
+  const groups = new Map(); for (const b of batch) groups.set(b.span.id, (groups.get(b.span.id) || 0) + 1);
+  return {text: [...groups].map(([id, n]) => `${sid(id)} × ${n}`).join(' + '), mixed: groups.size > 1};
+}
+function paintLists() {
+  $('locals').innerHTML = sim.threads.map((thread, t) => {
+    let rows = '';
+    thread.local.forEach((list, c) => {
+      if (!list.length && !thread.frees[c]) return;
+      const next = list.slice(-5).reverse().map(b => `${sid(b.span.id)}:${b.index}`).join(' → ');
+      rows += `<div class="local-row"><div class="local-meta"><b>${SIZES[c]} B</b><span class="mono">${list.length} available</span></div><div class="list-preview" title="Head first: ${next}">${next || 'empty'}</div><div class="meter"><i style="width:${thread.frees[c] / LIMITS[c] * 100}%"></i></div><div class="counter"><span>${thread.frees[c]} frees / ${LIMITS[c]} limit</span><span>head ↑</span></div></div>`;
+    });
+    return `<div class="thread-label"><span>T${t + 1} / private</span><span>${thread.large.length} large cached</span></div>${rows || '<p class="empty">No local blocks. The next miss refills.</p>'}`;
+  }).join('');
+  let central = '';
+  sim.central.forEach((stack, c) => {
+    if (!stack.length) return;
+    central += `<div class="central-class"><div class="central-title"><span>${SIZES[c]} B</span><span>${stack.length} batches</span></div><div class="batch-stack">`;
+    for (const batch of [...stack].reverse()) {
+      const label = batchLabel(batch);
+      central += `<div class="chip ${label.mixed ? 'mixed' : ''}" title="${label.text} (${batch.length} blocks)">${label.text}${label.mixed ? ` · ${batch.length} total` : ''}</div>`;
+    }
+    central += '</div></div>';
+  });
+  $('central').innerHTML = central || '<p class="empty">Empty. A miss will carve a fresh span. Fresh-span leftovers and flushed lists land here.</p>';
+  let stash = '';
+  sim.threads.forEach((thread, t) => thread.stash.forEach((groups, c) => {
+    const largest = Math.max(0, ...[...groups.values()].map(g => g.length));
+    for (const [id, blocks] of groups) stash += `<div class="chip" title="${SIZES[c]} B class, T${t + 1}; ${blocks.length === largest ? 'largest group in this class' : 'waiting'}">T${t + 1} · ${SIZES[c]} B · ${sid(id)} × ${blocks.length}${blocks.length === largest ? ' ↑' : ''}</div>`;
+  }));
+  $('stash').innerHTML = stash || `<p class="empty">${mode === 'free' ? 'Inactive in v2 today. Switch to Span-grouped to collect free blocks by span.' : 'Groups appear on flush. Up to 16 spans per class / 8 MiB per thread; overflow goes to central.'}</p>`;
+}
+function paintMemory(now) {
+  let spans = '', mapped = 0, ghost = false;
+  for (const [id, span] of sim.spans) {
+    const age = span.mapped ? 0 : now - span.releasedAt;
+    if (!span.mapped && age > 650) { sim.spans.delete(id); continue; }
+    if (span.mapped) mapped++; else ghost = true;
+    let blocks;
+    if (span.count > 256) blocks = `<div class="proportion"><div class="used" style="width:${span.live / span.count * 100}%"></div><span class="bar-label">${span.live} / ${span.count} live</span></div>`;
+    else blocks = `<div class="cells">${span.blocks.map(b => `<i class="block${b.live ? ' live' : ''}" title="${sid(id)}:${b.index} · ${b.live ? 'live' : 'free'} · offset ${HEADER + b.index * span.size}"></i>`).join('')}</div>`;
+    const pages = Array.from({length: 16}, (_, p) => `<i class="page${span.pages.has(p) ? ' touched' : ''}" title="${sid(id)} page ${p}${span.pages.has(p) ? ' · touched by burst' : ''}"></i>`).join('');
+    spans += `<div class="span${now - span.hot < 350 && span.mapped ? ' hot' : ''}${!span.mapped ? ' releasing' : ''}" style="${!span.mapped ? `animation-delay:-${age}ms` : ''}" title="64 KiB span; 64 B header; ${span.count} blocks of ${span.size} B"><div class="span-top"><b>${sid(id)}</b><span>${number(span.size)} B</span></div>${blocks}<div class="span-bottom"><span>${span.count - span.live} free</span><span>${span.mapped ? '64 KiB' : 'unmapping…'}</span></div><div class="pages">${pages}</div></div>`;
+  }
+  $('spans').innerHTML = spans; $('span-count').textContent = `/ ${mapped}`;
+  let large = '';
+  for (const [id, b] of sim.large) {
+    const age = b.mapped ? 0 : now - b.releasedAt;
+    if (!b.mapped && age > 650) { sim.large.delete(id); continue; }
+    if (!b.mapped) ghost = true;
+    large += `<div class="large-bar${b.live ? '' : ' cached'}${!b.mapped ? ' releasing' : ''}" style="width:${Math.min(100, 45 + b.capacity / 2048)}%;${!b.mapped ? `animation-delay:-${age}ms` : ''}" title="${bytes(b.mappedBytes)} mapped; ${bytes(b.capacity)} reusable capacity"><span>L${id} · ${bytes(b.capacity)}</span><span>${b.live ? `Live · T${b.owner + 1}` : `Cached · T${b.cacheThread + 1}`}</span></div>`;
+  }
+  $('large').innerHTML = large || '<p class="empty">No large mappings yet. JSON buffers, KV values and game frames can take this path.</p>';
+  pendingGhosts = ghost; return mapped;
+}
+function paint() {
+  if (!sim) return;
+  const now = performance.now();
+  // Preserve scroll positions when rebuilding the compact state panels.
+  const panels = ['locals', 'central', 'stash', 'spans', 'large'];
+  const scroll = panels.map(id => $(id).scrollTop);
+  paintLists(); const mapped = paintMemory(now);
+  panels.forEach((id, i) => { $(id).scrollTop = scroll[i]; });
+  $('phase').textContent = sim.phase; $('event-kind').textContent = sim.event.kind; $('event-text').textContent = sim.event.text;
+  $('event-log').innerHTML = sim.logs.map(line => `<li>${line}</li>`).join('');
+  const stats = {ops: number(sim.ops), hit: sim.smallAllocs ? `${(100 * sim.hits / sim.smallAllocs).toFixed(1)}%` : '—',
+    refills: number(sim.refills), flushes: number(sim.flushes), batches: number(sim.central.reduce((n, a) => n + a.length, 0)),
+    spans: number(mapped), mapped: `${bytes(sim.mapped)} / ${bytes(sim.live)}`, cache: `${number(sim.cacheHits)} / ${number(sim.cacheMisses)}`,
+    cross: number(sim.crossFrees), trim: `${number(sim.releasedSpans)} / ${bytes(sim.releasedBytes)}`};
+  for (const [key, value] of Object.entries(stats)) $('stat-' + key).textContent = value;
+  const used = sim.mapped ? sim.live / sim.mapped * 100 : 0;
+  $('live-meter').style.width = `${used}%`;
+  $('fragmentation').textContent = `Fragmentation: ${sim.mapped ? (100 - used).toFixed(1) : '0.0'}% unused mapped`;
+  $('stat-mapped').title = `${number(sim.mapped)} bytes mapped / ${number(sim.live)} requested bytes live`;
+  $('trim-report').textContent = sim.trimReport;
+  const footprint = sim.burst ? sim.burst.size : sim.lastBurst;
+  $('burst-pages').textContent = footprint === null ? '—' : footprint;
+  $('burst-state').textContent = sim.burst ? 'pages · burst in progress' : selected === 'locality' ? 'pages · completed burst' : 'select locality to measure';
+  if (selected === 'locality' && footprint === null) $('burst-state').textContent = 'pages · awaiting first burst';
+  for (const name of ['free', 'grouped']) {
+    const last = history[name].length ? history[name][history[name].length - 1] : null;
+    $(name + '-pages').textContent = last === null ? '—' : last;
+    $(name + '-bar').style.width = `${last === null ? 0 : Math.min(100, last / 48 * 100)}%`;
+    $(name + '-pages').title = history[name].length ? `Recent bursts: ${history[name].join(', ')} pages` : 'Run this mode to measure';
+  }
+  $('burst-caption').textContent = selected === 'locality' ? 'Demo: 2,048 × 64 B → 256-block burst. Bars: 0–48 pages. Grouping concentrates reuse within a 16-page span; the byte-only floor is 4 pages. The measured experiment below is 16× larger.' : 'Select Scrambled reuse, run to the burst, then switch modes and replay the same seed. A mode change keeps the last result from each mode.';
+  lastPaint = now;
+}
+function frame(now) {
+  if (running) {
+    credit += Math.min(100, now - lastTime) / 1000 * speeds[Number($('speed').value)];
+    const actions = Math.min(1000, Math.floor(credit)); credit -= actions;
+    for (let i = 0; i < actions && running; i++) step();
+  }
+  lastTime = now;
+  if ((running || pendingGhosts) && now - lastPaint >= 65) paint();
+  // Paint the auto-pause result even if the previous frame was less than 65 ms ago.
+  if (!running && $('phase').textContent !== sim.phase) paint();
+  requestAnimationFrame(frame);
+}
+$('step').addEventListener('click', () => { step(); paint(); });
+$('run').addEventListener('click', () => { setRunning(!running); paint(); });
+$('reset').addEventListener('click', () => reset());
+$('trim').addEventListener('click', trim);
+$('workload').addEventListener('change', () => { selected = $('workload').value; reset(); });
+$('threads').addEventListener('change', () => { threadCount = Number($('threads').value); reset(); });
+for (const name of ['free', 'grouped']) $(`mode-${name}`).addEventListener('click', () => { if (mode !== name) { mode = name; reset(true); } });
+$('speed').addEventListener('input', () => { $('speed-label').textContent = `${number(speeds[Number($('speed').value)])} ops/s`; });
+// Inline SVG charts: the complete datasets live here; no chart library or requests.
+const DATA = {
+  instructions: [['glibc', 142, 204], ['tcmalloc', 102, 159], ['jemalloc', 83, 129], ['mimalloc', 114, 95], ['v1', 73, 108], ['v2', 52, 87], ['jit', 51, 89]],
+  macro: [['Compiler', 76.2, 52.3, 37.4, 38.5], ['JSON doc', 137.5, 112.1, 105.0, 107.4], ['KV store', 598.4, 495.5, 499.3, 503.6], ['Game', 78.7, 25.8, 21.7, 22.7]],
+  large: [['glibc', 27.6], ['v2 before', 9000], ['v2 after', 9.4]],
+  locality: [['Free-order', 512.9], ['Span-grouped', 67.8], ['Floor', 64]],
+  trim: [['glibc', 124.8, 2.8], ['v2 before', 161.6, 135.2], ['v2 after', 161.7, 7.0]]
+};
+function bars(target, rows, max, unit, ticks, highlight, decimals = 0) {
+  const left = 108, width = 300, rowHeight = 26, height = rows.length * rowHeight + 35;
+  let body = `<svg viewBox="0 0 472 ${height}" role="img" aria-label="${unit}; horizontal bar chart; axis 0 to ${max}. Values also in the table above."><title>${unit}</title>`;
+  for (const tick of ticks) { const x = left + tick / max * width; body += `<line x1="${x}" y1="0" x2="${x}" y2="${height - 29}" stroke="#e1e9e2"/><text x="${x}" y="${height - 12}" text-anchor="middle">${tick}</text>`; }
+  rows.forEach(([name, value], i) => {
+    const y = i * rowHeight + 4, w = value / max * width;
+    body += `<text class="chart-label" x="0" y="${y + 12}">${name}</text><rect x="${left}" y="${y}" width="${w}" height="16" rx="1" fill="${name === highlight ? '#087f6c' : '#adcebb'}"/><text class="value" x="${left + w + 7}" y="${y + 12}">${value.toFixed(decimals)}</text>`;
+  });
+  $(target).innerHTML = body + '</svg>';
+}
+function drawCharts() {
+  bars('chart-instructions', DATA.instructions.map(row => row.slice(0, 2)), 160, 'Instructions / op · 64 B churn', [0, 40, 80, 120, 160], 'v2');
+  bars('chart-macro', DATA.macro.map(row => [row[0], row[3]]), 600, 'ns/op · v2 across macro workloads (see table for other allocators)', [0, 150, 300, 450, 600], 'KV store', 1);
+  bars('chart-locality', DATA.locality, 600, 'Distinct 4 KiB pages / burst', [0, 150, 300, 450, 600], 'Span-grouped', 1);
+  let svg = '<svg viewBox="0 0 472 182" role="img" aria-label="RSS in MB after free and after trim, axis 0 to 180; values also in the table above."><title>RSS in MB, after free and after trim</title>';
+  for (const tick of [0, 60, 120, 180]) { const x = 95 + tick / 180 * 305; svg += `<line x1="${x}" y1="0" x2="${x}" y2="154" stroke="#e1e9e2"/><text x="${x}" y="174" text-anchor="middle">${tick}</text>`; }
+  DATA.trim.forEach(([name, before, after], i) => {
+    const y = i * 51 + 5;
+    svg += `<text class="chart-label" x="0" y="${y + 18}">${name}</text>`;
+    [before, after].forEach((value, j) => { const w = value / 180 * 305, top = y + j * 19; svg += `<rect x="95" y="${top}" width="${w}" height="14" fill="${j ? '#087f6c' : '#adcebb'}"/><text class="value" x="${95 + w + 6}" y="${top + 11}">${value.toFixed(1)}</text>`; });
+  });
+  $('chart-trim').innerHTML = svg + '</svg>';
+}
+drawCharts(); reset(false, true); requestAnimationFrame(frame);
+</script>
+</body>
+</html>

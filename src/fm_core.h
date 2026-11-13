@@ -536,8 +536,16 @@ static inline char *fm_map_aligned(size_t bytes)
 static inline void *fm_span_new(uint32_t cls, void **tail_out, uint32_t *count_out)
 {
     size_t bs = kClassSize[cls];
-    size_t n = (SPAN_SIZE - HEADER_SIZE) / bs;
-    char *base = fm_map_aligned(SPAN_SIZE - HEADER_SIZE);
+    size_t bytes = SPAN_SIZE;
+#ifdef FM_SMALL_FIRST_SPAN
+    /* ADR 0060: sparsely used startup classes need no full-span free list.
+     * Grow subsequent spans normally; the atomic only runs on fresh spans. */
+    static _Atomic unsigned char started[CLASS_COUNT];
+    bytes = atomic_exchange_explicit(&started[cls], 1, memory_order_relaxed)
+        ? SPAN_SIZE : FM_ALIGN_UP(HEADER_SIZE + (bs > 16320 ? bs : 16320), FM_PAGE_SIZE);
+#endif
+    size_t n = (bytes - HEADER_SIZE) / bs;
+    char *base = fm_map_aligned(bytes - HEADER_SIZE);
     if (!base)
         return NULL;
 
@@ -547,7 +555,7 @@ static inline void *fm_span_new(uint32_t cls, void **tail_out, uint32_t *count_o
     sp->nblocks = (uint32_t)n;
     sp->dead_mark = 0;
     sp->map_base = (uintptr_t)base;
-    sp->map_size = SPAN_SIZE;
+    sp->map_size = bytes;
     sp->user_size = 0;
     sp->align = 0;
     sp->purge_mark = 0;
@@ -1173,7 +1181,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             FM_Span *sp = (FM_Span *)e->span;
             uint32_t nb = sp->nblocks;
             unsigned char vec[16];
-            int have_vec = mincore((void *)e->span, SPAN_SIZE, vec) == 0;
+            int have_vec = mincore((void *)e->span, sp->map_size, vec) == 0;
             uint16_t new_mask = 0;
             uint32_t new_pages = 0;
             for (uint32_t pg = 1; pg < 16; pg++) {

@@ -1,0 +1,4 @@
+{"rep": 0, "app": "python", "variant": "base-v2", "stdout": "python-churn checksum 625726\n", "stderr": "R3TIME elapsed=3.187 maxrss_kb=502884 exit=0\n", "rc": 0, "seconds": 3.187, "rss_kb": 502884}
+{"rep": 0, "app": "python", "variant": "v2", "stdout": "python-churn checksum 625726\n", "stderr": "R3TIME elapsed=3.429 maxrss_kb=499664 exit=0\n", "rc": 0, "seconds": 3.429, "rss_kb": 499664}
+{"rep": 0, "app": "python", "variant": "base-jit", "stdout": "python-churn checksum 625726\n", "stderr": "R3TIME elapsed=3.616 maxrss_kb=502792 exit=0\n", "rc": 0, "seconds": 3.616, "rss_kb": 502792}
+{"rep": 0, "app": "python", "variant": "jit", "stdout": "python-churn checksum 625726\n", "stderr": "R3TIME elapsed=4.190 maxrss_kb=499684 exit=0\n", "rc": 0, "seconds": 4.19, "rss_kb": 499684}

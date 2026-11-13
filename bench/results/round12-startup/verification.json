@@ -1,0 +1,18 @@
+{
+  "base": "3d1e114",
+  "final_frozen_verify_exit": 0,
+  "release_round7_exit": 0,
+  "debug_round7_exit": 0,
+  "intensified_debug_stress_passes": 6,
+  "release_restored": true,
+  "sha256": {
+    "src/fm_core.h": "ee48b32d93a0430bf9445f9c0dc8a0aa9ccbf9e4c3bd747f30cf51b7d84c1f49",
+    "src/fm_static.c": "d58753a6324d68c9dcef6558af90c8bd710026c5422d5d26c0d7b72648b4d3a3",
+    "work/round12/verify-final.sh": "d568102ae102edca48812390112095c8afb023a1dee6f06b1f96c968b3e4df2b",
+    "libfastmalloc2.so": "61268b9007f9877da370247d6d88a2582f4530d45a22df2a09f79ddce6a94233",
+    "libjitmalloc.so": "902db908f79994476bdcc8a5c5ec55f5038eecc4ec9d1999d6935fe4fccb31bc",
+    "work/round12/base/libfastmalloc2.so": "a3058061c39274f9406061b63f135c548dffce6c3594c8fbd87efe2c6d9f09b9",
+    "work/round12/base/libjitmalloc.so": "675b7a154f8124de8d180c0f2300907e91a468aafec97d1dd2d5adc278f93896",
+    "bench/round12/verify-startup.sh": "d568102ae102edca48812390112095c8afb023a1dee6f06b1f96c968b3e4df2b"
+  }
+}

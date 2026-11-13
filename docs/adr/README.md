@@ -69,3 +69,5 @@ mark were recorded when the work was done.
 | [0056](0056-census-contention-hint.md) | Advisory census busy hint | Rejected |
 | [0057](0057-census-thread-backoff.md) | Per-thread census backoff | Rejected |
 | [0058](0058-cold-large-cache-payload-purge.md) | Cold large-cache payload purge | Rejected: guard regression |
+| [0060](0060-smaller-first-span.md) | Smaller first span per class | Accepted for static v2 |
+| [0061](0061-smaller-first-span-jit-rejected.md) | Smaller first span in JIT | Rejected: pooled KV churn signal |

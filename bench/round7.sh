@@ -3,6 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 make -j4
+LD_PRELOAD="$PWD/libfastmalloc.so" ./bench/v1align
 for lib in libfastmalloc2.so libjitmalloc.so; do
     export LD_PRELOAD="$PWD/$lib"
     echo "=== $lib ==="

@@ -245,6 +245,10 @@ static void fm_large_free(Span *sp)
 
 static void *fm_aligned_alloc(size_t align, size_t n)
 {
+    if (align == 0 || (align & (align - 1)) != 0) {
+        errno = EINVAL;
+        return NULL;
+    }
     if (align <= 16)
         return fm_malloc(n);
     if (align < SPAN_SIZE) {
@@ -474,10 +478,8 @@ void *reallocarray(void *p, size_t n, size_t sz)
 
 int posix_memalign(void **out, size_t align, size_t n)
 {
-    if (align % sizeof(void *) != 0 || (align & (align - 1)) != 0) {
-        *out = NULL;
+    if (align == 0 || align % sizeof(void *) != 0 || (align & (align - 1)) != 0)
         return EINVAL;
-    }
     void *p = fm_aligned_alloc(align, n);
     if (!p)
         return ENOMEM;
@@ -487,8 +489,6 @@ int posix_memalign(void **out, size_t align, size_t n)
 
 void *aligned_alloc(size_t align, size_t n)
 {
-    if ((align & (align - 1)) != 0)
-        return NULL;
     return fm_aligned_alloc(align, n);
 }
 

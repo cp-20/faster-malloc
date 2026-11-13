@@ -35,3 +35,5 @@ bench/apps/work/
 /bench/idlefork
 
 /bench/jitprofile
+
+/bench/v1align

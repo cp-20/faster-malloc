@@ -5,7 +5,8 @@
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 APPDIR="$ROOT/bench/apps"
 REPS=${REPS:-3}
-NAMES=(glibc v1 v2 jit jemalloc mimalloc tcmalloc)
+TIME_BIN=${TIME_BIN:-/usr/bin/time}
+read -ra NAMES <<< "${CELL_ALLOCATORS:-glibc v1 v2 jit jemalloc mimalloc tcmalloc}"
 
 sys_lib() {
   ldconfig -p | grep -m1 "$1" | sed 's/.*=> //'
@@ -17,9 +18,9 @@ lib_for() {
     v1)       echo "$ROOT/libfastmalloc.so" ;;
     v2)       echo "$ROOT/libfastmalloc2.so" ;;
     jit)      echo "$ROOT/libjitmalloc.so" ;;
-    jemalloc) sys_lib "libjemalloc.so" ;;
-    mimalloc) sys_lib "libmimalloc.so" ;;
-    tcmalloc) sys_lib "libtcmalloc_minimal.so" ;;
+    jemalloc) echo "${JEMALLOC_LIB:-$(sys_lib libjemalloc.so)}" ;;
+    mimalloc) echo "${MIMALLOC_LIB:-$(sys_lib libmimalloc.so)}" ;;
+    tcmalloc) echo "${TCMALLOC_LIB:-$(sys_lib libtcmalloc_minimal.so)}" ;;
   esac
 }
 
@@ -33,7 +34,7 @@ run_cell() {
   : > "$CELL_OUT_FILE"
   for ((r = 0; r < REPS; r++)); do
     local out err rc
-    out=$(LD_PRELOAD="$LIB" /usr/bin/time -v "$@" 2>/tmp/cell-$$.err)
+    out=$(LD_PRELOAD="$LIB" "$TIME_BIN" -v "$@" 2>/tmp/cell-$$.err)
     rc=$?
     err=$(cat /tmp/cell-$$.err)
     if [ $rc -ne 0 ]; then

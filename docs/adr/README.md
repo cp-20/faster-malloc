@@ -49,3 +49,6 @@ mark were recorded when the work was done.
 | [0034](0034-realloc-cache-search.md) | Realloc large-cache bucket search | Opt-in prototype; default promotion rejected |
 | [0035](0035-purge-contention-ownership.md) | Purge contention: census and batch ownership | Accepted correctness fix; performance provisional |
 | [0036](0036-idle-timer-fork-signals.md) | Idle timer fork and signal ownership | Accepted hardening; default-off |
+| [0037](0037-realloc-cache-search-measurements.md) | Real-application realloc cache-search measurements | Measurement accepted; default promotion rejected |
+| [0038](0038-ownership-locking-measurements.md) | Central/census ownership cost under many-class traffic | Measured; safe reclamation redesign deferred |
+| [0039](0039-app-matrix-cloud-refresh.md) | nginx/pgbench/Ruby cloud re-baseline and demo refresh | Measurement accepted; quiet-box ranking deferred |

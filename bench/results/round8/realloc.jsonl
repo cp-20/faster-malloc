@@ -1,0 +1,160 @@
+{"app": "lua", "build": "v2", "mode": 0, "rep": 0, "warmup": true, "seconds": 0.5318410370000208, "rss_kib": 17820, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "v2", "mode": 1, "rep": 0, "warmup": true, "seconds": 0.4452738070000066, "rss_kib": 17772, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "v2", "mode": 1, "rep": 1, "warmup": false, "seconds": 0.43734343299999523, "rss_kib": 17932, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "v2", "mode": 0, "rep": 1, "warmup": false, "seconds": 0.4448989140000208, "rss_kib": 17888, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "v2", "mode": 0, "rep": 2, "warmup": false, "seconds": 0.47623432099999263, "rss_kib": 17816, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "v2", "mode": 1, "rep": 2, "warmup": false, "seconds": 0.5403097079999952, "rss_kib": 17956, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "v2", "mode": 1, "rep": 3, "warmup": false, "seconds": 0.4401047829999811, "rss_kib": 17924, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "v2", "mode": 0, "rep": 3, "warmup": false, "seconds": 0.45386952799998426, "rss_kib": 17752, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "v2", "mode": 0, "rep": 4, "warmup": false, "seconds": 0.44150207100000216, "rss_kib": 17928, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "v2", "mode": 1, "rep": 4, "warmup": false, "seconds": 0.5141716509999981, "rss_kib": 17808, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "v2", "mode": 1, "rep": 5, "warmup": false, "seconds": 0.4461523349999936, "rss_kib": 17892, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "v2", "mode": 0, "rep": 5, "warmup": false, "seconds": 0.4784852760000149, "rss_kib": 18072, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "v2", "mode": 0, "rep": 6, "warmup": false, "seconds": 0.462423436999984, "rss_kib": 17960, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "v2", "mode": 1, "rep": 6, "warmup": false, "seconds": 0.43724115100002336, "rss_kib": 17808, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "v2", "mode": 1, "rep": 7, "warmup": false, "seconds": 0.4295756909999966, "rss_kib": 17952, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "v2", "mode": 0, "rep": 7, "warmup": false, "seconds": 0.4298596040000007, "rss_kib": 17960, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "v2", "mode": 0, "rep": 8, "warmup": false, "seconds": 0.4474428380000006, "rss_kib": 17944, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "v2", "mode": 1, "rep": 8, "warmup": false, "seconds": 0.45268315800001346, "rss_kib": 17936, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "v2", "mode": 1, "rep": 9, "warmup": false, "seconds": 0.4628074450000099, "rss_kib": 17960, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "v2", "mode": 0, "rep": 9, "warmup": false, "seconds": 0.4315116660000058, "rss_kib": 17808, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "jit", "mode": 0, "rep": 0, "warmup": true, "seconds": 0.43690994499999647, "rss_kib": 17948, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "jit", "mode": 1, "rep": 0, "warmup": true, "seconds": 0.45986056300000655, "rss_kib": 17544, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "jit", "mode": 1, "rep": 1, "warmup": false, "seconds": 0.43883893299999954, "rss_kib": 17820, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "jit", "mode": 0, "rep": 1, "warmup": false, "seconds": 0.4485953110000196, "rss_kib": 17956, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "jit", "mode": 0, "rep": 2, "warmup": false, "seconds": 0.4286359989999937, "rss_kib": 17904, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "jit", "mode": 1, "rep": 2, "warmup": false, "seconds": 0.4348602000000028, "rss_kib": 17684, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "jit", "mode": 1, "rep": 3, "warmup": false, "seconds": 0.4641258750000077, "rss_kib": 17528, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "jit", "mode": 0, "rep": 3, "warmup": false, "seconds": 0.430129251000011, "rss_kib": 17964, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "jit", "mode": 0, "rep": 4, "warmup": false, "seconds": 0.4342728419999844, "rss_kib": 17920, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "jit", "mode": 1, "rep": 4, "warmup": false, "seconds": 0.4290287620000015, "rss_kib": 17964, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "jit", "mode": 1, "rep": 5, "warmup": false, "seconds": 0.43583870099999444, "rss_kib": 18088, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "jit", "mode": 0, "rep": 5, "warmup": false, "seconds": 0.4883059390000142, "rss_kib": 17940, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "jit", "mode": 0, "rep": 6, "warmup": false, "seconds": 0.46662076300000876, "rss_kib": 17924, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "jit", "mode": 1, "rep": 6, "warmup": false, "seconds": 0.4355427890000101, "rss_kib": 17972, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "jit", "mode": 1, "rep": 7, "warmup": false, "seconds": 0.4465407330000062, "rss_kib": 18088, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "jit", "mode": 0, "rep": 7, "warmup": false, "seconds": 0.45600784099997327, "rss_kib": 17828, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "jit", "mode": 0, "rep": 8, "warmup": false, "seconds": 0.44378480200001036, "rss_kib": 17956, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "jit", "mode": 1, "rep": 8, "warmup": false, "seconds": 0.44718274599998153, "rss_kib": 17956, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "jit", "mode": 1, "rep": 9, "warmup": false, "seconds": 0.45152330299998766, "rss_kib": 18084, "output": "lua-churn checksum\t19466078"}
+{"app": "lua", "build": "jit", "mode": 0, "rep": 9, "warmup": false, "seconds": 0.43052478000001315, "rss_kib": 17948, "output": "lua-churn checksum\t19466078"}
+{"app": "jq", "build": "v2", "mode": 0, "rep": 0, "warmup": true, "seconds": 2.1918020960000035, "rss_kib": 392916, "output": "66395"}
+{"app": "jq", "build": "v2", "mode": 1, "rep": 0, "warmup": true, "seconds": 1.6781909709999923, "rss_kib": 390272, "output": "66395"}
+{"app": "jq", "build": "v2", "mode": 1, "rep": 1, "warmup": false, "seconds": 1.8089947070000107, "rss_kib": 391588, "output": "66395"}
+{"app": "jq", "build": "v2", "mode": 0, "rep": 1, "warmup": false, "seconds": 1.4267978150000147, "rss_kib": 389840, "output": "66395"}
+{"app": "jq", "build": "v2", "mode": 0, "rep": 2, "warmup": false, "seconds": 1.3107300320000093, "rss_kib": 392980, "output": "66395"}
+{"app": "jq", "build": "v2", "mode": 1, "rep": 2, "warmup": false, "seconds": 1.2607630610000058, "rss_kib": 390616, "output": "66395"}
+{"app": "jq", "build": "v2", "mode": 1, "rep": 3, "warmup": false, "seconds": 1.8541854829999806, "rss_kib": 389512, "output": "66395"}
+{"app": "jq", "build": "v2", "mode": 0, "rep": 3, "warmup": false, "seconds": 1.3728610590000017, "rss_kib": 389460, "output": "66395"}
+{"app": "jq", "build": "v2", "mode": 0, "rep": 4, "warmup": false, "seconds": 1.5211406219999901, "rss_kib": 391460, "output": "66395"}
+{"app": "jq", "build": "v2", "mode": 1, "rep": 4, "warmup": false, "seconds": 1.299316009999984, "rss_kib": 392560, "output": "66395"}
+{"app": "jq", "build": "v2", "mode": 1, "rep": 5, "warmup": false, "seconds": 1.3982504909999989, "rss_kib": 391952, "output": "66395"}
+{"app": "jq", "build": "v2", "mode": 0, "rep": 5, "warmup": false, "seconds": 1.3391062260000126, "rss_kib": 394444, "output": "66395"}
+{"app": "jq", "build": "v2", "mode": 0, "rep": 6, "warmup": false, "seconds": 1.2711378270000182, "rss_kib": 392616, "output": "66395"}
+{"app": "jq", "build": "v2", "mode": 1, "rep": 6, "warmup": false, "seconds": 1.4781818719999933, "rss_kib": 390132, "output": "66395"}
+{"app": "jq", "build": "v2", "mode": 1, "rep": 7, "warmup": false, "seconds": 1.3248844830000053, "rss_kib": 391076, "output": "66395"}
+{"app": "jq", "build": "v2", "mode": 0, "rep": 7, "warmup": false, "seconds": 1.4078399370000056, "rss_kib": 391516, "output": "66395"}
+{"app": "jq", "build": "v2", "mode": 0, "rep": 8, "warmup": false, "seconds": 1.4205686320000268, "rss_kib": 391388, "output": "66395"}
+{"app": "jq", "build": "v2", "mode": 1, "rep": 8, "warmup": false, "seconds": 1.2857390089999967, "rss_kib": 390744, "output": "66395"}
+{"app": "jq", "build": "v2", "mode": 1, "rep": 9, "warmup": false, "seconds": 1.2425695160000032, "rss_kib": 391520, "output": "66395"}
+{"app": "jq", "build": "v2", "mode": 0, "rep": 9, "warmup": false, "seconds": 1.4558106299999736, "rss_kib": 390752, "output": "66395"}
+{"app": "jq", "build": "jit", "mode": 0, "rep": 0, "warmup": true, "seconds": 1.4179798870000013, "rss_kib": 390984, "output": "66395"}
+{"app": "jq", "build": "jit", "mode": 1, "rep": 0, "warmup": true, "seconds": 1.528521636999983, "rss_kib": 388624, "output": "66395"}
+{"app": "jq", "build": "jit", "mode": 1, "rep": 1, "warmup": false, "seconds": 1.3949760549999723, "rss_kib": 389928, "output": "66395"}
+{"app": "jq", "build": "jit", "mode": 0, "rep": 1, "warmup": false, "seconds": 1.5506835769999725, "rss_kib": 394152, "output": "66395"}
+{"app": "jq", "build": "jit", "mode": 0, "rep": 2, "warmup": false, "seconds": 1.3605448250000336, "rss_kib": 390328, "output": "66395"}
+{"app": "jq", "build": "jit", "mode": 1, "rep": 2, "warmup": false, "seconds": 1.342413792000002, "rss_kib": 393604, "output": "66395"}
+{"app": "jq", "build": "jit", "mode": 1, "rep": 3, "warmup": false, "seconds": 1.3496656589999816, "rss_kib": 391004, "output": "66395"}
+{"app": "jq", "build": "jit", "mode": 0, "rep": 3, "warmup": false, "seconds": 1.3719125169999984, "rss_kib": 388712, "output": "66395"}
+{"app": "jq", "build": "jit", "mode": 0, "rep": 4, "warmup": false, "seconds": 1.2198354810000183, "rss_kib": 393492, "output": "66395"}
+{"app": "jq", "build": "jit", "mode": 1, "rep": 4, "warmup": false, "seconds": 1.3675038279999967, "rss_kib": 390208, "output": "66395"}
+{"app": "jq", "build": "jit", "mode": 1, "rep": 5, "warmup": false, "seconds": 1.2883664629999885, "rss_kib": 391048, "output": "66395"}
+{"app": "jq", "build": "jit", "mode": 0, "rep": 5, "warmup": false, "seconds": 1.3995716609999818, "rss_kib": 390772, "output": "66395"}
+{"app": "jq", "build": "jit", "mode": 0, "rep": 6, "warmup": false, "seconds": 1.3180600980000463, "rss_kib": 388656, "output": "66395"}
+{"app": "jq", "build": "jit", "mode": 1, "rep": 6, "warmup": false, "seconds": 1.6103354279999849, "rss_kib": 390244, "output": "66395"}
+{"app": "jq", "build": "jit", "mode": 1, "rep": 7, "warmup": false, "seconds": 1.5330802469999867, "rss_kib": 388964, "output": "66395"}
+{"app": "jq", "build": "jit", "mode": 0, "rep": 7, "warmup": false, "seconds": 1.714984770000001, "rss_kib": 390108, "output": "66395"}
+{"app": "jq", "build": "jit", "mode": 0, "rep": 8, "warmup": false, "seconds": 1.70357349599999, "rss_kib": 390108, "output": "66395"}
+{"app": "jq", "build": "jit", "mode": 1, "rep": 8, "warmup": false, "seconds": 1.825743156000044, "rss_kib": 389484, "output": "66395"}
+{"app": "jq", "build": "jit", "mode": 1, "rep": 9, "warmup": false, "seconds": 1.6794711380000535, "rss_kib": 387868, "output": "66395"}
+{"app": "jq", "build": "jit", "mode": 0, "rep": 9, "warmup": false, "seconds": 1.4682037709999918, "rss_kib": 389340, "output": "66395"}
+{"app": "ruby", "build": "v2", "mode": 0, "rep": 0, "warmup": true, "seconds": 1.2063882659999763, "rss_kib": 73804, "output": "{\"secs\":1.151,\"rss_kb\":73952,\"checksum\":32103}"}
+{"app": "ruby", "build": "v2", "mode": 1, "rep": 0, "warmup": true, "seconds": 1.308406778999995, "rss_kib": 73900, "output": "{\"secs\":1.253,\"rss_kb\":74048,\"checksum\":32103}"}
+{"app": "ruby", "build": "v2", "mode": 1, "rep": 1, "warmup": false, "seconds": 1.3492258370000059, "rss_kib": 74000, "output": "{\"secs\":1.299,\"rss_kb\":74256,\"checksum\":32103}"}
+{"app": "ruby", "build": "v2", "mode": 0, "rep": 1, "warmup": false, "seconds": 1.2758165070000018, "rss_kib": 73848, "output": "{\"secs\":1.211,\"rss_kb\":74052,\"checksum\":32103}"}
+{"app": "ruby", "build": "v2", "mode": 0, "rep": 2, "warmup": false, "seconds": 1.2866797130000123, "rss_kib": 74300, "output": "{\"secs\":1.221,\"rss_kb\":74432,\"checksum\":32103}"}
+{"app": "ruby", "build": "v2", "mode": 1, "rep": 2, "warmup": false, "seconds": 1.3440585540000143, "rss_kib": 73788, "output": "{\"secs\":1.293,\"rss_kb\":74124,\"checksum\":32103}"}
+{"app": "ruby", "build": "v2", "mode": 1, "rep": 3, "warmup": false, "seconds": 1.2573289560000376, "rss_kib": 73916, "output": "{\"secs\":1.203,\"rss_kb\":74120,\"checksum\":32103}"}
+{"app": "ruby", "build": "v2", "mode": 0, "rep": 3, "warmup": false, "seconds": 1.2649559700000168, "rss_kib": 74196, "output": "{\"secs\":1.216,\"rss_kb\":74328,\"checksum\":32103}"}
+{"app": "ruby", "build": "v2", "mode": 0, "rep": 4, "warmup": false, "seconds": 1.3080852269999923, "rss_kib": 74148, "output": "{\"secs\":1.252,\"rss_kb\":74348,\"checksum\":32103}"}
+{"app": "ruby", "build": "v2", "mode": 1, "rep": 4, "warmup": false, "seconds": 1.2113211699999624, "rss_kib": 74280, "output": "{\"secs\":1.165,\"rss_kb\":74352,\"checksum\":32103}"}
+{"app": "ruby", "build": "v2", "mode": 1, "rep": 5, "warmup": false, "seconds": 1.1869244149999645, "rss_kib": 73892, "output": "{\"secs\":1.152,\"rss_kb\":74036,\"checksum\":32103}"}
+{"app": "ruby", "build": "v2", "mode": 0, "rep": 5, "warmup": false, "seconds": 1.2602597420000166, "rss_kib": 74232, "output": "{\"secs\":1.226,\"rss_kb\":74428,\"checksum\":32103}"}
+{"app": "ruby", "build": "v2", "mode": 0, "rep": 6, "warmup": false, "seconds": 1.2032235640000408, "rss_kib": 74292, "output": "{\"secs\":1.17,\"rss_kb\":74424,\"checksum\":32103}"}
+{"app": "ruby", "build": "v2", "mode": 1, "rep": 6, "warmup": false, "seconds": 1.274983619000011, "rss_kib": 74284, "output": "{\"secs\":1.214,\"rss_kb\":74420,\"checksum\":32103}"}
+{"app": "ruby", "build": "v2", "mode": 1, "rep": 7, "warmup": false, "seconds": 1.2712161940000328, "rss_kib": 73876, "output": "{\"secs\":1.215,\"rss_kb\":74020,\"checksum\":32103}"}
+{"app": "ruby", "build": "v2", "mode": 0, "rep": 7, "warmup": false, "seconds": 1.2928305280000245, "rss_kib": 74060, "output": "{\"secs\":1.257,\"rss_kb\":74324,\"checksum\":32103}"}
+{"app": "ruby", "build": "v2", "mode": 0, "rep": 8, "warmup": false, "seconds": 1.3390574890000266, "rss_kib": 74280, "output": "{\"secs\":1.293,\"rss_kb\":74412,\"checksum\":32103}"}
+{"app": "ruby", "build": "v2", "mode": 1, "rep": 8, "warmup": false, "seconds": 1.3893876170000112, "rss_kib": 73948, "output": "{\"secs\":1.343,\"rss_kb\":74032,\"checksum\":32103}"}
+{"app": "ruby", "build": "v2", "mode": 1, "rep": 9, "warmup": false, "seconds": 1.2537531999999487, "rss_kib": 74028, "output": "{\"secs\":1.219,\"rss_kb\":74288,\"checksum\":32103}"}
+{"app": "ruby", "build": "v2", "mode": 0, "rep": 9, "warmup": false, "seconds": 1.3180737559999898, "rss_kib": 74148, "output": "{\"secs\":1.264,\"rss_kb\":74348,\"checksum\":32103}"}
+{"app": "ruby", "build": "jit", "mode": 0, "rep": 0, "warmup": true, "seconds": 1.1489269239999658, "rss_kib": 74280, "output": "{\"secs\":1.112,\"rss_kb\":74432,\"checksum\":32103}"}
+{"app": "ruby", "build": "jit", "mode": 1, "rep": 0, "warmup": true, "seconds": 1.2221080909999955, "rss_kib": 73928, "output": "{\"secs\":1.184,\"rss_kb\":74024,\"checksum\":32103}"}
+{"app": "ruby", "build": "jit", "mode": 1, "rep": 1, "warmup": false, "seconds": 1.312473195999985, "rss_kib": 73896, "output": "{\"secs\":1.28,\"rss_kb\":74056,\"checksum\":32103}"}
+{"app": "ruby", "build": "jit", "mode": 0, "rep": 1, "warmup": false, "seconds": 1.3993010780000077, "rss_kib": 73812, "output": "{\"secs\":1.33,\"rss_kb\":74144,\"checksum\":32103}"}
+{"app": "ruby", "build": "jit", "mode": 0, "rep": 2, "warmup": false, "seconds": 1.4138916430000563, "rss_kib": 73752, "output": "{\"secs\":1.376,\"rss_kb\":73972,\"checksum\":32103}"}
+{"app": "ruby", "build": "jit", "mode": 1, "rep": 2, "warmup": false, "seconds": 1.3987725590000082, "rss_kib": 74252, "output": "{\"secs\":1.365,\"rss_kb\":74400,\"checksum\":32103}"}
+{"app": "ruby", "build": "jit", "mode": 1, "rep": 3, "warmup": false, "seconds": 1.5443662870000026, "rss_kib": 73876, "output": "{\"secs\":1.432,\"rss_kb\":74036,\"checksum\":32103}"}
+{"app": "ruby", "build": "jit", "mode": 0, "rep": 3, "warmup": false, "seconds": 1.2156465509999634, "rss_kib": 73912, "output": "{\"secs\":1.178,\"rss_kb\":74072,\"checksum\":32103}"}
+{"app": "ruby", "build": "jit", "mode": 0, "rep": 4, "warmup": false, "seconds": 1.1947850060000178, "rss_kib": 73904, "output": "{\"secs\":1.163,\"rss_kb\":74068,\"checksum\":32103}"}
+{"app": "ruby", "build": "jit", "mode": 1, "rep": 4, "warmup": false, "seconds": 1.2856576109999764, "rss_kib": 73896, "output": "{\"secs\":1.253,\"rss_kb\":74060,\"checksum\":32103}"}
+{"app": "ruby", "build": "jit", "mode": 1, "rep": 5, "warmup": false, "seconds": 1.3201888199999985, "rss_kib": 74280, "output": "{\"secs\":1.273,\"rss_kb\":74428,\"checksum\":32103}"}
+{"app": "ruby", "build": "jit", "mode": 0, "rep": 5, "warmup": false, "seconds": 1.2494506799999954, "rss_kib": 73980, "output": "{\"secs\":1.216,\"rss_kb\":74076,\"checksum\":32103}"}
+{"app": "ruby", "build": "jit", "mode": 0, "rep": 6, "warmup": false, "seconds": 1.2294623619999925, "rss_kib": 74336, "output": "{\"secs\":1.176,\"rss_kb\":74424,\"checksum\":32103}"}
+{"app": "ruby", "build": "jit", "mode": 1, "rep": 6, "warmup": false, "seconds": 1.1703055360000008, "rss_kib": 74296, "output": "{\"secs\":1.134,\"rss_kb\":74448,\"checksum\":32103}"}
+{"app": "ruby", "build": "jit", "mode": 1, "rep": 7, "warmup": false, "seconds": 1.2036636770000086, "rss_kib": 74160, "output": "{\"secs\":1.169,\"rss_kb\":74372,\"checksum\":32103}"}
+{"app": "ruby", "build": "jit", "mode": 0, "rep": 7, "warmup": false, "seconds": 1.334049456999992, "rss_kib": 74132, "output": "{\"secs\":1.301,\"rss_kb\":74348,\"checksum\":32103}"}
+{"app": "ruby", "build": "jit", "mode": 0, "rep": 8, "warmup": false, "seconds": 1.383329788000026, "rss_kib": 74048, "output": "{\"secs\":1.343,\"rss_kb\":74144,\"checksum\":32103}"}
+{"app": "ruby", "build": "jit", "mode": 1, "rep": 8, "warmup": false, "seconds": 1.1774290619999874, "rss_kib": 74152, "output": "{\"secs\":1.109,\"rss_kb\":74428,\"checksum\":32103}"}
+{"app": "ruby", "build": "jit", "mode": 1, "rep": 9, "warmup": false, "seconds": 1.1944569830000091, "rss_kib": 74048, "output": "{\"secs\":1.159,\"rss_kb\":74140,\"checksum\":32103}"}
+{"app": "ruby", "build": "jit", "mode": 0, "rep": 9, "warmup": false, "seconds": 1.179191947999982, "rss_kib": 74060, "output": "{\"secs\":1.103,\"rss_kb\":74304,\"checksum\":32103}"}
+{"app": "python", "build": "v2", "mode": 0, "rep": 0, "warmup": true, "seconds": 4.677243239999939, "rss_kib": 502884, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "v2", "mode": 1, "rep": 0, "warmup": true, "seconds": 3.3269298290000506, "rss_kib": 452608, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "v2", "mode": 1, "rep": 1, "warmup": false, "seconds": 3.444354258999965, "rss_kib": 452608, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "v2", "mode": 0, "rep": 1, "warmup": false, "seconds": 3.1575659999999743, "rss_kib": 502884, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "v2", "mode": 0, "rep": 2, "warmup": false, "seconds": 3.3659428170000183, "rss_kib": 502808, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "v2", "mode": 1, "rep": 2, "warmup": false, "seconds": 3.1361372820000497, "rss_kib": 452608, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "v2", "mode": 1, "rep": 3, "warmup": false, "seconds": 3.100798520000012, "rss_kib": 452608, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "v2", "mode": 0, "rep": 3, "warmup": false, "seconds": 3.2972978070000636, "rss_kib": 502812, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "v2", "mode": 0, "rep": 4, "warmup": false, "seconds": 3.493374976000041, "rss_kib": 502884, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "v2", "mode": 1, "rep": 4, "warmup": false, "seconds": 2.9989763769999627, "rss_kib": 452608, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "v2", "mode": 1, "rep": 5, "warmup": false, "seconds": 2.846670324999991, "rss_kib": 452608, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "v2", "mode": 0, "rep": 5, "warmup": false, "seconds": 3.459811214999945, "rss_kib": 502880, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "v2", "mode": 0, "rep": 6, "warmup": false, "seconds": 3.285875881000038, "rss_kib": 502868, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "v2", "mode": 1, "rep": 6, "warmup": false, "seconds": 3.098478691999958, "rss_kib": 452608, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "v2", "mode": 1, "rep": 7, "warmup": false, "seconds": 3.3537141330000395, "rss_kib": 452608, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "v2", "mode": 0, "rep": 7, "warmup": false, "seconds": 3.0952808270000105, "rss_kib": 502880, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "v2", "mode": 0, "rep": 8, "warmup": false, "seconds": 3.456276979999984, "rss_kib": 502664, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "v2", "mode": 1, "rep": 8, "warmup": false, "seconds": 3.3770070489999853, "rss_kib": 452608, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "v2", "mode": 1, "rep": 9, "warmup": false, "seconds": 3.0114562380000507, "rss_kib": 452608, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "v2", "mode": 0, "rep": 9, "warmup": false, "seconds": 4.074960841999996, "rss_kib": 502884, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "jit", "mode": 0, "rep": 0, "warmup": true, "seconds": 4.148364618999949, "rss_kib": 502832, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "jit", "mode": 1, "rep": 0, "warmup": true, "seconds": 3.381479728000045, "rss_kib": 452608, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "jit", "mode": 1, "rep": 1, "warmup": false, "seconds": 3.450655488000052, "rss_kib": 452608, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "jit", "mode": 0, "rep": 1, "warmup": false, "seconds": 3.502135399999929, "rss_kib": 502884, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "jit", "mode": 0, "rep": 2, "warmup": false, "seconds": 3.4307463420000204, "rss_kib": 502900, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "jit", "mode": 1, "rep": 2, "warmup": false, "seconds": 3.1919076079999513, "rss_kib": 452608, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "jit", "mode": 1, "rep": 3, "warmup": false, "seconds": 3.0741582410000774, "rss_kib": 452608, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "jit", "mode": 0, "rep": 3, "warmup": false, "seconds": 3.226048676000005, "rss_kib": 502900, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "jit", "mode": 0, "rep": 4, "warmup": false, "seconds": 3.2449572699999862, "rss_kib": 502900, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "jit", "mode": 1, "rep": 4, "warmup": false, "seconds": 3.017653035999956, "rss_kib": 452608, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "jit", "mode": 1, "rep": 5, "warmup": false, "seconds": 2.9829948899999863, "rss_kib": 452608, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "jit", "mode": 0, "rep": 5, "warmup": false, "seconds": 3.0739842120000276, "rss_kib": 502888, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "jit", "mode": 0, "rep": 6, "warmup": false, "seconds": 3.4844131449999622, "rss_kib": 502896, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "jit", "mode": 1, "rep": 6, "warmup": false, "seconds": 3.0191571350000004, "rss_kib": 452608, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "jit", "mode": 1, "rep": 7, "warmup": false, "seconds": 2.890324703000033, "rss_kib": 452636, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "jit", "mode": 0, "rep": 7, "warmup": false, "seconds": 3.2695015780000176, "rss_kib": 502760, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "jit", "mode": 0, "rep": 8, "warmup": false, "seconds": 3.4624920049999446, "rss_kib": 502900, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "jit", "mode": 1, "rep": 8, "warmup": false, "seconds": 2.813113541000007, "rss_kib": 452608, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "jit", "mode": 1, "rep": 9, "warmup": false, "seconds": 2.9619388910000453, "rss_kib": 452632, "output": "python-churn checksum 625726"}
+{"app": "python", "build": "jit", "mode": 0, "rep": 9, "warmup": false, "seconds": 3.180261281000071, "rss_kib": 502900, "output": "python-churn checksum 625726"}

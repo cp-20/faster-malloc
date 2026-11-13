@@ -1,0 +1,23 @@
+[
+  {
+    "index": 2,
+    "reason": "nginx RSS file read empty during in-place sampler write",
+    "app": "nginx",
+    "allocator": "v2",
+    "rep": 0
+  },
+  {
+    "index": 10,
+    "reason": "harness shell parse error after editing active script",
+    "app": "pgbench",
+    "allocator": "jit",
+    "rep": 0
+  },
+  {
+    "index": 16,
+    "reason": "GNU time missing from base image",
+    "app": "ruby",
+    "allocator": "glibc",
+    "rep": 0
+  }
+]

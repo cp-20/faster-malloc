@@ -1,6 +1,8 @@
-# 0033 — Realloc growth by mapping extension (no copy, no move)
+# 0033 — Realloc growth by mapping extension: built, measured, rejected
 
-*Status: Accepted (2026-11-13). Contemporaneous. Round 6, item 4.*
+*Status: Rejected (2026-11-13). Contemporaneous. Round 6, item 4.
+The prototype was implemented, strace-verified, and reverted
+(commit af80cec) after the measurements below.*
 
 ## Background
 
@@ -12,55 +14,74 @@ and needs to grow, extend *the mapping* — never relocate
 anything, never shrink anything.
 
 The baseline cost of the status quo, on `bench/rgrow.c`
-(40 KB → 32 MB by doubling, touching each new page; quiet-box
-session, 60 rounds): glibc 0.101 s, **v2 0.287 s**, mimalloc
-0.411 s, jemalloc 3.362 s. v2's growth was alloc+copy every
+(40 KB → 32 MB by doubling, touching each new page): glibc
+0.101 s, **v2 0.287 s**, mimalloc 0.411 s, jemalloc 3.362 s in
+the pre-round session. v2's growth was alloc+copy every
 doubling, and the large cache could not help: its bucket search
 looks at the request's bucket and the next one up, so the block
 freed by the previous doubling (2× the new request) is never
 found for it.
 
-## Decision
+## The prototype
 
-In `fm_realloc`'s large, unaligned path, after the existing
-fits-in-mapping check fails, try:
+In `fm_realloc`'s large, unaligned path, after the
+fits-in-mapping check failed:
 
 ```c
 mmap(map_end, extra, PROT_READ|PROT_WRITE,
      MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE, -1, 0)
 ```
 
-- On success at exactly `map_end`, the mapping is longer:
-  `sp->map_size` grows, `user_size` updates, the same pointer is
-  returned. No bytes copied, header unmoved, nothing else in the
-  allocator changes — the block later frees, caches, and unmaps
-  by its recorded `map_size` as usual.
-- On any failure (something already lives at the end address),
-  fall back to the pre-existing alloc+copy path unchanged.
-  `MAP_FIXED_NOREPLACE` guarantees the probe can never clobber
-  an existing mapping.
+Success at exactly `map_end` grows `sp->map_size` in place — no
+copy, header unmoved. Any failure falls back to alloc+copy.
+Correctness was never in question: the full battery passed with
+it, and `MAP_FIXED_NOREPLACE` cannot clobber anything.
 
-Scope limits kept deliberately: unaligned large blocks only
-(aligned allocations have a different header geometry), growth
-only, extension sized exactly to the page-rounded need (the
-caller that keeps doubling pays one syscall per doubling and no
-copy; VA headroom games are not this item).
+## Why it was rejected: the address is never free
 
-## Expected effects beyond rgrow
+The adoption rule for this item was "a clean win", and the
+mechanism never gets to win. Strace counts of the extension
+attempt on the final build:
 
-ADR 0031 found ~3.1 MB of lua's peak was the large cache holding
-realloc-doubling's superseded blocks. A block that extends in
-place leaves no superseded block: the trail component of
-grow-by-realloc workloads (sqlite's page cache growth is the
-same shape) should shrink wherever the adjacent VA is free,
-which for a mostly-private heap is the common case.
+| workload | attempts | successes |
+|---|---|---|
+| rgrow (200 rounds of doubling) | 1,600 | **0** |
+| sqlite speedtest1 --size 30 | 355 | **0** |
+| lua churn2 (peak delta) | — | no change (18,892 vs 18,936 KB) |
 
-## Measurements
+Every attempt failed with `EEXIST`. The reason is structural:
+this allocator's heap is *densely packed by construction*. Small
+spans are themselves 64 KiB mappings, large mappings are placed
+by the kernel adjacently (top-down) against them and against
+each other, and the large cache deliberately retains freed
+mappings in the same neighbourhood. A growing block is, in
+every real heap measured, never the topmost mapping — something
+the allocator itself owns almost always sits at its end
+address. The one heap shape where the extension would fire (a
+lone growing buffer with free VA above it) did not occur in any
+of the round's workloads.
 
-Recorded in the round-6 log with the full battery: rgrow before/
-after on a quiet box, the realloc rows of the micro suite, and
-sqlite + lua cells from the app matrix. (Battery: test_basic
-incl. profiles, stress ×3, check, mt both modes, earlyinit,
-tlsexit — green; FM_DEBUG build clean. The extension path is
-exercised by test_basic's large-realloc cases and by rgrow
-itself, whose checksum-equivalent output is unchanged.)
+glibc's rgrow advantage comes from a different mechanism —
+mremap on chunks drawn from its own arena/mmap management,
+where the growing chunk's surroundings are arranged by the same
+allocator. Chasing that means revisiting ADR 0018's ground,
+which this round does not do on the strength of one micro
+benchmark: rgrow's absolute numbers (v2 ~0.20 s vs glibc ~0.04 s
+on 2,200 growths of a synthetic doubler) matter to real programs
+only through workloads like sqlite's, and sqlite's cell in the
+app matrix is contention/noise-bound on this VM (ADR 0023's
+finding stands).
+
+## What survives
+
+- The diagnosis of the large-cache bucket search (request bucket
+  + 1 only) as the reason the growth trail never recycles: still
+  true, still bounded by ADR 0019's cache budget, and the trail
+  itself is quantified in ADR 0031 (~3.1 MB of lua's peak).
+  Widening the realloc-path search is a smaller, separate idea —
+  round-7 material, to be taken up only with a workload that
+  shows it mattering.
+- The strace methodology: counting mechanism attempts vs
+  successes settled in one run what timing on this noisy VM
+  could not (an apparent ~10% rgrow improvement between builds
+  was unattributable once the success count proved to be zero).

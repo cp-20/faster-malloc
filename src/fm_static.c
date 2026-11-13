@@ -11,6 +11,8 @@
 
 #include "fm_core.h"
 
+FM_Config fm_cfg;
+pthread_once_t fm_cfg_once = PTHREAD_ONCE_INIT;
 FM_Central fm_central[CLASS_COUNT];
 __thread void *fm_head[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 __thread void *fm_tail[CLASS_COUNT] __attribute__((tls_model("initial-exec")));

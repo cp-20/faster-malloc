@@ -81,4 +81,13 @@ EOF
     cd ..
     echo "built gitfix"
 fi
+# Round-5 cell binaries (bench/apps/*.c) live next to this script,
+# not in work/: wrk (nginx load generator) and bursty (server-shaped
+# heap).  Binaries are gitignored; build them here so the cells
+# are reproducible from a fresh checkout.
+cd "$WORK/.."
+gcc -O2 -pthread -o wrk wrk.c
+gcc -O2 -o bursty bursty.c
+echo "built wrk, bursty"
+
 echo "prep done: $(du -sh $WORK | cut -f1) in $WORK"

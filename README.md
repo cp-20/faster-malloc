@@ -492,7 +492,16 @@ What the JIT does demonstrate is real and useful:
   threads). In the round-3 app matrix, Python's peak fell from 565 MB to
   506 MB (glibc 440 MB) and Node's from 544 MB to 512 MB (glibc 438 MB);
   the remaining excess is small-span retention, which is still only
-  released by `malloc_trim`.
+  released by `malloc_trim`. Round 4 closed that too: dead spans now
+  age out and return automatically (ADR 0020), and round 5's
+  occupancy-aware placement consolidates survivors so partially-free
+  spans can empty in the first place (ADR 0024; the consolidation
+  probe's settled RSS halved, 17.8 → 9.0 MB, past glibc's 19.2 MB).
+  What remains is the live-set floor: peaks that are still allocated
+  when the process is measured, and survivors scattered across
+  partially-free spans (bursty's idle RSS: v2 88 MB, mimalloc
+  54 MB — mimalloc purges at page granularity, v2 at span
+  granularity; see docs/round5-2026-11-13.md).
 * **Locality on reuse.** glibc and mimalloc have fewer D1 misses than v2 on
   the churn workload (1264 and 1815 against 1731) because they reuse the
   same physical page over and over, while v2's blocks come from many
@@ -516,15 +525,21 @@ What the JIT does demonstrate is real and useful:
    that mimalloc gets from its page abstraction. This is the single biggest
    known gap between v2 and mimalloc. *(Round 2: tried, measured,
    rejected as the default path — ADR 0014. The untried variant is
-   regrouping at refill time instead of at flush.)*
+   regrouping at refill time instead of at flush. Round 4: tried,
+   rejected the same way — ADR 0021.)*
 2. **Return memory to the OS** under pressure, and implement `malloc_trim`
    properly. *(Round 2: `malloc_trim` done — ADR 0015; automatic return
    under pressure measured and rejected in ADR 0014. Round 3: retention
-   bounded instead — ADR 0017 thread-exit drain, ADR 0019 cache budget;
-   automatic small-span return remains the open problem.)*
+   bounded instead — ADR 0017 thread-exit drain, ADR 0019 cache budget.
+   Round 4: automatic small-span return landed, with dead-span
+   ageing — ADR 0020. Round 5: occupancy-aware placement (ADR 0024),
+   runtime profiles FM_PROFILE (ADR 0027), and an idle-process
+   release design pass, deferred — ADR 0029.)*
 3. **Make the JIT's dispatch branchless** — a jump table indexed by
    `size >> 4` would replace N range tests with one indirect branch, which
    might make specialisation profitable for diverse workloads too.
+   *(Round 4: implemented and measured; never beat the range tests —
+   ADR 0022.)*
 4. ~~**Grow large blocks with mremap instead of copying**~~ — *(Round 3:
    tried three ways, rejected with measurements — ADR 0018. The large
    cache already plays the role glibc's retained heap plays, and the
@@ -577,6 +592,12 @@ docs/
   adr/             architecture decision records, incl. rejected
                    experiments (0014 shaping, 0015 malloc_trim)
   round2-2026-11-12.md   the round-2 log (locality, trim, demo)
+  round3-2026-11-12.md   the round-3 log (real-app matrix, JIT startup
+                   fix, thread-exit drain, cache budget)
+  round4-2026-11-12.md   the round-4 log (automatic span return,
+                   two rejected regrouping/dispatch variants)
+  round5-2026-11-13.md   the round-5 log (occupancy placement,
+                   profiles, four new use-case cells, Pareto scoring)
 ```
 
 ### Correctness

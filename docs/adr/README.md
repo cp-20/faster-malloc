@@ -32,3 +32,13 @@ mark were recorded when the work was done.
 | [0017](0017-thread-exit-drain.md) | Drain per-thread caches when a thread exits | Accepted |
 | [0018](0018-mremap-realloc-growth-rejected.md) | Realloc growth via mremap: rejected (the cache already does this job) | Rejected after measurement |
 | [0019](0019-large-cache-budget.md) | Large-block cache budget: 4 GiB → 64 MiB | Accepted |
+| [0020](0020-automatic-span-release.md) | Automatic small-span return: the census on a cadence, with dead-span ageing | Accepted (instant-release form rejected inside) |
+| [0021](0021-refill-side-regrouping-rejected.md) | Refill-side regrouping: measured, and rejected like its flush-side parent | Rejected after measurement |
+| [0022](0022-jit-jump-table-rejected.md) | JIT jump-table dispatch: implemented, measured, rejected | Rejected after measurement |
+| [0023](0023-sqlite-node-gap-investigation.md) | The sqlite and node "gaps": profiled; no allocator defect found | Closed — investigation record |
+| [0024](0024-occupancy-aware-placement.md) | Occupancy-aware placement: the census rebuild regroups survivors by span | Accepted |
+| [0025](0025-cross-scenario-ring-race.md) | bench/micro `cross` measured its own race; the ring is now bounded | Accepted (harness fix) |
+| [0026](0026-release-constant-sweep.md) | Release-constant sweep: the defaults sit on a flat optimum | Accepted |
+| [0027](0027-runtime-configuration-profiles.md) | Runtime configuration: FM_PROFILE and per-knob FM_* overrides | Accepted |
+| [0028](0028-size-class-audit.md) | Size-class audit: the table is already well-placed; waste lives elsewhere | Accepted (no change) |
+| [0029](0029-idle-process-release.md) | Idle-process release: design pass, implementation deferred | Deferred |

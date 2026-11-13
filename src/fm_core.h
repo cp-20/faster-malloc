@@ -186,6 +186,135 @@ extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec"
 #define FM_RELEASE_AGE_MS 100u
 #define FM_RELEASE_INTERVAL_MS 10u
 #define FM_RELEASE_MAX_INTERVAL_MS 5000u
+
+/* ADR 0024: in the census rebuild, a span needs at least this many
+ * blocks in central to earn its own span-pure batch; smaller
+ * fragments merge into one mixed residue batch.  Bounds the batch
+ * count (and batch-pool growth) a regrouping census can create at
+ * roughly total_free_blocks / FM_REGROUP_MIN + 1. */
+#define FM_REGROUP_MIN 8u
+
+/* ------------------------------------------------------------------ */
+/* runtime configuration (ADR 0027)                                    */
+/*                                                                     */
+/* The tuning constants above are defaults, not destiny: different   */
+/* deployments weight speed against footprint differently, so the    */
+/* slow-path knobs are runtime-configurable through the environment. */
+/*                                                                     */
+/*   FM_PROFILE            balanced (default) | throughput |         */
+/*                         footprint -- named presets for the whole  */
+/*                         knob set                                  */
+/*   FM_RELEASE_AGE_MS     dead-span ageing before automatic unmap   */
+/*   FM_RELEASE_KEEP       dead spans retained per class             */
+/*   FM_RELEASE_MIN_DEPTH  central batches before a class is         */
+/*                         eligible for census                       */
+/*   FM_RELEASE_INTERVAL_MS     census interval floor                */
+/*   FM_RELEASE_MAX_INTERVAL_MS census interval cap                  */
+/*   FM_RELEASE_WALK_DIV   walked blocks per ms of census interval   */
+/*   FM_REGROUP_MIN        min blocks for a span-pure batch (0024)   */
+/*   FM_LCACHE_MAX_BYTES   per-thread large-block cache budget       */
+/*                                                                     */
+/* Individual FM_* variables override the profile.  Values are       */
+/* parsed once, lazily, on the first slow path (pthread_once), so    */
+/* no hot path ever reads the environment and pre-constructor        */
+/* callers (ADR 0016) are unaffected.  Malformed or out-of-range     */
+/* values fall back to the profile/default value, clamped.           */
+/* ------------------------------------------------------------------ */
+
+typedef struct FM_Config {
+    uint32_t release_age_ms;
+    uint32_t release_keep;
+    uint32_t release_min_depth;
+    uint32_t release_interval_ms;
+    uint32_t release_max_interval_ms;
+    uint32_t release_walk_div;
+    uint32_t regroup_min;
+    uint64_t lcache_max_bytes;
+} FM_Config;
+
+extern FM_Config fm_cfg;
+extern pthread_once_t fm_cfg_once;
+
+static void fm_config_init(void)
+{
+    FM_Config c;
+    c.release_age_ms = FM_RELEASE_AGE_MS;
+    c.release_keep = FM_RELEASE_KEEP;
+    c.release_min_depth = FM_RELEASE_MIN_DEPTH;
+    c.release_interval_ms = FM_RELEASE_INTERVAL_MS;
+    c.release_max_interval_ms = FM_RELEASE_MAX_INTERVAL_MS;
+    c.release_walk_div = 100;
+    c.regroup_min = FM_REGROUP_MIN;
+    c.lcache_max_bytes = FM_LCACHE_MAX_BYTES;
+
+    const char *prof = getenv("FM_PROFILE");
+    if (prof) {
+        if (!strcmp(prof, "throughput")) {
+            /* Touch the release machinery as rarely as possible;
+             * cache large blocks generously. */
+            c.release_age_ms = 1000;
+            c.release_keep = 8;
+            c.release_min_depth = 16;
+            c.release_interval_ms = 50;
+            c.release_max_interval_ms = 30000;
+            c.release_walk_div = 25;
+            c.lcache_max_bytes = 256ull << 20;
+        } else if (!strcmp(prof, "footprint")) {
+            /* Return memory eagerly; keep almost nothing back. */
+            c.release_age_ms = 25;
+            c.release_keep = 0;
+            c.release_min_depth = 2;
+            c.release_interval_ms = 5;
+            c.release_max_interval_ms = 1000;
+            c.release_walk_div = 400;
+            c.lcache_max_bytes = 8ull << 20;
+        }
+        /* "balanced" and anything unrecognised keep the defaults. */
+    }
+
+    /* Individual overrides, clamped to sane ranges. */
+    struct { const char *name; uint32_t *dst; uint32_t lo, hi; } num[] = {
+        { "FM_RELEASE_AGE_MS", &c.release_age_ms, 0, 600000 },
+        { "FM_RELEASE_KEEP", &c.release_keep, 0, 1024 },
+        { "FM_RELEASE_MIN_DEPTH", &c.release_min_depth, 1, 65536 },
+        { "FM_RELEASE_INTERVAL_MS", &c.release_interval_ms, 1, 600000 },
+        { "FM_RELEASE_MAX_INTERVAL_MS", &c.release_max_interval_ms, 1, 3600000 },
+        { "FM_RELEASE_WALK_DIV", &c.release_walk_div, 1, 1000000 },
+        { "FM_REGROUP_MIN", &c.regroup_min, 1, 4096 },
+    };
+    for (size_t i = 0; i < sizeof(num) / sizeof(num[0]); i++) {
+        const char *v = getenv(num[i].name);
+        if (!v || !*v)
+            continue;
+        char *end = NULL;
+        unsigned long long x = strtoull(v, &end, 10);
+        if (end == v)
+            continue;
+        if (x < num[i].lo)
+            x = num[i].lo;
+        if (x > num[i].hi)
+            x = num[i].hi;
+        *num[i].dst = (uint32_t)x;
+    }
+    const char *lb = getenv("FM_LCACHE_MAX_BYTES");
+    if (lb && *lb) {
+        char *end = NULL;
+        unsigned long long x = strtoull(lb, &end, 10);
+        if (end != lb) {
+            if (x > (16ull << 30))
+                x = 16ull << 30;
+            c.lcache_max_bytes = x;
+        }
+    }
+    if (c.release_max_interval_ms < c.release_interval_ms)
+        c.release_max_interval_ms = c.release_interval_ms;
+
+    fm_cfg = c;
+}
+
+/* Read a config field, initialising on first use.  Callers are all
+ * slow paths (refill, flush, census, large alloc/free). */
+#define FM_CFG() (pthread_once(&fm_cfg_once, fm_config_init), &fm_cfg)
 /* The automatic census sets the class's next interval from how
  * many blocks it had to walk (one ms per 100 walked blocks,
  * doubling when it finds nothing, capped at 5 s): the walk is the
@@ -497,6 +626,15 @@ typedef struct FM_CensusEnt {
     uintptr_t span;
     uint32_t cnt;
     uint32_t dead;
+    /* ADR 0024: survivor-chain accumulators for the regrouping
+     * rebuild.  While the census puts the central stack back, each
+     * span's surviving blocks are linked into one chain (ahead ..
+     * atail, acnt blocks) so they can be re-published as a single
+     * span-pure batch.  Only used during the rebuild phase, after
+     * counting is complete. */
+    void *ahead;
+    void *atail;
+    uint32_t acnt;
 } FM_CensusEnt;
 
 typedef struct FM_Census {
@@ -548,6 +686,9 @@ static int fm_census_grow(FM_Census *c)
             e->span = old[i].span;
             e->cnt = old[i].cnt;
             e->dead = 0;
+            e->ahead = NULL;
+            e->atail = NULL;
+            e->acnt = 0;
             c->used++;
         }
     }
@@ -555,14 +696,21 @@ static int fm_census_grow(FM_Census *c)
     return 1;
 }
 
+/* Set when a census add had to be dropped (table full and growth
+ * failed): counts are then underestimates, which is safe for the
+ * dead-span proof but invalidates exact-count assertions. */
+static int fm_census_dropped;
+
 /* Add n to the free-block count of `span`.  On allocation failure the
  * add is dropped: the span simply will not look free, which is safe. */
 static void fm_census_add(FM_Census *c, uintptr_t span, uint32_t n)
 {
     if (!c->ents)
         return;
-    if ((c->used + 1) * 2 >= c->cap && !fm_census_grow(c) && c->used + 1 >= c->cap)
+    if ((c->used + 1) * 2 >= c->cap && !fm_census_grow(c) && c->used + 1 >= c->cap) {
+        fm_census_dropped = 1;
         return;
+    }
     FM_CensusEnt *e = fm_census_slot(c, span);
     if (e->span == 0) {
         e->span = span;
@@ -585,6 +733,14 @@ static FM_CensusEnt *fm_census_find(FM_Census *c, uintptr_t span)
  * count are accounted wholesale and do not count).  The automatic
  * release reads them to set the class's next interval (ADR 0020). */
 static uint32_t fm_census_marked, fm_census_waiting, fm_census_walked;
+
+/* qsort comparator: descending free-block count (ADR 0024). */
+static int fm_batch_count_desc(const void *a, const void *b)
+{
+    uint32_t ca = (*(FM_Batch *const *)a)->count & FM_COUNT_MASK;
+    uint32_t cb = (*(FM_Batch *const *)b)->count & FM_COUNT_MASK;
+    return (ca < cb) - (ca > cb);
+}
 
 /* Census one class and unmap its provably-dead spans, retaining up
  * to `keep` dead spans (their blocks stay on the central stack for
@@ -629,6 +785,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
     /* Count free blocks per span.  Span-pure batches with a recorded
      * count are accounted wholesale; anything else is walked. */
     fm_census_walked = 0;
+    fm_census_dropped = 0;
     for (FM_Batch *b = all; b; b = b->next) {
         uint32_t cnt = b->count & FM_COUNT_MASK;
         if (cnt && (b->count & FM_COUNT_PURE)) {
@@ -669,7 +826,8 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             } else if (!sp->dead_mark) {
                 sp->dead_mark = now ? now : 1;
                 fm_census_marked++;
-            } else if ((uint32_t)(now - sp->dead_mark) >= FM_RELEASE_AGE_MS) {
+            } else if ((uint32_t)(now - sp->dead_mark) >=
+                       FM_CFG()->release_age_ms) {
                 e->dead = 1;
             } else {
                 fm_census_waiting++;
@@ -694,47 +852,71 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
         }
     }
 
-    /* Rebuild: keep survivors, drop blocks of dead spans. */
-    FM_Batch *survivors = NULL;
+    /* Rebuild, regrouped by span (ADR 0024).  The pre-0024 rebuild
+     * preserved the incoming batch boundaries, so the stack a
+     * refill saw was a pile of mixed batches whose span composition
+     * nobody knew: refill placement was span-blind, and recycled
+     * blocks sprayed across every span of the class, pinning
+     * partially-free spans forever.  The census has just visited
+     * every block anyway, so grouping the survivors per span here
+     * costs no extra walk -- span-pure batches splice wholesale and
+     * mixed batches are already being walked block by block.  Each
+     * span's survivors accumulate into one chain on its census
+     * entry; blocks of dead spans are dropped.  Spans whose census
+     * entry is missing (an add was dropped when the table could not
+     * grow) keep their blocks in the residue chain: losing blocks
+     * would leak them, grouping them wrongly would corrupt the
+     * census's counts, so they stay mixed and merely ungrouped. */
+    void *res_head = NULL, *res_tail = NULL;
+    uint32_t res_cnt = 0;
     for (FM_Batch *b = all; b;) {
         FM_Batch *nextb = b->next;
         uint32_t cnt = b->count & FM_COUNT_MASK;
         if (cnt && (b->count & FM_COUNT_PURE)) {
             FM_CensusEnt *e = fm_census_find(&cen, (uintptr_t)b->head & SPAN_MASK);
             if (e && e->dead) {
-                fm_batch_release(b);
+                /* the whole chain dies with its span */
+            } else if (e) {
+                if (e->atail)
+                    *(void **)e->atail = b->head;
+                else
+                    e->ahead = b->head;
+                e->atail = b->tail;
+                e->acnt += cnt;
             } else {
-                b->next = survivors;
-                survivors = b;
+                if (res_tail)
+                    *(void **)res_tail = b->head;
+                else
+                    res_head = b->head;
+                res_tail = b->tail;
+                res_cnt += cnt;
             }
         } else {
-            void *shead = NULL, *stail = NULL;
-            uint32_t scnt = 0;
             void *p = b->head;
             while (p) {
                 void *nx = *(void **)p;
                 FM_CensusEnt *e = fm_census_find(&cen, (uintptr_t)p & SPAN_MASK);
-                if (!(e && e->dead)) {
-                    if (stail)
-                        *(void **)stail = p;
+                if (e && e->dead) {
+                    /* block dies with its span */
+                } else if (e) {
+                    if (e->atail)
+                        *(void **)e->atail = p;
                     else
-                        shead = p;
-                    stail = p;
-                    scnt++;
+                        e->ahead = p;
+                    e->atail = p;
+                    e->acnt++;
+                } else {
+                    if (res_tail)
+                        *(void **)res_tail = p;
+                    else
+                        res_head = p;
+                    res_tail = p;
+                    res_cnt++;
                 }
                 p = nx;
             }
-            if (shead) {
-                *(void **)stail = NULL;
-                b->head = shead;
-                b->tail = stail;
-                b->count = scnt; /* mixed, count known */
-                b->next = survivors;
-                survivors = b;
-            } else {
-                fm_batch_release(b);
-            }
         }
+        fm_batch_release(b);
         b = nextb;
     }
 
@@ -751,10 +933,70 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
         }
     }
 
-    while (survivors) {
-        FM_Batch *nx = survivors->next;
-        fm_central_push(cls, survivors);
-        survivors = nx;
+    /* Form the new stack: one span-pure batch per surviving span
+     * with at least FM_REGROUP_MIN blocks in central; smaller
+     * fragments merge into a single mixed residue batch.  Batches
+     * are pushed largest-free-count first, so the batch a refill
+     * pops from the top of the stack is the FULLEST span's -- the
+     * span least likely to empty soon -- while the freest spans'
+     * blocks rest at the bottom, untouched, so those spans can
+     * still empty completely as their last live blocks die.  The
+     * residue is pushed last (top): its fragments come from the
+     * fullest spans of all. */
+    FM_Batch **order = NULL;
+    size_t norder = 0;
+    if (cen.used)
+        order = mmap(NULL, cen.used * sizeof(FM_Batch *),
+                     PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,
+                     -1, 0);
+    if (order == MAP_FAILED)
+        order = NULL;
+    for (size_t i = 0; i < cen.cap; i++) {
+        FM_CensusEnt *e = &cen.ents[i];
+        if (!e->span || !e->acnt)
+            continue;
+        *(void **)e->atail = NULL;
+#ifdef FM_DEBUG
+        if (!fm_census_dropped && !e->dead && e->acnt != e->cnt) {
+            fprintf(stderr, "[fm] REGROUP COUNT cls=%u span=%p acnt=%u "
+                            "cnt=%u\n",
+                    cls, (void *)e->span, e->acnt, e->cnt);
+            abort();
+        }
+#endif
+        if (e->acnt >= FM_CFG()->regroup_min && order) {
+            FM_Batch *nb = fm_batch_alloc();
+            if (nb) {
+                nb->head = e->ahead;
+                nb->tail = e->atail;
+                nb->count = e->acnt | FM_COUNT_PURE;
+                nb->next = NULL;
+                order[norder++] = nb;
+                continue;
+            }
+        }
+        if (e->acnt >= FM_CFG()->regroup_min) {
+            /* No sort array or no batch header: publish directly
+             * (unsorted) rather than dropping the blocks. */
+            fm_publish2(e->ahead, e->atail, cls, e->acnt, 1);
+        } else {
+            if (res_tail)
+                *(void **)res_tail = e->ahead;
+            else
+                res_head = e->ahead;
+            res_tail = e->atail;
+            res_cnt += e->acnt;
+        }
+    }
+    if (order) {
+        qsort(order, norder, sizeof(FM_Batch *), fm_batch_count_desc);
+        for (size_t i = 0; i < norder; i++)
+            fm_central_push(cls, order[i]);
+        munmap(order, cen.used * sizeof(FM_Batch *));
+    }
+    if (res_head) {
+        *(void **)res_tail = NULL;
+        fm_publish2(res_head, res_tail, cls, res_cnt, 0);
     }
     fm_census_destroy(&cen);
     fm_in_census = was_in_census;
@@ -774,25 +1016,26 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
  * release needs. */
 static void fm_release_maybe(uint32_t cls, uint32_t now)
 {
+    const FM_Config *cfg = FM_CFG();
     FM_Central *c = &fm_central[cls];
     if (atomic_load_explicit(&c->depth, memory_order_relaxed) <
-        FM_RELEASE_MIN_DEPTH)
+        cfg->release_min_depth)
         return;
     uint32_t interval = atomic_load_explicit(&c->interval_ms,
                                               memory_order_relaxed);
     uint32_t last = atomic_load_explicit(&c->last_census_ms, memory_order_relaxed);
     if (last && (uint32_t)(now - last) <
-                    (interval ? interval : FM_RELEASE_INTERVAL_MS))
+                    (interval ? interval : cfg->release_interval_ms))
         return;
     atomic_store_explicit(&c->last_census_ms, now, memory_order_relaxed);
-    size_t released = fm_trim_class(cls, FM_RELEASE_KEEP, 0);
-    uint32_t next = fm_census_walked / 100;
-    if (next < FM_RELEASE_INTERVAL_MS)
-        next = FM_RELEASE_INTERVAL_MS;
+    size_t released = fm_trim_class(cls, cfg->release_keep, 0);
+    uint32_t next = fm_census_walked / cfg->release_walk_div;
+    if (next < cfg->release_interval_ms)
+        next = cfg->release_interval_ms;
     if (released == 0 && fm_census_marked == 0 && fm_census_waiting == 0)
         next *= 2;
-    if (next > FM_RELEASE_MAX_INTERVAL_MS)
-        next = FM_RELEASE_MAX_INTERVAL_MS;
+    if (next > cfg->release_max_interval_ms)
+        next = cfg->release_max_interval_ms;
     atomic_store_explicit(&c->interval_ms, next, memory_order_relaxed);
 }
 
@@ -878,7 +1121,7 @@ static inline void fm_large_free(FM_Span *sp, void *p)
         size_t ms = sp->map_size;
         int b = 63 - __builtin_clzll(fm_large_usable(sp));
         if (b < FM_LCACHE_BUCKETS &&
-            fm_lcache_bytes + ms <= FM_LCACHE_MAX_BYTES) {
+            fm_lcache_bytes + ms <= FM_CFG()->lcache_max_bytes) {
             sp->lnext = (uintptr_t)fm_lcache_head[b];
             fm_lcache_head[b] = sp;
             fm_lcache_bytes += ms;

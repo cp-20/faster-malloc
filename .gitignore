@@ -11,6 +11,8 @@
 /bench/instr
 /bench/check
 /bench/rgrow
+/bench/apps/wrk
+/bench/apps/bursty
 /test_basic
 
 # Editor / OS noise
@@ -22,3 +24,6 @@
 callgrind.out.*
 cachegrind.out.*
 bench/apps/work/
+/bench/consprobe
+/bench/decayprobe
+/bench/usableprobe

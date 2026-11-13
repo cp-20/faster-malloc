@@ -1,0 +1,112 @@
+     17124:	find library=libc.so.6 [0]; searching
+     17124:	 search cache=/etc/ld.so.cache
+     17124:	  trying file=/lib/x86_64-linux-gnu/libc.so.6
+     17124:	
+     17124:	find library=libm.so.6 [0]; searching
+     17124:	 search cache=/etc/ld.so.cache
+     17124:	  trying file=/lib/x86_64-linux-gnu/libm.so.6
+     17124:	
+     17124:	find library=libgcc_s.so.1 [0]; searching
+     17124:	 search cache=/etc/ld.so.cache
+     17124:	  trying file=/lib/x86_64-linux-gnu/libgcc_s.so.1
+     17124:	
+     17124:	
+     17124:	calling preinit: /workspace/faster-malloc/work/sanitizers/early-recheck/address-static-early
+     17124:	
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: __isoc99_printf (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: __isoc99_sprintf (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: __isoc99_snprintf (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: __isoc99_fprintf (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: __isoc99_vprintf (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: __isoc99_vsprintf (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: __isoc99_vsnprintf (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: __isoc99_vfprintf (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: __b64_ntop (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: __b64_pton (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: pthread_mutexattr_getrobust_np (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdrmem_create (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdrstdio_create (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_short (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_u_short (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_int (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_u_int (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_long (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_u_long (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_hyper (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_u_hyper (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_longlong_t (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_u_longlong_t (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_int8_t (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_uint8_t (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_int16_t (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_uint16_t (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_int32_t (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_uint32_t (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_int64_t (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_uint64_t (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_quad_t (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_u_quad_t (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_bool (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_enum (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_char (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_u_char (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_float (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_double (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_bytes (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_string (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdrrec_create (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: xdr_destroy (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: __cxa_throw (fatal)
+     17124:	/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so: error: symbol lookup error: undefined symbol: swift_demangle (fatal)
+     17124:	
+     17124:	calling init: /lib64/ld-linux-x86-64.so.2
+     17124:	
+     17124:	
+     17124:	calling init: /lib/x86_64-linux-gnu/libc.so.6
+     17124:	
+     17124:	
+     17124:	calling init: /lib/x86_64-linux-gnu/libgcc_s.so.1
+     17124:	
+     17124:	
+     17124:	calling init: /lib/x86_64-linux-gnu/libm.so.6
+     17124:	
+     17124:	
+     17124:	calling init: /usr/lib/gcc/x86_64-linux-gnu/14/libasan.so
+     17124:	
+     17124:	
+     17124:	calling init: /workspace/faster-malloc/work/sanitizers/early-recheck/address-static-early.so
+     17124:	
+     17124:	
+     17124:	calling init: /workspace/faster-malloc/work/sanitizers/early-recheck/address-static.so
+     17124:	
+     17124:	
+     17124:	initialize program: /workspace/faster-malloc/work/sanitizers/early-recheck/address-static-early
+     17124:	
+     17124:	
+     17124:	transferring control: /workspace/faster-malloc/work/sanitizers/early-recheck/address-static-early
+     17124:	
+     17124:	
+     17124:	calling fini:  [0]
+     17124:	
+     17124:	
+     17124:	calling fini: /workspace/faster-malloc/work/sanitizers/early-recheck/address-static.so [0]
+     17124:	
+     17124:	
+     17124:	calling fini: /workspace/faster-malloc/work/sanitizers/early-recheck/address-static-early.so [0]
+     17124:	
+     17124:	
+     17124:	calling fini: /usr/lib/gcc/x86_64-linux-gnu/14/libasan.so [0]
+     17124:	
+     17124:	
+     17124:	calling fini: /lib/x86_64-linux-gnu/libm.so.6 [0]
+     17124:	
+     17124:	
+     17124:	calling fini: /lib/x86_64-linux-gnu/libgcc_s.so.1 [0]
+     17124:	
+     17124:	
+     17124:	calling fini: /lib/x86_64-linux-gnu/libc.so.6 [0]
+     17124:	
+     17124:	
+     17124:	calling fini: /lib64/ld-linux-x86-64.so.2 [0]
+     17124:	
+earlyinit ok

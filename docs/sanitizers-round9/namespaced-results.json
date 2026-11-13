@@ -1,0 +1,1394 @@
+[
+  {
+    "mode": "address-static",
+    "test": "build",
+    "status": 0,
+    "seconds": 2.98
+  },
+  {
+    "mode": "address-static",
+    "test": "compile-test_basic",
+    "status": 0,
+    "seconds": 0.98
+  },
+  {
+    "mode": "address-static",
+    "test": "compile-stress",
+    "status": 0,
+    "seconds": 0.55
+  },
+  {
+    "mode": "address-static",
+    "test": "compile-check",
+    "status": 0,
+    "seconds": 0.17
+  },
+  {
+    "mode": "address-static",
+    "test": "compile-mt",
+    "status": 0,
+    "seconds": 0.32
+  },
+  {
+    "mode": "address-static",
+    "test": "compile-realloccache",
+    "status": 0,
+    "seconds": 0.17
+  },
+  {
+    "mode": "address-static",
+    "test": "compile-idlefork",
+    "status": 0,
+    "seconds": 0.32
+  },
+  {
+    "mode": "address-static",
+    "test": "basic",
+    "status": 0,
+    "seconds": 1.46
+  },
+  {
+    "mode": "address-static",
+    "test": "basic-balanced",
+    "status": 0,
+    "seconds": 0.79
+  },
+  {
+    "mode": "address-static",
+    "test": "basic-throughput",
+    "status": 0,
+    "seconds": 0.58
+  },
+  {
+    "mode": "address-static",
+    "test": "basic-footprint",
+    "status": 0,
+    "seconds": 1.69
+  },
+  {
+    "mode": "address-static",
+    "test": "stress-1",
+    "status": 0,
+    "seconds": 9.04
+  },
+  {
+    "mode": "address-static",
+    "test": "stress-2",
+    "status": 0,
+    "seconds": 12.76
+  },
+  {
+    "mode": "address-static",
+    "test": "stress-3",
+    "status": 0,
+    "seconds": 10.04
+  },
+  {
+    "mode": "address-static",
+    "test": "check",
+    "status": 0,
+    "seconds": 1.24
+  },
+  {
+    "mode": "address-static",
+    "test": "mt-0",
+    "status": 0,
+    "seconds": 0.18
+  },
+  {
+    "mode": "address-static",
+    "test": "realloccache-0",
+    "status": 0,
+    "seconds": 0.02
+  },
+  {
+    "mode": "address-static",
+    "test": "idlefork-0",
+    "status": 0,
+    "seconds": 9.71
+  },
+  {
+    "mode": "address-static",
+    "test": "mt-1",
+    "status": 0,
+    "seconds": 0.28
+  },
+  {
+    "mode": "address-static",
+    "test": "realloccache-1",
+    "status": 0,
+    "seconds": 0.03
+  },
+  {
+    "mode": "address-static",
+    "test": "idlefork-1",
+    "status": 0,
+    "seconds": 9.84
+  },
+  {
+    "mode": "address-static",
+    "test": "both-basic",
+    "status": 0,
+    "seconds": 2.44
+  },
+  {
+    "mode": "address-static",
+    "test": "both-stress",
+    "status": 0,
+    "seconds": 8.71
+  },
+  {
+    "mode": "address-static",
+    "test": "debug-build",
+    "status": 0,
+    "seconds": 2.68
+  },
+  {
+    "mode": "address-static",
+    "test": "debug-stress",
+    "status": 0,
+    "seconds": 11.89
+  },
+  {
+    "mode": "address-jit",
+    "test": "build",
+    "status": 0,
+    "seconds": 2.87
+  },
+  {
+    "mode": "address-jit",
+    "test": "compile-test_basic",
+    "status": 0,
+    "seconds": 0.81
+  },
+  {
+    "mode": "address-jit",
+    "test": "compile-stress",
+    "status": 0,
+    "seconds": 0.58
+  },
+  {
+    "mode": "address-jit",
+    "test": "compile-check",
+    "status": 0,
+    "seconds": 0.22
+  },
+  {
+    "mode": "address-jit",
+    "test": "compile-mt",
+    "status": 0,
+    "seconds": 0.31
+  },
+  {
+    "mode": "address-jit",
+    "test": "compile-realloccache",
+    "status": 0,
+    "seconds": 0.12
+  },
+  {
+    "mode": "address-jit",
+    "test": "compile-idlefork",
+    "status": 0,
+    "seconds": 0.56
+  },
+  {
+    "mode": "address-jit",
+    "test": "compile-jitprofile",
+    "status": 0,
+    "seconds": 0.23
+  },
+  {
+    "mode": "address-jit",
+    "test": "jitprofile",
+    "status": 0,
+    "seconds": 0.07
+  },
+  {
+    "mode": "address-jit",
+    "test": "basic",
+    "status": 0,
+    "seconds": 1.49
+  },
+  {
+    "mode": "address-jit",
+    "test": "basic-balanced",
+    "status": 0,
+    "seconds": 1.64
+  },
+  {
+    "mode": "address-jit",
+    "test": "basic-throughput",
+    "status": 0,
+    "seconds": 2.55
+  },
+  {
+    "mode": "address-jit",
+    "test": "basic-footprint",
+    "status": 0,
+    "seconds": 1.2
+  },
+  {
+    "mode": "address-jit",
+    "test": "stress-1",
+    "status": 0,
+    "seconds": 9.0
+  },
+  {
+    "mode": "address-jit",
+    "test": "stress-2",
+    "status": 0,
+    "seconds": 9.3
+  },
+  {
+    "mode": "address-jit",
+    "test": "stress-3",
+    "status": 0,
+    "seconds": 8.7
+  },
+  {
+    "mode": "address-jit",
+    "test": "check",
+    "status": 0,
+    "seconds": 0.6
+  },
+  {
+    "mode": "address-jit",
+    "test": "mt-0",
+    "status": 0,
+    "seconds": 0.1
+  },
+  {
+    "mode": "address-jit",
+    "test": "realloccache-0",
+    "status": 0,
+    "seconds": 0.02
+  },
+  {
+    "mode": "address-jit",
+    "test": "idlefork-0",
+    "status": 0,
+    "seconds": 9.81
+  },
+  {
+    "mode": "address-jit",
+    "test": "mt-1",
+    "status": 0,
+    "seconds": 0.19
+  },
+  {
+    "mode": "address-jit",
+    "test": "realloccache-1",
+    "status": 0,
+    "seconds": 0.02
+  },
+  {
+    "mode": "address-jit",
+    "test": "idlefork-1",
+    "status": 0,
+    "seconds": 9.59
+  },
+  {
+    "mode": "address-jit",
+    "test": "both-basic",
+    "status": 0,
+    "seconds": 1.78
+  },
+  {
+    "mode": "address-jit",
+    "test": "both-stress",
+    "status": 0,
+    "seconds": 6.88
+  },
+  {
+    "mode": "address-jit",
+    "test": "debug-build",
+    "status": 0,
+    "seconds": 1.34
+  },
+  {
+    "mode": "address-jit",
+    "test": "debug-stress",
+    "status": 0,
+    "seconds": 7.89
+  },
+  {
+    "mode": "thread-static",
+    "test": "build",
+    "status": 0,
+    "seconds": 2.3
+  },
+  {
+    "mode": "thread-static",
+    "test": "object-test_basic",
+    "status": 0,
+    "seconds": 0.67
+  },
+  {
+    "mode": "thread-static",
+    "test": "compile-test_basic",
+    "status": 0,
+    "seconds": 0.1
+  },
+  {
+    "mode": "thread-static",
+    "test": "object-stress",
+    "status": 0,
+    "seconds": 0.7
+  },
+  {
+    "mode": "thread-static",
+    "test": "compile-stress",
+    "status": 0,
+    "seconds": 0.13
+  },
+  {
+    "mode": "thread-static",
+    "test": "object-check",
+    "status": 0,
+    "seconds": 0.2
+  },
+  {
+    "mode": "thread-static",
+    "test": "compile-check",
+    "status": 0,
+    "seconds": 0.11
+  },
+  {
+    "mode": "thread-static",
+    "test": "object-mt",
+    "status": 0,
+    "seconds": 0.3
+  },
+  {
+    "mode": "thread-static",
+    "test": "compile-mt",
+    "status": 0,
+    "seconds": 0.1
+  },
+  {
+    "mode": "thread-static",
+    "test": "object-realloccache",
+    "status": 0,
+    "seconds": 0.18
+  },
+  {
+    "mode": "thread-static",
+    "test": "compile-realloccache",
+    "status": 0,
+    "seconds": 0.11
+  },
+  {
+    "mode": "thread-static",
+    "test": "object-idlefork",
+    "status": 0,
+    "seconds": 0.39
+  },
+  {
+    "mode": "thread-static",
+    "test": "compile-idlefork",
+    "status": 0,
+    "seconds": 0.1
+  },
+  {
+    "mode": "thread-static",
+    "test": "basic",
+    "status": 0,
+    "seconds": 2.03
+  },
+  {
+    "mode": "thread-static",
+    "test": "basic-balanced",
+    "status": 0,
+    "seconds": 1.53
+  },
+  {
+    "mode": "thread-static",
+    "test": "basic-throughput",
+    "status": 0,
+    "seconds": 3.49
+  },
+  {
+    "mode": "thread-static",
+    "test": "basic-footprint",
+    "status": 0,
+    "seconds": 3.02
+  },
+  {
+    "mode": "thread-static",
+    "test": "stress-1",
+    "status": 0,
+    "seconds": 15.28
+  },
+  {
+    "mode": "thread-static",
+    "test": "stress-2",
+    "status": 0,
+    "seconds": 14.64
+  },
+  {
+    "mode": "thread-static",
+    "test": "stress-3",
+    "status": 0,
+    "seconds": 16.96
+  },
+  {
+    "mode": "thread-static",
+    "test": "check",
+    "status": 0,
+    "seconds": 1.85
+  },
+  {
+    "mode": "thread-static",
+    "test": "mt-0",
+    "status": 0,
+    "seconds": 0.25
+  },
+  {
+    "mode": "thread-static",
+    "test": "realloccache-0",
+    "status": 0,
+    "seconds": 0.06
+  },
+  {
+    "mode": "thread-static",
+    "test": "idlefork-0",
+    "status": 0,
+    "seconds": 10.09
+  },
+  {
+    "mode": "thread-static",
+    "test": "mt-1",
+    "status": 66,
+    "seconds": 0.18
+  },
+  {
+    "mode": "thread-static",
+    "test": "realloccache-1",
+    "status": 0,
+    "seconds": 0.03
+  },
+  {
+    "mode": "thread-static",
+    "test": "idlefork-1",
+    "status": 0,
+    "seconds": 10.69
+  },
+  {
+    "mode": "thread-static",
+    "test": "both-basic",
+    "status": 0,
+    "seconds": 6.09
+  },
+  {
+    "mode": "thread-static",
+    "test": "both-stress",
+    "status": 0,
+    "seconds": 21.18
+  },
+  {
+    "mode": "thread-static",
+    "test": "debug-build",
+    "status": 0,
+    "seconds": 1.4
+  },
+  {
+    "mode": "thread-static",
+    "test": "debug-stress",
+    "status": 0,
+    "seconds": 20.25
+  },
+  {
+    "mode": "thread-jit",
+    "test": "build",
+    "status": 0,
+    "seconds": 1.03
+  },
+  {
+    "mode": "thread-jit",
+    "test": "object-test_basic",
+    "status": 0,
+    "seconds": 0.17
+  },
+  {
+    "mode": "thread-jit",
+    "test": "compile-test_basic",
+    "status": 0,
+    "seconds": 0.03
+  },
+  {
+    "mode": "thread-jit",
+    "test": "object-stress",
+    "status": 0,
+    "seconds": 0.22
+  },
+  {
+    "mode": "thread-jit",
+    "test": "compile-stress",
+    "status": 0,
+    "seconds": 0.03
+  },
+  {
+    "mode": "thread-jit",
+    "test": "object-check",
+    "status": 0,
+    "seconds": 0.06
+  },
+  {
+    "mode": "thread-jit",
+    "test": "compile-check",
+    "status": 0,
+    "seconds": 0.03
+  },
+  {
+    "mode": "thread-jit",
+    "test": "object-mt",
+    "status": 0,
+    "seconds": 0.07
+  },
+  {
+    "mode": "thread-jit",
+    "test": "compile-mt",
+    "status": 0,
+    "seconds": 0.03
+  },
+  {
+    "mode": "thread-jit",
+    "test": "object-realloccache",
+    "status": 0,
+    "seconds": 0.04
+  },
+  {
+    "mode": "thread-jit",
+    "test": "compile-realloccache",
+    "status": 0,
+    "seconds": 0.03
+  },
+  {
+    "mode": "thread-jit",
+    "test": "object-idlefork",
+    "status": 0,
+    "seconds": 0.1
+  },
+  {
+    "mode": "thread-jit",
+    "test": "compile-idlefork",
+    "status": 0,
+    "seconds": 0.03
+  },
+  {
+    "mode": "thread-jit",
+    "test": "compile-jitprofile",
+    "status": 0,
+    "seconds": 0.07
+  },
+  {
+    "mode": "thread-jit",
+    "test": "jitprofile",
+    "status": 0,
+    "seconds": 0.96
+  },
+  {
+    "mode": "thread-jit",
+    "test": "basic",
+    "status": 0,
+    "seconds": 3.6
+  },
+  {
+    "mode": "thread-jit",
+    "test": "basic-balanced",
+    "status": 0,
+    "seconds": 1.72
+  },
+  {
+    "mode": "thread-jit",
+    "test": "basic-throughput",
+    "status": 0,
+    "seconds": 3.71
+  },
+  {
+    "mode": "thread-jit",
+    "test": "basic-footprint",
+    "status": 0,
+    "seconds": 1.41
+  },
+  {
+    "mode": "thread-jit",
+    "test": "stress-1",
+    "status": 0,
+    "seconds": 9.66
+  },
+  {
+    "mode": "thread-jit",
+    "test": "stress-2",
+    "status": 0,
+    "seconds": 9.13
+  },
+  {
+    "mode": "thread-jit",
+    "test": "stress-3",
+    "status": 0,
+    "seconds": 12.87
+  },
+  {
+    "mode": "thread-jit",
+    "test": "check",
+    "status": 0,
+    "seconds": 0.48
+  },
+  {
+    "mode": "thread-jit",
+    "test": "mt-0",
+    "status": 0,
+    "seconds": 0.09
+  },
+  {
+    "mode": "thread-jit",
+    "test": "realloccache-0",
+    "status": 0,
+    "seconds": 0.03
+  },
+  {
+    "mode": "thread-jit",
+    "test": "idlefork-0",
+    "status": 0,
+    "seconds": 9.82
+  },
+  {
+    "mode": "thread-jit",
+    "test": "mt-1",
+    "status": 66,
+    "seconds": 0.12
+  },
+  {
+    "mode": "thread-jit",
+    "test": "realloccache-1",
+    "status": 0,
+    "seconds": 0.05
+  },
+  {
+    "mode": "thread-jit",
+    "test": "idlefork-1",
+    "status": 0,
+    "seconds": 10.72
+  },
+  {
+    "mode": "thread-jit",
+    "test": "both-basic",
+    "status": 0,
+    "seconds": 3.02
+  },
+  {
+    "mode": "thread-jit",
+    "test": "both-stress",
+    "status": 0,
+    "seconds": 11.1
+  },
+  {
+    "mode": "thread-jit",
+    "test": "debug-build",
+    "status": 0,
+    "seconds": 1.43
+  },
+  {
+    "mode": "thread-jit",
+    "test": "debug-stress",
+    "status": 0,
+    "seconds": 12.7
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "build",
+    "status": 0,
+    "seconds": 1.5
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "compile-test_basic",
+    "status": 0,
+    "seconds": 0.69
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "compile-stress",
+    "status": 0,
+    "seconds": 0.59
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "compile-check",
+    "status": 0,
+    "seconds": 0.35
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "compile-mt",
+    "status": 0,
+    "seconds": 0.29
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "compile-realloccache",
+    "status": 0,
+    "seconds": 0.19
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "compile-idlefork",
+    "status": 0,
+    "seconds": 0.36
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "basic",
+    "status": 0,
+    "seconds": 1.89
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "basic-balanced",
+    "status": 0,
+    "seconds": 1.35
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "basic-throughput",
+    "status": 0,
+    "seconds": 1.49
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "basic-footprint",
+    "status": 0,
+    "seconds": 1.3
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "stress-1",
+    "status": 0,
+    "seconds": 7.66
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "stress-2",
+    "status": 0,
+    "seconds": 7.21
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "stress-3",
+    "status": 0,
+    "seconds": 7.09
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "check",
+    "status": 0,
+    "seconds": 0.26
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "mt-0",
+    "status": 0,
+    "seconds": 0.04
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "realloccache-0",
+    "status": 0,
+    "seconds": 0.01
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "idlefork-0",
+    "status": 0,
+    "seconds": 9.29
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "mt-1",
+    "status": 0,
+    "seconds": 0.02
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "realloccache-1",
+    "status": 0,
+    "seconds": 0.01
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "idlefork-1",
+    "status": 0,
+    "seconds": 9.42
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "both-basic",
+    "status": 0,
+    "seconds": 1.33
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "both-stress",
+    "status": 0,
+    "seconds": 7.02
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "debug-build",
+    "status": 0,
+    "seconds": 1.48
+  },
+  {
+    "mode": "address-undefined-static",
+    "test": "debug-stress",
+    "status": 0,
+    "seconds": 7.2
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "build",
+    "status": 0,
+    "seconds": 2.57
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "compile-test_basic",
+    "status": 0,
+    "seconds": 0.74
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "compile-stress",
+    "status": 0,
+    "seconds": 0.66
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "compile-check",
+    "status": 0,
+    "seconds": 0.56
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "compile-mt",
+    "status": 0,
+    "seconds": 0.51
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "compile-realloccache",
+    "status": 0,
+    "seconds": 0.23
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "compile-idlefork",
+    "status": 0,
+    "seconds": 0.36
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "compile-jitprofile",
+    "status": 0,
+    "seconds": 0.17
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "jitprofile",
+    "status": 0,
+    "seconds": 0.17
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "basic",
+    "status": 0,
+    "seconds": 1.31
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "basic-balanced",
+    "status": 0,
+    "seconds": 1.75
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "basic-throughput",
+    "status": 0,
+    "seconds": 0.71
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "basic-footprint",
+    "status": 0,
+    "seconds": 0.7
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "stress-1",
+    "status": 0,
+    "seconds": 7.12
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "stress-2",
+    "status": 0,
+    "seconds": 7.28
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "stress-3",
+    "status": 0,
+    "seconds": 7.47
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "check",
+    "status": 0,
+    "seconds": 0.27
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "mt-0",
+    "status": 0,
+    "seconds": 0.04
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "realloccache-0",
+    "status": 0,
+    "seconds": 0.01
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "idlefork-0",
+    "status": 0,
+    "seconds": 9.44
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "mt-1",
+    "status": 0,
+    "seconds": 0.02
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "realloccache-1",
+    "status": 0,
+    "seconds": 0.01
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "idlefork-1",
+    "status": 0,
+    "seconds": 9.48
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "both-basic",
+    "status": 0,
+    "seconds": 1.22
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "both-stress",
+    "status": 0,
+    "seconds": 7.27
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "debug-build",
+    "status": 0,
+    "seconds": 1.94
+  },
+  {
+    "mode": "address-undefined-jit",
+    "test": "debug-stress",
+    "status": 0,
+    "seconds": 7.1
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "build",
+    "status": 0,
+    "seconds": 1.08
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "object-test_basic",
+    "status": 0,
+    "seconds": 0.21
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "compile-test_basic",
+    "status": 0,
+    "seconds": 0.06
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "object-stress",
+    "status": 0,
+    "seconds": 0.17
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "compile-stress",
+    "status": 0,
+    "seconds": 0.05
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "object-check",
+    "status": 0,
+    "seconds": 0.05
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "compile-check",
+    "status": 0,
+    "seconds": 0.05
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "object-mt",
+    "status": 0,
+    "seconds": 0.07
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "compile-mt",
+    "status": 0,
+    "seconds": 0.05
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "object-realloccache",
+    "status": 0,
+    "seconds": 0.05
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "compile-realloccache",
+    "status": 0,
+    "seconds": 0.05
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "object-idlefork",
+    "status": 0,
+    "seconds": 0.11
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "compile-idlefork",
+    "status": 0,
+    "seconds": 0.06
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "basic",
+    "status": 0,
+    "seconds": 2.75
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "basic-balanced",
+    "status": 0,
+    "seconds": 2.15
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "basic-throughput",
+    "status": 0,
+    "seconds": 1.89
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "basic-footprint",
+    "status": 0,
+    "seconds": 1.48
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "stress-1",
+    "status": 0,
+    "seconds": 11.0
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "stress-2",
+    "status": 0,
+    "seconds": 11.0
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "stress-3",
+    "status": 0,
+    "seconds": 10.04
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "check",
+    "status": 0,
+    "seconds": 0.4
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "mt-0",
+    "status": 0,
+    "seconds": 0.11
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "realloccache-0",
+    "status": 0,
+    "seconds": 0.04
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "idlefork-0",
+    "status": 0,
+    "seconds": 9.7
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "mt-1",
+    "status": 66,
+    "seconds": 0.05
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "realloccache-1",
+    "status": 0,
+    "seconds": 0.03
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "idlefork-1",
+    "status": 0,
+    "seconds": 10.59
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "both-basic",
+    "status": 0,
+    "seconds": 3.18
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "both-stress",
+    "status": 0,
+    "seconds": 12.55
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "debug-build",
+    "status": 0,
+    "seconds": 1.17
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "debug-stress",
+    "status": 0,
+    "seconds": 10.32
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "build",
+    "status": 0,
+    "seconds": 1.48
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "object-test_basic",
+    "status": 0,
+    "seconds": 0.18
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "compile-test_basic",
+    "status": 0,
+    "seconds": 0.05
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "object-stress",
+    "status": 0,
+    "seconds": 0.18
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "compile-stress",
+    "status": 0,
+    "seconds": 0.05
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "object-check",
+    "status": 0,
+    "seconds": 0.06
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "compile-check",
+    "status": 0,
+    "seconds": 0.06
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "object-mt",
+    "status": 0,
+    "seconds": 0.09
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "compile-mt",
+    "status": 0,
+    "seconds": 0.05
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "object-realloccache",
+    "status": 0,
+    "seconds": 0.06
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "compile-realloccache",
+    "status": 0,
+    "seconds": 0.05
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "object-idlefork",
+    "status": 0,
+    "seconds": 0.11
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "compile-idlefork",
+    "status": 0,
+    "seconds": 0.05
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "compile-jitprofile",
+    "status": 0,
+    "seconds": 0.11
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "jitprofile",
+    "status": 0,
+    "seconds": 0.68
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "basic",
+    "status": 0,
+    "seconds": 2.41
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "basic-balanced",
+    "status": 0,
+    "seconds": 2.11
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "basic-throughput",
+    "status": 0,
+    "seconds": 1.47
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "basic-footprint",
+    "status": 0,
+    "seconds": 1.61
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "stress-1",
+    "status": 0,
+    "seconds": 10.74
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "stress-2",
+    "status": 0,
+    "seconds": 10.07
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "stress-3",
+    "status": 0,
+    "seconds": 10.15
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "check",
+    "status": 0,
+    "seconds": 0.38
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "mt-0",
+    "status": 0,
+    "seconds": 0.08
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "realloccache-0",
+    "status": 0,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "idlefork-0",
+    "status": 0,
+    "seconds": 9.58
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "mt-1",
+    "status": 66,
+    "seconds": 0.05
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "realloccache-1",
+    "status": 0,
+    "seconds": 0.02
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "idlefork-1",
+    "status": 0,
+    "seconds": 10.62
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "both-basic",
+    "status": 0,
+    "seconds": 3.31
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "both-stress",
+    "status": 0,
+    "seconds": 12.52
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "debug-build",
+    "status": 0,
+    "seconds": 1.65
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "debug-stress",
+    "status": 0,
+    "seconds": 10.15
+  }
+]

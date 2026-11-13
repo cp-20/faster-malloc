@@ -20,6 +20,9 @@ for lib in libfastmalloc2.so libjitmalloc.so; do
     done
     FM_REALLOC_CACHE_SEARCH=1 FM_IDLE_RELEASE=1 ./test_basic
     FM_REALLOC_CACHE_SEARCH=1 FM_IDLE_RELEASE=1 FM_PURGE_MIN_PAGES=1 ./bench/stress
+    if [[ $lib == libjitmalloc.so ]]; then
+        FM_JIT_MINSHARE=101 ./bench/jitprofile
+    fi
     unset LD_PRELOAD
 done
 bash bench/earlyinit.sh

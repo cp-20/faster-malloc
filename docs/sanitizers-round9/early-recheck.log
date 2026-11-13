@@ -1,0 +1,72 @@
+
+=== address-static-build-normal (exit 0) ===
+
+=== address-static-compile-early-lib (exit 0) ===
+
+=== address-static-compile-early-main (exit 0) ===
+
+=== address-static-earlyinit (exit 0) ===
+earlyinit ok
+
+=== address-jit-build-normal (exit 0) ===
+
+=== address-jit-compile-early-lib (exit 0) ===
+
+=== address-jit-compile-early-main (exit 0) ===
+
+=== address-jit-earlyinit (exit 0) ===
+earlyinit ok
+
+=== thread-static-build-normal (exit 0) ===
+
+=== thread-static-compile-early-lib (exit 0) ===
+
+=== thread-static-compile-early-main (exit 0) ===
+
+=== thread-static-earlyinit (exit 0) ===
+earlyinit ok
+
+=== thread-jit-build-normal (exit 0) ===
+
+=== thread-jit-compile-early-lib (exit 0) ===
+
+=== thread-jit-compile-early-main (exit 0) ===
+
+=== thread-jit-earlyinit (exit 0) ===
+earlyinit ok
+
+=== address-undefined-static-build-normal (exit 0) ===
+
+=== address-undefined-static-compile-early-lib (exit 0) ===
+
+=== address-undefined-static-compile-early-main (exit 0) ===
+
+=== address-undefined-static-earlyinit (exit 0) ===
+earlyinit ok
+
+=== address-undefined-jit-build-normal (exit 0) ===
+
+=== address-undefined-jit-compile-early-lib (exit 0) ===
+
+=== address-undefined-jit-compile-early-main (exit 0) ===
+
+=== address-undefined-jit-earlyinit (exit 0) ===
+earlyinit ok
+
+=== thread-undefined-static-build-normal (exit 0) ===
+
+=== thread-undefined-static-compile-early-lib (exit 0) ===
+
+=== thread-undefined-static-compile-early-main (exit 0) ===
+
+=== thread-undefined-static-earlyinit (exit 0) ===
+earlyinit ok
+
+=== thread-undefined-jit-build-normal (exit 0) ===
+
+=== thread-undefined-jit-compile-early-lib (exit 0) ===
+
+=== thread-undefined-jit-compile-early-main (exit 0) ===
+
+=== thread-undefined-jit-earlyinit (exit 0) ===
+earlyinit ok

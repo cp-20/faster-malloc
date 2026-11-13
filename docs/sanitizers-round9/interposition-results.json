@@ -1,0 +1,1016 @@
+[
+  {
+    "mode": "undefined",
+    "test": "build",
+    "status": 0,
+    "seconds": 6.3
+  },
+  {
+    "mode": "undefined",
+    "test": "round7",
+    "status": 0,
+    "seconds": 221.54
+  },
+  {
+    "mode": "undefined",
+    "test": "debug-build",
+    "status": 0,
+    "seconds": 5.36
+  },
+  {
+    "mode": "undefined",
+    "test": "libfastmalloc2.so-debug-stress",
+    "status": 0,
+    "seconds": 9.41
+  },
+  {
+    "mode": "undefined",
+    "test": "libjitmalloc.so-debug-stress",
+    "status": 0,
+    "seconds": 11.23
+  },
+  {
+    "mode": "address",
+    "test": "build",
+    "status": 0,
+    "seconds": 5.14
+  },
+  {
+    "mode": "address",
+    "test": "round7",
+    "status": 1,
+    "seconds": 0.01
+  },
+  {
+    "mode": "address",
+    "test": "v2-basic",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "v2-basic-balanced",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "v2-basic-throughput",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "v2-basic-footprint",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "v2-stress-1",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "v2-stress-2",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "v2-stress-3",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "v2-check",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "v2-mt-local",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "v2-mt-cross",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "v2-realloccache-0",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "v2-idlefork-0",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "v2-realloccache-1",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "v2-idlefork-1",
+    "status": 1,
+    "seconds": 0.01
+  },
+  {
+    "mode": "address",
+    "test": "v2-both-basic",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "v2-both-stress",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "jit-basic",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "jit-basic-balanced",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "jit-basic-throughput",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "jit-basic-footprint",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "jit-stress-1",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "jit-stress-2",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "jit-stress-3",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "jit-check",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "jit-mt-local",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "jit-mt-cross",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "jit-realloccache-0",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "jit-idlefork-0",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "jit-realloccache-1",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "jit-idlefork-1",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "jit-both-basic",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "jit-both-stress",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "earlyinit",
+    "status": 1,
+    "seconds": 0.16
+  },
+  {
+    "mode": "address",
+    "test": "tlsexit",
+    "status": 1,
+    "seconds": 0.47
+  },
+  {
+    "mode": "address",
+    "test": "idlelifecycle",
+    "status": 1,
+    "seconds": 0.42
+  },
+  {
+    "mode": "address",
+    "test": "jitprofile",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "debug-build",
+    "status": 0,
+    "seconds": 3.78
+  },
+  {
+    "mode": "address",
+    "test": "libfastmalloc2.so-debug-stress",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address",
+    "test": "libjitmalloc.so-debug-stress",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "thread",
+    "test": "build",
+    "status": 0,
+    "seconds": 5.04
+  },
+  {
+    "mode": "thread",
+    "test": "round7",
+    "status": 139,
+    "seconds": 0.02
+  },
+  {
+    "mode": "thread",
+    "test": "v2-basic",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "v2-basic-balanced",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "v2-basic-throughput",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "v2-basic-footprint",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "v2-stress-1",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "v2-stress-2",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "v2-stress-3",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "v2-check",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "v2-mt-local",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "v2-mt-cross",
+    "status": -11,
+    "seconds": 0.02
+  },
+  {
+    "mode": "thread",
+    "test": "v2-realloccache-0",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "v2-idlefork-0",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "v2-realloccache-1",
+    "status": -11,
+    "seconds": 0.02
+  },
+  {
+    "mode": "thread",
+    "test": "v2-idlefork-1",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "v2-both-basic",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "v2-both-stress",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "jit-basic",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "jit-basic-balanced",
+    "status": -11,
+    "seconds": 0.02
+  },
+  {
+    "mode": "thread",
+    "test": "jit-basic-throughput",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "jit-basic-footprint",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "jit-stress-1",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "jit-stress-2",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "jit-stress-3",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "jit-check",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "jit-mt-local",
+    "status": -11,
+    "seconds": 0.02
+  },
+  {
+    "mode": "thread",
+    "test": "jit-mt-cross",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "jit-realloccache-0",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "jit-idlefork-0",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "jit-realloccache-1",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "jit-idlefork-1",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "jit-both-basic",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "jit-both-stress",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "earlyinit",
+    "status": 1,
+    "seconds": 0.22
+  },
+  {
+    "mode": "thread",
+    "test": "tlsexit",
+    "status": 1,
+    "seconds": 0.37
+  },
+  {
+    "mode": "thread",
+    "test": "idlelifecycle",
+    "status": 66,
+    "seconds": 0.2
+  },
+  {
+    "mode": "thread",
+    "test": "jitprofile",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "debug-build",
+    "status": 0,
+    "seconds": 2.02
+  },
+  {
+    "mode": "thread",
+    "test": "libfastmalloc2.so-debug-stress",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread",
+    "test": "libjitmalloc.so-debug-stress",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "address-undefined",
+    "test": "build",
+    "status": 0,
+    "seconds": 7.99
+  },
+  {
+    "mode": "address-undefined",
+    "test": "round7",
+    "status": 1,
+    "seconds": 0.02
+  },
+  {
+    "mode": "address-undefined",
+    "test": "v2-basic",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "v2-basic-balanced",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "v2-basic-throughput",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "v2-basic-footprint",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "v2-stress-1",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "v2-stress-2",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "v2-stress-3",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "v2-check",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "v2-mt-local",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "v2-mt-cross",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "v2-realloccache-0",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "v2-idlefork-0",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "v2-realloccache-1",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "v2-idlefork-1",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "v2-both-basic",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "v2-both-stress",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "jit-basic",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "jit-basic-balanced",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "jit-basic-throughput",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "jit-basic-footprint",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "jit-stress-1",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "jit-stress-2",
+    "status": 1,
+    "seconds": 0.01
+  },
+  {
+    "mode": "address-undefined",
+    "test": "jit-stress-3",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "jit-check",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "jit-mt-local",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "jit-mt-cross",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "jit-realloccache-0",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "jit-idlefork-0",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "jit-realloccache-1",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "jit-idlefork-1",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "jit-both-basic",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "jit-both-stress",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "earlyinit",
+    "status": 1,
+    "seconds": 0.19
+  },
+  {
+    "mode": "address-undefined",
+    "test": "tlsexit",
+    "status": 1,
+    "seconds": 0.59
+  },
+  {
+    "mode": "address-undefined",
+    "test": "idlelifecycle",
+    "status": 1,
+    "seconds": 0.22
+  },
+  {
+    "mode": "address-undefined",
+    "test": "jitprofile",
+    "status": 1,
+    "seconds": 0.0
+  },
+  {
+    "mode": "address-undefined",
+    "test": "debug-build",
+    "status": 0,
+    "seconds": 4.38
+  },
+  {
+    "mode": "address-undefined",
+    "test": "libfastmalloc2.so-debug-stress",
+    "status": 1,
+    "seconds": 0.01
+  },
+  {
+    "mode": "address-undefined",
+    "test": "libjitmalloc.so-debug-stress",
+    "status": 1,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "build",
+    "status": 0,
+    "seconds": 9.54
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "round7",
+    "status": 139,
+    "seconds": 0.09
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "v2-basic",
+    "status": -11,
+    "seconds": 0.02
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "v2-basic-balanced",
+    "status": -11,
+    "seconds": 0.03
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "v2-basic-throughput",
+    "status": -11,
+    "seconds": 0.03
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "v2-basic-footprint",
+    "status": -11,
+    "seconds": 0.07
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "v2-stress-1",
+    "status": -11,
+    "seconds": 0.02
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "v2-stress-2",
+    "status": -11,
+    "seconds": 0.06
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "v2-stress-3",
+    "status": -11,
+    "seconds": 0.02
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "v2-check",
+    "status": -11,
+    "seconds": 0.02
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "v2-mt-local",
+    "status": -11,
+    "seconds": 0.05
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "v2-mt-cross",
+    "status": -11,
+    "seconds": 0.03
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "v2-realloccache-0",
+    "status": -11,
+    "seconds": 0.02
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "v2-idlefork-0",
+    "status": -11,
+    "seconds": 0.05
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "v2-realloccache-1",
+    "status": -11,
+    "seconds": 0.02
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "v2-idlefork-1",
+    "status": -11,
+    "seconds": 0.02
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "v2-both-basic",
+    "status": -11,
+    "seconds": 0.06
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "v2-both-stress",
+    "status": -11,
+    "seconds": 0.03
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "jit-basic",
+    "status": -11,
+    "seconds": 0.06
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "jit-basic-balanced",
+    "status": -11,
+    "seconds": 0.04
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "jit-basic-throughput",
+    "status": -11,
+    "seconds": 0.05
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "jit-basic-footprint",
+    "status": -11,
+    "seconds": 0.03
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "jit-stress-1",
+    "status": -11,
+    "seconds": 0.09
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "jit-stress-2",
+    "status": -11,
+    "seconds": 0.06
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "jit-stress-3",
+    "status": -11,
+    "seconds": 0.11
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "jit-check",
+    "status": -11,
+    "seconds": 0.09
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "jit-mt-local",
+    "status": -11,
+    "seconds": 0.02
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "jit-mt-cross",
+    "status": -11,
+    "seconds": 0.03
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "jit-realloccache-0",
+    "status": -11,
+    "seconds": 0.04
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "jit-idlefork-0",
+    "status": -11,
+    "seconds": 0.02
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "jit-realloccache-1",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "jit-idlefork-1",
+    "status": -11,
+    "seconds": 0.02
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "jit-both-basic",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "jit-both-stress",
+    "status": -11,
+    "seconds": 0.05
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "earlyinit",
+    "status": 1,
+    "seconds": 0.5
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "tlsexit",
+    "status": 1,
+    "seconds": 1.63
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "idlelifecycle",
+    "status": 66,
+    "seconds": 0.34
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "jitprofile",
+    "status": -11,
+    "seconds": 0.02
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "debug-build",
+    "status": 0,
+    "seconds": 2.85
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "libfastmalloc2.so-debug-stress",
+    "status": -11,
+    "seconds": 0.01
+  },
+  {
+    "mode": "thread-undefined",
+    "test": "libjitmalloc.so-debug-stress",
+    "status": -11,
+    "seconds": 0.01
+  }
+]

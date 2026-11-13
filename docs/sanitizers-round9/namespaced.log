@@ -1,0 +1,770 @@
+
+=== address-static-build (exit 0) ===
+
+=== address-static-compile-test_basic (exit 0) ===
+test_basic.c: In function ‘main’:
+<command-line>: warning: product ‘9223372036854775807 * 3’ of arguments 1 and 2 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+test_basic.c:282:13: note: in expansion of macro ‘calloc’
+  282 |         if (calloc(SIZE_MAX / 2, 3) != NULL) { printf("calloc overflow\n"); return 1; }
+      |             ^~~~~~
+<command-line>: note: in a call to allocation function ‘fm_san_calloc’ declared here
+<command-line>: warning: product ‘9223372036854775807 * 3’ of arguments 2 and 3 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+test_basic.c:285:13: note: in expansion of macro ‘reallocarray’
+  285 |         if (reallocarray(p, SIZE_MAX / 2, 3) != NULL) { printf("reallocarray overflow\n"); return 1; }
+      |             ^~~~~~~~~~~~
+<command-line>: note: in a call to allocation function ‘fm_san_reallocarray’ declared here
+
+=== address-static-compile-stress (exit 0) ===
+
+=== address-static-compile-check (exit 0) ===
+
+=== address-static-compile-mt (exit 0) ===
+
+=== address-static-compile-realloccache (exit 0) ===
+
+=== address-static-compile-idlefork (exit 0) ===
+
+=== address-static-basic (exit 0) ===
+ok
+
+=== address-static-basic-balanced (exit 0) ===
+ok
+
+=== address-static-basic-throughput (exit 0) ===
+ok
+
+=== address-static-basic-footprint (exit 0) ===
+ok
+
+=== address-static-stress-1 (exit 0) ===
+stress ok
+
+=== address-static-stress-2 (exit 0) ===
+stress ok
+
+=== address-static-stress-3 (exit 0) ===
+stress ok
+
+=== address-static-check (exit 0) ===
+ok
+
+=== address-static-mt-0 (exit 0) ===
+
+=== address-static-realloccache-0 (exit 0) ===
+realloccache ok
+
+=== address-static-idlefork-0 (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== address-static-mt-1 (exit 0) ===
+
+=== address-static-realloccache-1 (exit 0) ===
+realloccache ok
+
+=== address-static-idlefork-1 (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== address-static-both-basic (exit 0) ===
+ok
+
+=== address-static-both-stress (exit 0) ===
+stress ok
+
+=== address-static-debug-build (exit 0) ===
+
+=== address-static-debug-stress (exit 0) ===
+stress ok
+
+=== address-jit-build (exit 0) ===
+
+=== address-jit-compile-test_basic (exit 0) ===
+test_basic.c: In function ‘main’:
+<command-line>: warning: product ‘9223372036854775807 * 3’ of arguments 1 and 2 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+test_basic.c:282:13: note: in expansion of macro ‘calloc’
+  282 |         if (calloc(SIZE_MAX / 2, 3) != NULL) { printf("calloc overflow\n"); return 1; }
+      |             ^~~~~~
+<command-line>: note: in a call to allocation function ‘fm_san_calloc’ declared here
+<command-line>: warning: product ‘9223372036854775807 * 3’ of arguments 2 and 3 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+test_basic.c:285:13: note: in expansion of macro ‘reallocarray’
+  285 |         if (reallocarray(p, SIZE_MAX / 2, 3) != NULL) { printf("reallocarray overflow\n"); return 1; }
+      |             ^~~~~~~~~~~~
+<command-line>: note: in a call to allocation function ‘fm_san_reallocarray’ declared here
+
+=== address-jit-compile-stress (exit 0) ===
+
+=== address-jit-compile-check (exit 0) ===
+
+=== address-jit-compile-mt (exit 0) ===
+
+=== address-jit-compile-realloccache (exit 0) ===
+
+=== address-jit-compile-idlefork (exit 0) ===
+
+=== address-jit-compile-jitprofile (exit 0) ===
+
+=== address-jit-jitprofile (exit 0) ===
+jitprofile ok (8 threads, 800000 allocations)
+
+=== address-jit-basic (exit 0) ===
+ok
+
+=== address-jit-basic-balanced (exit 0) ===
+ok
+
+=== address-jit-basic-throughput (exit 0) ===
+ok
+
+=== address-jit-basic-footprint (exit 0) ===
+ok
+
+=== address-jit-stress-1 (exit 0) ===
+stress ok
+
+=== address-jit-stress-2 (exit 0) ===
+stress ok
+
+=== address-jit-stress-3 (exit 0) ===
+stress ok
+
+=== address-jit-check (exit 0) ===
+ok
+
+=== address-jit-mt-0 (exit 0) ===
+
+=== address-jit-realloccache-0 (exit 0) ===
+realloccache ok
+
+=== address-jit-idlefork-0 (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== address-jit-mt-1 (exit 0) ===
+
+=== address-jit-realloccache-1 (exit 0) ===
+realloccache ok
+
+=== address-jit-idlefork-1 (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== address-jit-both-basic (exit 0) ===
+ok
+
+=== address-jit-both-stress (exit 0) ===
+stress ok
+
+=== address-jit-debug-build (exit 0) ===
+
+=== address-jit-debug-stress (exit 0) ===
+stress ok
+
+=== thread-static-build (exit 0) ===
+
+=== thread-static-object-test_basic (exit 0) ===
+test_basic.c: In function ‘main’:
+<command-line>: warning: product ‘9223372036854775807 * 3’ of arguments 1 and 2 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+test_basic.c:282:13: note: in expansion of macro ‘calloc’
+  282 |         if (calloc(SIZE_MAX / 2, 3) != NULL) { printf("calloc overflow\n"); return 1; }
+      |             ^~~~~~
+<command-line>: note: in a call to allocation function ‘fm_san_calloc’ declared here
+<command-line>: warning: product ‘9223372036854775807 * 3’ of arguments 2 and 3 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+test_basic.c:285:13: note: in expansion of macro ‘reallocarray’
+  285 |         if (reallocarray(p, SIZE_MAX / 2, 3) != NULL) { printf("reallocarray overflow\n"); return 1; }
+      |             ^~~~~~~~~~~~
+<command-line>: note: in a call to allocation function ‘fm_san_reallocarray’ declared here
+
+=== thread-static-compile-test_basic (exit 0) ===
+
+=== thread-static-object-stress (exit 0) ===
+
+=== thread-static-compile-stress (exit 0) ===
+
+=== thread-static-object-check (exit 0) ===
+
+=== thread-static-compile-check (exit 0) ===
+
+=== thread-static-object-mt (exit 0) ===
+
+=== thread-static-compile-mt (exit 0) ===
+
+=== thread-static-object-realloccache (exit 0) ===
+
+=== thread-static-compile-realloccache (exit 0) ===
+
+=== thread-static-object-idlefork (exit 0) ===
+
+=== thread-static-compile-idlefork (exit 0) ===
+
+=== thread-static-basic (exit 0) ===
+ok
+
+=== thread-static-basic-balanced (exit 0) ===
+ok
+
+=== thread-static-basic-throughput (exit 0) ===
+ok
+
+=== thread-static-basic-footprint (exit 0) ===
+ok
+
+=== thread-static-stress-1 (exit 0) ===
+stress ok
+
+=== thread-static-stress-2 (exit 0) ===
+stress ok
+
+=== thread-static-stress-3 (exit 0) ===
+stress ok
+
+=== thread-static-check (exit 0) ===
+ok
+
+=== thread-static-mt-0 (exit 0) ===
+
+=== thread-static-realloccache-0 (exit 0) ===
+realloccache ok
+
+=== thread-static-idlefork-0 (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== thread-static-mt-1 (exit 66) ===
+==================
+WARNING: ThreadSanitizer: data race (pid=10280)
+  Read of size 4 at 0x7f47a5560000 by thread T2:
+    #0 fm_free src/fm_core.h:1923 (thread-static.so+0x7b5e) (BuildId: 4be264e0f90a0c7a2da377710ace35b9289d15ef)
+    #1 fm_san_free src/fm_static.c:31 (thread-static.so+0x7b5e)
+    #2 consumer bench/mt.c:104 (thread-static-mt+0x136f) (BuildId: bd8c58de039f25c3ad7da46e25bd7704be53ca72)
+
+  Previous write of size 4 at 0x7f47a5560000 by thread T1:
+    #0 fm_span_new src/fm_core.h:485 (thread-static.so+0x6669) (BuildId: 4be264e0f90a0c7a2da377710ace35b9289d15ef)
+    #1 fm_refill_class src/fm_core.h:574 (thread-static.so+0x6669)
+    #2 fm_malloc src/fm_core.h:1906 (thread-static.so+0x7b16) (BuildId: 4be264e0f90a0c7a2da377710ace35b9289d15ef)
+    #3 fm_san_malloc src/fm_static.c:30 (thread-static.so+0x7b16)
+    #4 producer bench/mt.c:74 (thread-static-mt+0x13a9) (BuildId: bd8c58de039f25c3ad7da46e25bd7704be53ca72)
+
+  Thread T2 (tid=10283, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main bench/mt.c:126 (thread-static-mt+0x11ec) (BuildId: bd8c58de039f25c3ad7da46e25bd7704be53ca72)
+
+  Thread T1 (tid=10282, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main bench/mt.c:125 (thread-static-mt+0x11d5) (BuildId: bd8c58de039f25c3ad7da46e25bd7704be53ca72)
+
+SUMMARY: ThreadSanitizer: data race src/fm_core.h:1923 in fm_free
+==================
+
+=== thread-static-realloccache-1 (exit 0) ===
+realloccache ok
+
+=== thread-static-idlefork-1 (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== thread-static-both-basic (exit 0) ===
+ok
+
+=== thread-static-both-stress (exit 0) ===
+stress ok
+
+=== thread-static-debug-build (exit 0) ===
+
+=== thread-static-debug-stress (exit 0) ===
+stress ok
+
+=== thread-jit-build (exit 0) ===
+
+=== thread-jit-object-test_basic (exit 0) ===
+test_basic.c: In function ‘main’:
+<command-line>: warning: product ‘9223372036854775807 * 3’ of arguments 1 and 2 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+test_basic.c:282:13: note: in expansion of macro ‘calloc’
+  282 |         if (calloc(SIZE_MAX / 2, 3) != NULL) { printf("calloc overflow\n"); return 1; }
+      |             ^~~~~~
+<command-line>: note: in a call to allocation function ‘fm_san_calloc’ declared here
+<command-line>: warning: product ‘9223372036854775807 * 3’ of arguments 2 and 3 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+test_basic.c:285:13: note: in expansion of macro ‘reallocarray’
+  285 |         if (reallocarray(p, SIZE_MAX / 2, 3) != NULL) { printf("reallocarray overflow\n"); return 1; }
+      |             ^~~~~~~~~~~~
+<command-line>: note: in a call to allocation function ‘fm_san_reallocarray’ declared here
+
+=== thread-jit-compile-test_basic (exit 0) ===
+
+=== thread-jit-object-stress (exit 0) ===
+
+=== thread-jit-compile-stress (exit 0) ===
+
+=== thread-jit-object-check (exit 0) ===
+
+=== thread-jit-compile-check (exit 0) ===
+
+=== thread-jit-object-mt (exit 0) ===
+
+=== thread-jit-compile-mt (exit 0) ===
+
+=== thread-jit-object-realloccache (exit 0) ===
+
+=== thread-jit-compile-realloccache (exit 0) ===
+
+=== thread-jit-object-idlefork (exit 0) ===
+
+=== thread-jit-compile-idlefork (exit 0) ===
+
+=== thread-jit-compile-jitprofile (exit 0) ===
+
+=== thread-jit-jitprofile (exit 0) ===
+jitprofile ok (8 threads, 800000 allocations)
+
+=== thread-jit-basic (exit 0) ===
+ok
+
+=== thread-jit-basic-balanced (exit 0) ===
+ok
+
+=== thread-jit-basic-throughput (exit 0) ===
+ok
+
+=== thread-jit-basic-footprint (exit 0) ===
+ok
+
+=== thread-jit-stress-1 (exit 0) ===
+stress ok
+
+=== thread-jit-stress-2 (exit 0) ===
+stress ok
+
+=== thread-jit-stress-3 (exit 0) ===
+stress ok
+
+=== thread-jit-check (exit 0) ===
+ok
+
+=== thread-jit-mt-0 (exit 0) ===
+
+=== thread-jit-realloccache-0 (exit 0) ===
+realloccache ok
+
+=== thread-jit-idlefork-0 (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== thread-jit-mt-1 (exit 66) ===
+==================
+WARNING: ThreadSanitizer: data race (pid=12057)
+  Read of size 4 at 0x7fb868320000 by thread T2:
+    #0 fm_san_free /workspace/faster-malloc/work/sanitizers/namespaced/thread-jit-source.c:551 (thread-jit.so+0x8c2e) (BuildId: 83972ef04303a5e96577050ae1b783714a5cfe41)
+    #1 consumer bench/mt.c:104 (thread-jit-mt+0x136f) (BuildId: 036dad78ca4731dd72af865e2efdac36950eaf21)
+
+  Previous write of size 4 at 0x7fb868320000 by thread T1:
+    #0 fm_span_new src/fm_core.h:485 (thread-jit.so+0x76e9) (BuildId: 83972ef04303a5e96577050ae1b783714a5cfe41)
+    #1 fm_refill_class src/fm_core.h:574 (thread-jit.so+0x76e9)
+    #2 fm_malloc src/fm_core.h:1906 (thread-jit.so+0x7e96) (BuildId: 83972ef04303a5e96577050ae1b783714a5cfe41)
+    #3 fm_jit_generic /workspace/faster-malloc/work/sanitizers/namespaced/thread-jit-source.c:493 (thread-jit.so+0x7e96)
+    #4 producer bench/mt.c:74 (thread-jit-mt+0x13a9) (BuildId: 036dad78ca4731dd72af865e2efdac36950eaf21)
+
+  Thread T2 (tid=12060, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main bench/mt.c:126 (thread-jit-mt+0x11ec) (BuildId: 036dad78ca4731dd72af865e2efdac36950eaf21)
+
+  Thread T1 (tid=12059, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main bench/mt.c:125 (thread-jit-mt+0x11d5) (BuildId: 036dad78ca4731dd72af865e2efdac36950eaf21)
+
+SUMMARY: ThreadSanitizer: data race /workspace/faster-malloc/work/sanitizers/namespaced/thread-jit-source.c:551 in fm_san_free
+==================
+
+=== thread-jit-realloccache-1 (exit 0) ===
+realloccache ok
+
+=== thread-jit-idlefork-1 (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== thread-jit-both-basic (exit 0) ===
+ok
+
+=== thread-jit-both-stress (exit 0) ===
+stress ok
+
+=== thread-jit-debug-build (exit 0) ===
+
+=== thread-jit-debug-stress (exit 0) ===
+stress ok
+
+=== address-undefined-static-build (exit 0) ===
+
+=== address-undefined-static-compile-test_basic (exit 0) ===
+test_basic.c: In function ‘main’:
+<command-line>: warning: product ‘9223372036854775807 * 3’ of arguments 1 and 2 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+test_basic.c:282:13: note: in expansion of macro ‘calloc’
+  282 |         if (calloc(SIZE_MAX / 2, 3) != NULL) { printf("calloc overflow\n"); return 1; }
+      |             ^~~~~~
+<command-line>: note: in a call to allocation function ‘fm_san_calloc’ declared here
+<command-line>: warning: product ‘9223372036854775807 * 3’ of arguments 2 and 3 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+test_basic.c:285:13: note: in expansion of macro ‘reallocarray’
+  285 |         if (reallocarray(p, SIZE_MAX / 2, 3) != NULL) { printf("reallocarray overflow\n"); return 1; }
+      |             ^~~~~~~~~~~~
+<command-line>: note: in a call to allocation function ‘fm_san_reallocarray’ declared here
+
+=== address-undefined-static-compile-stress (exit 0) ===
+
+=== address-undefined-static-compile-check (exit 0) ===
+
+=== address-undefined-static-compile-mt (exit 0) ===
+
+=== address-undefined-static-compile-realloccache (exit 0) ===
+
+=== address-undefined-static-compile-idlefork (exit 0) ===
+
+=== address-undefined-static-basic (exit 0) ===
+ok
+
+=== address-undefined-static-basic-balanced (exit 0) ===
+ok
+
+=== address-undefined-static-basic-throughput (exit 0) ===
+ok
+
+=== address-undefined-static-basic-footprint (exit 0) ===
+ok
+
+=== address-undefined-static-stress-1 (exit 0) ===
+stress ok
+
+=== address-undefined-static-stress-2 (exit 0) ===
+stress ok
+
+=== address-undefined-static-stress-3 (exit 0) ===
+stress ok
+
+=== address-undefined-static-check (exit 0) ===
+ok
+
+=== address-undefined-static-mt-0 (exit 0) ===
+
+=== address-undefined-static-realloccache-0 (exit 0) ===
+realloccache ok
+
+=== address-undefined-static-idlefork-0 (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== address-undefined-static-mt-1 (exit 0) ===
+
+=== address-undefined-static-realloccache-1 (exit 0) ===
+realloccache ok
+
+=== address-undefined-static-idlefork-1 (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== address-undefined-static-both-basic (exit 0) ===
+ok
+
+=== address-undefined-static-both-stress (exit 0) ===
+stress ok
+
+=== address-undefined-static-debug-build (exit 0) ===
+
+=== address-undefined-static-debug-stress (exit 0) ===
+stress ok
+
+=== address-undefined-jit-build (exit 0) ===
+
+=== address-undefined-jit-compile-test_basic (exit 0) ===
+test_basic.c: In function ‘main’:
+<command-line>: warning: product ‘9223372036854775807 * 3’ of arguments 1 and 2 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+test_basic.c:282:13: note: in expansion of macro ‘calloc’
+  282 |         if (calloc(SIZE_MAX / 2, 3) != NULL) { printf("calloc overflow\n"); return 1; }
+      |             ^~~~~~
+<command-line>: note: in a call to allocation function ‘fm_san_calloc’ declared here
+<command-line>: warning: product ‘9223372036854775807 * 3’ of arguments 2 and 3 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+test_basic.c:285:13: note: in expansion of macro ‘reallocarray’
+  285 |         if (reallocarray(p, SIZE_MAX / 2, 3) != NULL) { printf("reallocarray overflow\n"); return 1; }
+      |             ^~~~~~~~~~~~
+<command-line>: note: in a call to allocation function ‘fm_san_reallocarray’ declared here
+
+=== address-undefined-jit-compile-stress (exit 0) ===
+
+=== address-undefined-jit-compile-check (exit 0) ===
+
+=== address-undefined-jit-compile-mt (exit 0) ===
+
+=== address-undefined-jit-compile-realloccache (exit 0) ===
+
+=== address-undefined-jit-compile-idlefork (exit 0) ===
+
+=== address-undefined-jit-compile-jitprofile (exit 0) ===
+
+=== address-undefined-jit-jitprofile (exit 0) ===
+jitprofile ok (8 threads, 800000 allocations)
+
+=== address-undefined-jit-basic (exit 0) ===
+ok
+
+=== address-undefined-jit-basic-balanced (exit 0) ===
+ok
+
+=== address-undefined-jit-basic-throughput (exit 0) ===
+ok
+
+=== address-undefined-jit-basic-footprint (exit 0) ===
+ok
+
+=== address-undefined-jit-stress-1 (exit 0) ===
+stress ok
+
+=== address-undefined-jit-stress-2 (exit 0) ===
+stress ok
+
+=== address-undefined-jit-stress-3 (exit 0) ===
+stress ok
+
+=== address-undefined-jit-check (exit 0) ===
+ok
+
+=== address-undefined-jit-mt-0 (exit 0) ===
+
+=== address-undefined-jit-realloccache-0 (exit 0) ===
+realloccache ok
+
+=== address-undefined-jit-idlefork-0 (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== address-undefined-jit-mt-1 (exit 0) ===
+
+=== address-undefined-jit-realloccache-1 (exit 0) ===
+realloccache ok
+
+=== address-undefined-jit-idlefork-1 (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== address-undefined-jit-both-basic (exit 0) ===
+ok
+
+=== address-undefined-jit-both-stress (exit 0) ===
+stress ok
+
+=== address-undefined-jit-debug-build (exit 0) ===
+
+=== address-undefined-jit-debug-stress (exit 0) ===
+stress ok
+
+=== thread-undefined-static-build (exit 0) ===
+
+=== thread-undefined-static-object-test_basic (exit 0) ===
+test_basic.c: In function ‘main’:
+<command-line>: warning: product ‘9223372036854775807 * 3’ of arguments 1 and 2 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+test_basic.c:282:13: note: in expansion of macro ‘calloc’
+  282 |         if (calloc(SIZE_MAX / 2, 3) != NULL) { printf("calloc overflow\n"); return 1; }
+      |             ^~~~~~
+<command-line>: note: in a call to allocation function ‘fm_san_calloc’ declared here
+<command-line>: warning: product ‘9223372036854775807 * 3’ of arguments 2 and 3 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+test_basic.c:285:13: note: in expansion of macro ‘reallocarray’
+  285 |         if (reallocarray(p, SIZE_MAX / 2, 3) != NULL) { printf("reallocarray overflow\n"); return 1; }
+      |             ^~~~~~~~~~~~
+<command-line>: note: in a call to allocation function ‘fm_san_reallocarray’ declared here
+
+=== thread-undefined-static-compile-test_basic (exit 0) ===
+
+=== thread-undefined-static-object-stress (exit 0) ===
+
+=== thread-undefined-static-compile-stress (exit 0) ===
+
+=== thread-undefined-static-object-check (exit 0) ===
+
+=== thread-undefined-static-compile-check (exit 0) ===
+
+=== thread-undefined-static-object-mt (exit 0) ===
+
+=== thread-undefined-static-compile-mt (exit 0) ===
+
+=== thread-undefined-static-object-realloccache (exit 0) ===
+
+=== thread-undefined-static-compile-realloccache (exit 0) ===
+
+=== thread-undefined-static-object-idlefork (exit 0) ===
+
+=== thread-undefined-static-compile-idlefork (exit 0) ===
+
+=== thread-undefined-static-basic (exit 0) ===
+ok
+
+=== thread-undefined-static-basic-balanced (exit 0) ===
+ok
+
+=== thread-undefined-static-basic-throughput (exit 0) ===
+ok
+
+=== thread-undefined-static-basic-footprint (exit 0) ===
+ok
+
+=== thread-undefined-static-stress-1 (exit 0) ===
+stress ok
+
+=== thread-undefined-static-stress-2 (exit 0) ===
+stress ok
+
+=== thread-undefined-static-stress-3 (exit 0) ===
+stress ok
+
+=== thread-undefined-static-check (exit 0) ===
+ok
+
+=== thread-undefined-static-mt-0 (exit 0) ===
+
+=== thread-undefined-static-realloccache-0 (exit 0) ===
+realloccache ok
+
+=== thread-undefined-static-idlefork-0 (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== thread-undefined-static-mt-1 (exit 66) ===
+==================
+WARNING: ThreadSanitizer: data race (pid=12858)
+  Read of size 4 at 0x7fb0b61e0000 by thread T2:
+    #0 fm_free src/fm_core.h:1923 (thread-undefined-static.so+0xd6b6) (BuildId: 4629eab60892f79c9732c085c44e46f42cae4a85)
+    #1 fm_san_free src/fm_static.c:31 (thread-undefined-static.so+0x1008c) (BuildId: 4629eab60892f79c9732c085c44e46f42cae4a85)
+    #2 consumer bench/mt.c:104 (thread-undefined-static-mt+0x136f) (BuildId: e9f5564f73d116530ddee6b0a237f47b3c263de1)
+
+  Previous write of size 4 at 0x7fb0b61e0000 by thread T1:
+    #0 fm_span_new src/fm_core.h:485 (thread-undefined-static.so+0xdfd3) (BuildId: 4629eab60892f79c9732c085c44e46f42cae4a85)
+    #1 fm_refill_class src/fm_core.h:574 (thread-undefined-static.so+0xdfd3)
+    #2 fm_malloc src/fm_core.h:1906 (thread-undefined-static.so+0xffb6) (BuildId: 4629eab60892f79c9732c085c44e46f42cae4a85)
+    #3 fm_san_malloc src/fm_static.c:30 (thread-undefined-static.so+0xffb6)
+    #4 producer bench/mt.c:74 (thread-undefined-static-mt+0x13a9) (BuildId: e9f5564f73d116530ddee6b0a237f47b3c263de1)
+
+  Thread T2 (tid=12861, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main bench/mt.c:126 (thread-undefined-static-mt+0x11ec) (BuildId: e9f5564f73d116530ddee6b0a237f47b3c263de1)
+
+  Thread T1 (tid=12860, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main bench/mt.c:125 (thread-undefined-static-mt+0x11d5) (BuildId: e9f5564f73d116530ddee6b0a237f47b3c263de1)
+
+SUMMARY: ThreadSanitizer: data race src/fm_core.h:1923 in fm_free
+==================
+
+=== thread-undefined-static-realloccache-1 (exit 0) ===
+realloccache ok
+
+=== thread-undefined-static-idlefork-1 (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== thread-undefined-static-both-basic (exit 0) ===
+ok
+
+=== thread-undefined-static-both-stress (exit 0) ===
+stress ok
+
+=== thread-undefined-static-debug-build (exit 0) ===
+
+=== thread-undefined-static-debug-stress (exit 0) ===
+stress ok
+
+=== thread-undefined-jit-build (exit 0) ===
+
+=== thread-undefined-jit-object-test_basic (exit 0) ===
+test_basic.c: In function ‘main’:
+<command-line>: warning: product ‘9223372036854775807 * 3’ of arguments 1 and 2 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+test_basic.c:282:13: note: in expansion of macro ‘calloc’
+  282 |         if (calloc(SIZE_MAX / 2, 3) != NULL) { printf("calloc overflow\n"); return 1; }
+      |             ^~~~~~
+<command-line>: note: in a call to allocation function ‘fm_san_calloc’ declared here
+<command-line>: warning: product ‘9223372036854775807 * 3’ of arguments 2 and 3 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+test_basic.c:285:13: note: in expansion of macro ‘reallocarray’
+  285 |         if (reallocarray(p, SIZE_MAX / 2, 3) != NULL) { printf("reallocarray overflow\n"); return 1; }
+      |             ^~~~~~~~~~~~
+<command-line>: note: in a call to allocation function ‘fm_san_reallocarray’ declared here
+
+=== thread-undefined-jit-compile-test_basic (exit 0) ===
+
+=== thread-undefined-jit-object-stress (exit 0) ===
+
+=== thread-undefined-jit-compile-stress (exit 0) ===
+
+=== thread-undefined-jit-object-check (exit 0) ===
+
+=== thread-undefined-jit-compile-check (exit 0) ===
+
+=== thread-undefined-jit-object-mt (exit 0) ===
+
+=== thread-undefined-jit-compile-mt (exit 0) ===
+
+=== thread-undefined-jit-object-realloccache (exit 0) ===
+
+=== thread-undefined-jit-compile-realloccache (exit 0) ===
+
+=== thread-undefined-jit-object-idlefork (exit 0) ===
+
+=== thread-undefined-jit-compile-idlefork (exit 0) ===
+
+=== thread-undefined-jit-compile-jitprofile (exit 0) ===
+
+=== thread-undefined-jit-jitprofile (exit 0) ===
+jitprofile ok (8 threads, 800000 allocations)
+
+=== thread-undefined-jit-basic (exit 0) ===
+ok
+
+=== thread-undefined-jit-basic-balanced (exit 0) ===
+ok
+
+=== thread-undefined-jit-basic-throughput (exit 0) ===
+ok
+
+=== thread-undefined-jit-basic-footprint (exit 0) ===
+ok
+
+=== thread-undefined-jit-stress-1 (exit 0) ===
+stress ok
+
+=== thread-undefined-jit-stress-2 (exit 0) ===
+stress ok
+
+=== thread-undefined-jit-stress-3 (exit 0) ===
+stress ok
+
+=== thread-undefined-jit-check (exit 0) ===
+ok
+
+=== thread-undefined-jit-mt-0 (exit 0) ===
+
+=== thread-undefined-jit-realloccache-0 (exit 0) ===
+realloccache ok
+
+=== thread-undefined-jit-idlefork-0 (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== thread-undefined-jit-mt-1 (exit 66) ===
+==================
+WARNING: ThreadSanitizer: data race (pid=13049)
+  Read of size 4 at 0x7f9162510000 by thread T2:
+    #0 fm_san_free /workspace/faster-malloc/work/sanitizers/namespaced/thread-undefined-jit-source.c:551 (thread-undefined-jit.so+0x162a6) (BuildId: aa5e01ce4d74880c05b29357da151d8c905a7b46)
+    #1 consumer bench/mt.c:104 (thread-undefined-jit-mt+0x136f) (BuildId: a8233070452782e5b27f9902a3e970aa32e4ed69)
+
+  Previous write of size 4 at 0x7f9162510000 by thread T1:
+    #0 fm_span_new src/fm_core.h:485 (thread-undefined-jit.so+0x14153) (BuildId: aa5e01ce4d74880c05b29357da151d8c905a7b46)
+    #1 fm_refill_class src/fm_core.h:574 (thread-undefined-jit.so+0x14153)
+    #2 fm_malloc src/fm_core.h:1906 (thread-undefined-jit.so+0x150b6) (BuildId: aa5e01ce4d74880c05b29357da151d8c905a7b46)
+    #3 fm_jit_generic /workspace/faster-malloc/work/sanitizers/namespaced/thread-undefined-jit-source.c:493 (thread-undefined-jit.so+0x150b6)
+    #4 producer bench/mt.c:74 (thread-undefined-jit-mt+0x13a9) (BuildId: a8233070452782e5b27f9902a3e970aa32e4ed69)
+
+  Thread T2 (tid=13052, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main bench/mt.c:126 (thread-undefined-jit-mt+0x11ec) (BuildId: a8233070452782e5b27f9902a3e970aa32e4ed69)
+
+  Thread T1 (tid=13051, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main bench/mt.c:125 (thread-undefined-jit-mt+0x11d5) (BuildId: a8233070452782e5b27f9902a3e970aa32e4ed69)
+
+SUMMARY: ThreadSanitizer: data race /workspace/faster-malloc/work/sanitizers/namespaced/thread-undefined-jit-source.c:551 in fm_san_free
+==================
+
+=== thread-undefined-jit-realloccache-1 (exit 0) ===
+realloccache ok
+
+=== thread-undefined-jit-idlefork-1 (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== thread-undefined-jit-both-basic (exit 0) ===
+ok
+
+=== thread-undefined-jit-both-stress (exit 0) ===
+stress ok
+
+=== thread-undefined-jit-debug-build (exit 0) ===
+
+=== thread-undefined-jit-debug-stress (exit 0) ===
+stress ok

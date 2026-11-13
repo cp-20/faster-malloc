@@ -1,0 +1,528 @@
+[
+  {
+    "mode": "thread-static",
+    "test": "build",
+    "status": 0,
+    "command": [
+      "/usr/bin/gcc",
+      "-O2",
+      "-g",
+      "-fno-omit-frame-pointer",
+      "-fno-sanitize-recover=all",
+      "-fsanitize=thread",
+      "-Dmalloc=fm_san_malloc",
+      "-Dfree=fm_san_free",
+      "-Dcalloc=fm_san_calloc",
+      "-Drealloc=fm_san_realloc",
+      "-Dreallocarray=fm_san_reallocarray",
+      "-Dposix_memalign=fm_san_posix_memalign",
+      "-Daligned_alloc=fm_san_aligned_alloc",
+      "-Dmemalign=fm_san_memalign",
+      "-Dvalloc=fm_san_valloc",
+      "-Dpvalloc=fm_san_pvalloc",
+      "-Dmalloc_usable_size=fm_san_malloc_usable_size",
+      "-Dmalloc_trim=fm_san_malloc_trim",
+      "-Dmallopt=fm_san_mallopt",
+      "-Dmalloc_stats=fm_san_malloc_stats",
+      "-Dmalloc_info=fm_san_malloc_info",
+      "-fPIC",
+      "-shared",
+      "-Isrc",
+      "-Wl,-z,nodelete",
+      "src/fm_static.c",
+      "-pthread",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-static.so"
+    ],
+    "seconds": 2.47
+  },
+  {
+    "mode": "thread-static",
+    "test": "compile-mt",
+    "status": 0,
+    "command": [
+      "/usr/bin/gcc",
+      "-O2",
+      "-g",
+      "-fno-omit-frame-pointer",
+      "-fno-sanitize-recover=all",
+      "-fsanitize=thread",
+      "-Dmalloc=fm_san_malloc",
+      "-Dfree=fm_san_free",
+      "-Dcalloc=fm_san_calloc",
+      "-Drealloc=fm_san_realloc",
+      "-Dreallocarray=fm_san_reallocarray",
+      "-Dposix_memalign=fm_san_posix_memalign",
+      "-Daligned_alloc=fm_san_aligned_alloc",
+      "-Dmemalign=fm_san_memalign",
+      "-Dvalloc=fm_san_valloc",
+      "-Dpvalloc=fm_san_pvalloc",
+      "-Dmalloc_usable_size=fm_san_malloc_usable_size",
+      "-Dmalloc_trim=fm_san_malloc_trim",
+      "-Dmallopt=fm_san_mallopt",
+      "-Dmalloc_stats=fm_san_malloc_stats",
+      "-Dmalloc_info=fm_san_malloc_info",
+      "bench/mt.c",
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-static.so",
+      "-pthread",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-static-mt"
+    ],
+    "seconds": 0.43
+  },
+  {
+    "mode": "thread-static",
+    "test": "mt-0-1",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-static-mt",
+      "0"
+    ],
+    "seconds": 0.29
+  },
+  {
+    "mode": "thread-static",
+    "test": "mt-1-1",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-static-mt",
+      "1"
+    ],
+    "seconds": 0.68
+  },
+  {
+    "mode": "thread-static",
+    "test": "mt-0-2",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-static-mt",
+      "0"
+    ],
+    "seconds": 0.22
+  },
+  {
+    "mode": "thread-static",
+    "test": "mt-1-2",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-static-mt",
+      "1"
+    ],
+    "seconds": 0.41
+  },
+  {
+    "mode": "thread-static",
+    "test": "mt-0-3",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-static-mt",
+      "0"
+    ],
+    "seconds": 0.18
+  },
+  {
+    "mode": "thread-static",
+    "test": "mt-1-3",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-static-mt",
+      "1"
+    ],
+    "seconds": 0.58
+  },
+  {
+    "mode": "thread-jit",
+    "test": "build",
+    "status": 0,
+    "command": [
+      "/usr/bin/gcc",
+      "-O2",
+      "-g",
+      "-fno-omit-frame-pointer",
+      "-fno-sanitize-recover=all",
+      "-fsanitize=thread",
+      "-Dmalloc=fm_san_malloc",
+      "-Dfree=fm_san_free",
+      "-Dcalloc=fm_san_calloc",
+      "-Drealloc=fm_san_realloc",
+      "-Dreallocarray=fm_san_reallocarray",
+      "-Dposix_memalign=fm_san_posix_memalign",
+      "-Daligned_alloc=fm_san_aligned_alloc",
+      "-Dmemalign=fm_san_memalign",
+      "-Dvalloc=fm_san_valloc",
+      "-Dpvalloc=fm_san_pvalloc",
+      "-Dmalloc_usable_size=fm_san_malloc_usable_size",
+      "-Dmalloc_trim=fm_san_malloc_trim",
+      "-Dmallopt=fm_san_mallopt",
+      "-Dmalloc_stats=fm_san_malloc_stats",
+      "-Dmalloc_info=fm_san_malloc_info",
+      "-fPIC",
+      "-shared",
+      "-Isrc",
+      "-Wl,-z,nodelete",
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-jit.c",
+      "src/jit_stubs.S",
+      "-pthread",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-jit.so"
+    ],
+    "seconds": 1.39
+  },
+  {
+    "mode": "thread-jit",
+    "test": "compile-mt",
+    "status": 0,
+    "command": [
+      "/usr/bin/gcc",
+      "-O2",
+      "-g",
+      "-fno-omit-frame-pointer",
+      "-fno-sanitize-recover=all",
+      "-fsanitize=thread",
+      "-Dmalloc=fm_san_malloc",
+      "-Dfree=fm_san_free",
+      "-Dcalloc=fm_san_calloc",
+      "-Drealloc=fm_san_realloc",
+      "-Dreallocarray=fm_san_reallocarray",
+      "-Dposix_memalign=fm_san_posix_memalign",
+      "-Daligned_alloc=fm_san_aligned_alloc",
+      "-Dmemalign=fm_san_memalign",
+      "-Dvalloc=fm_san_valloc",
+      "-Dpvalloc=fm_san_pvalloc",
+      "-Dmalloc_usable_size=fm_san_malloc_usable_size",
+      "-Dmalloc_trim=fm_san_malloc_trim",
+      "-Dmallopt=fm_san_mallopt",
+      "-Dmalloc_stats=fm_san_malloc_stats",
+      "-Dmalloc_info=fm_san_malloc_info",
+      "bench/mt.c",
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-jit.so",
+      "-pthread",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-jit-mt"
+    ],
+    "seconds": 0.14
+  },
+  {
+    "mode": "thread-jit",
+    "test": "mt-0-1",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-jit-mt",
+      "0"
+    ],
+    "seconds": 0.16
+  },
+  {
+    "mode": "thread-jit",
+    "test": "mt-1-1",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-jit-mt",
+      "1"
+    ],
+    "seconds": 0.22
+  },
+  {
+    "mode": "thread-jit",
+    "test": "mt-0-2",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-jit-mt",
+      "0"
+    ],
+    "seconds": 0.17
+  },
+  {
+    "mode": "thread-jit",
+    "test": "mt-1-2",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-jit-mt",
+      "1"
+    ],
+    "seconds": 0.53
+  },
+  {
+    "mode": "thread-jit",
+    "test": "mt-0-3",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-jit-mt",
+      "0"
+    ],
+    "seconds": 0.32
+  },
+  {
+    "mode": "thread-jit",
+    "test": "mt-1-3",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-jit-mt",
+      "1"
+    ],
+    "seconds": 0.89
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "build",
+    "status": 0,
+    "command": [
+      "/usr/bin/gcc",
+      "-O2",
+      "-g",
+      "-fno-omit-frame-pointer",
+      "-fno-sanitize-recover=all",
+      "-fsanitize=thread,undefined",
+      "-Dmalloc=fm_san_malloc",
+      "-Dfree=fm_san_free",
+      "-Dcalloc=fm_san_calloc",
+      "-Drealloc=fm_san_realloc",
+      "-Dreallocarray=fm_san_reallocarray",
+      "-Dposix_memalign=fm_san_posix_memalign",
+      "-Daligned_alloc=fm_san_aligned_alloc",
+      "-Dmemalign=fm_san_memalign",
+      "-Dvalloc=fm_san_valloc",
+      "-Dpvalloc=fm_san_pvalloc",
+      "-Dmalloc_usable_size=fm_san_malloc_usable_size",
+      "-Dmalloc_trim=fm_san_malloc_trim",
+      "-Dmallopt=fm_san_mallopt",
+      "-Dmalloc_stats=fm_san_malloc_stats",
+      "-Dmalloc_info=fm_san_malloc_info",
+      "-fPIC",
+      "-shared",
+      "-Isrc",
+      "-Wl,-z,nodelete",
+      "src/fm_static.c",
+      "-pthread",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-undefined-static.so"
+    ],
+    "seconds": 3.68
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "compile-mt",
+    "status": 0,
+    "command": [
+      "/usr/bin/gcc",
+      "-O2",
+      "-g",
+      "-fno-omit-frame-pointer",
+      "-fno-sanitize-recover=all",
+      "-fsanitize=thread,undefined",
+      "-Dmalloc=fm_san_malloc",
+      "-Dfree=fm_san_free",
+      "-Dcalloc=fm_san_calloc",
+      "-Drealloc=fm_san_realloc",
+      "-Dreallocarray=fm_san_reallocarray",
+      "-Dposix_memalign=fm_san_posix_memalign",
+      "-Daligned_alloc=fm_san_aligned_alloc",
+      "-Dmemalign=fm_san_memalign",
+      "-Dvalloc=fm_san_valloc",
+      "-Dpvalloc=fm_san_pvalloc",
+      "-Dmalloc_usable_size=fm_san_malloc_usable_size",
+      "-Dmalloc_trim=fm_san_malloc_trim",
+      "-Dmallopt=fm_san_mallopt",
+      "-Dmalloc_stats=fm_san_malloc_stats",
+      "-Dmalloc_info=fm_san_malloc_info",
+      "bench/mt.c",
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-undefined-static.so",
+      "-pthread",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-undefined-static-mt"
+    ],
+    "seconds": 0.42
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "mt-0-1",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-undefined-static-mt",
+      "0"
+    ],
+    "seconds": 0.4
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "mt-1-1",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-undefined-static-mt",
+      "1"
+    ],
+    "seconds": 1.08
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "mt-0-2",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-undefined-static-mt",
+      "0"
+    ],
+    "seconds": 0.38
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "mt-1-2",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-undefined-static-mt",
+      "1"
+    ],
+    "seconds": 0.9
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "mt-0-3",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-undefined-static-mt",
+      "0"
+    ],
+    "seconds": 0.34
+  },
+  {
+    "mode": "thread-undefined-static",
+    "test": "mt-1-3",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-undefined-static-mt",
+      "1"
+    ],
+    "seconds": 0.84
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "build",
+    "status": 0,
+    "command": [
+      "/usr/bin/gcc",
+      "-O2",
+      "-g",
+      "-fno-omit-frame-pointer",
+      "-fno-sanitize-recover=all",
+      "-fsanitize=thread,undefined",
+      "-Dmalloc=fm_san_malloc",
+      "-Dfree=fm_san_free",
+      "-Dcalloc=fm_san_calloc",
+      "-Drealloc=fm_san_realloc",
+      "-Dreallocarray=fm_san_reallocarray",
+      "-Dposix_memalign=fm_san_posix_memalign",
+      "-Daligned_alloc=fm_san_aligned_alloc",
+      "-Dmemalign=fm_san_memalign",
+      "-Dvalloc=fm_san_valloc",
+      "-Dpvalloc=fm_san_pvalloc",
+      "-Dmalloc_usable_size=fm_san_malloc_usable_size",
+      "-Dmalloc_trim=fm_san_malloc_trim",
+      "-Dmallopt=fm_san_mallopt",
+      "-Dmalloc_stats=fm_san_malloc_stats",
+      "-Dmalloc_info=fm_san_malloc_info",
+      "-fPIC",
+      "-shared",
+      "-Isrc",
+      "-Wl,-z,nodelete",
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-undefined-jit.c",
+      "src/jit_stubs.S",
+      "-pthread",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-undefined-jit.so"
+    ],
+    "seconds": 2.01
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "compile-mt",
+    "status": 0,
+    "command": [
+      "/usr/bin/gcc",
+      "-O2",
+      "-g",
+      "-fno-omit-frame-pointer",
+      "-fno-sanitize-recover=all",
+      "-fsanitize=thread,undefined",
+      "-Dmalloc=fm_san_malloc",
+      "-Dfree=fm_san_free",
+      "-Dcalloc=fm_san_calloc",
+      "-Drealloc=fm_san_realloc",
+      "-Dreallocarray=fm_san_reallocarray",
+      "-Dposix_memalign=fm_san_posix_memalign",
+      "-Daligned_alloc=fm_san_aligned_alloc",
+      "-Dmemalign=fm_san_memalign",
+      "-Dvalloc=fm_san_valloc",
+      "-Dpvalloc=fm_san_pvalloc",
+      "-Dmalloc_usable_size=fm_san_malloc_usable_size",
+      "-Dmalloc_trim=fm_san_malloc_trim",
+      "-Dmallopt=fm_san_mallopt",
+      "-Dmalloc_stats=fm_san_malloc_stats",
+      "-Dmalloc_info=fm_san_malloc_info",
+      "bench/mt.c",
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-undefined-jit.so",
+      "-pthread",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-undefined-jit-mt"
+    ],
+    "seconds": 0.36
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "mt-0-1",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-undefined-jit-mt",
+      "0"
+    ],
+    "seconds": 0.24
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "mt-1-1",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-undefined-jit-mt",
+      "1"
+    ],
+    "seconds": 0.5
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "mt-0-2",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-undefined-jit-mt",
+      "0"
+    ],
+    "seconds": 0.2
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "mt-1-2",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-undefined-jit-mt",
+      "1"
+    ],
+    "seconds": 0.81
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "mt-0-3",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-undefined-jit-mt",
+      "0"
+    ],
+    "seconds": 0.27
+  },
+  {
+    "mode": "thread-undefined-jit",
+    "test": "mt-1-3",
+    "status": 0,
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/mt-recheck/thread-undefined-jit-mt",
+      "1"
+    ],
+    "seconds": 0.82
+  }
+]

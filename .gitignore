@@ -33,3 +33,5 @@ bench/apps/work/
 /work/
 /bench/realloccache
 /bench/idlefork
+
+/bench/jitprofile

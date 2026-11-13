@@ -64,10 +64,8 @@ void *reallocarray(void *p, size_t n, size_t sz)
 
 int posix_memalign(void **out, size_t align, size_t n)
 {
-    if (align % sizeof(void *) != 0 || (align & (align - 1)) != 0) {
-        *out = NULL;
+    if (align == 0 || align % sizeof(void *) != 0 || (align & (align - 1)) != 0)
         return EINVAL;
-    }
     void *p = fm_aligned_alloc_impl(align, n);
     if (!p)
         return ENOMEM;

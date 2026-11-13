@@ -285,11 +285,18 @@ int main(void)
         if (reallocarray(p, SIZE_MAX / 2, 3) != NULL) { printf("reallocarray overflow\n"); return 1; }
         if (malloc_usable_size(p) < 100) { printf("block lost after reallocarray overflow\n"); return 1; }
         free(p);
+        /* An indirect call prevents GCC's builtin posix_memalign assumptions
+         * from hiding an implementation that changes *out on failure. */
+        int (*volatile aligned_call)(void **, size_t, size_t) = posix_memalign;
         void *q = (void *)(uintptr_t)0x1;
-        if (posix_memalign(&q, 3, 100) != EINVAL || q != (void *)(uintptr_t)0x1) {
-            printf("posix_memalign align=3\n"); return 1;
+        const size_t invalid_alignments[] = {0, 3, 24};
+        for (size_t i = 0; i < sizeof(invalid_alignments) / sizeof(*invalid_alignments); i++) {
+            q = (void *)(uintptr_t)0x1;
+            if (aligned_call(&q, invalid_alignments[i], 100) != EINVAL ||
+                q != (void *)(uintptr_t)0x1) {
+                printf("posix_memalign align=%zu\n", invalid_alignments[i]); return 1;
+            }
         }
-        if (posix_memalign(&q, 24, 100) != EINVAL) { printf("posix_memalign align=24\n"); return 1; }
         if (posix_memalign(&q, 4096, 5000) != 0 || ((uintptr_t)q & 4095) != 0 ||
             malloc_usable_size(q) < 5000) { printf("posix_memalign 4096\n"); return 1; }
         free(q);

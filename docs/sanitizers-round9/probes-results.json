@@ -1,0 +1,469 @@
+[
+  {
+    "test": "owner-build",
+    "command": [
+      "/usr/bin/gcc",
+      "-O2",
+      "-g",
+      "/workspace/faster-malloc/work/sanitizers/probes/owner.c",
+      "-ldl",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/probes/owner"
+    ],
+    "environment": {},
+    "status": 0
+  },
+  {
+    "test": "address-plain-build",
+    "command": [
+      "/usr/bin/gcc",
+      "-O2",
+      "-g",
+      "-fsanitize=address",
+      "/workspace/faster-malloc/work/sanitizers/probes/owner.c",
+      "-ldl",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/probes/address-plain"
+    ],
+    "environment": {},
+    "status": 0
+  },
+  {
+    "test": "address-plain",
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/probes/address-plain"
+    ],
+    "environment": {},
+    "status": 0
+  },
+  {
+    "test": "address-allocator-build",
+    "command": [
+      "/usr/bin/gcc",
+      "-O2",
+      "-g",
+      "-fPIC",
+      "-shared",
+      "-Isrc",
+      "-fsanitize=address",
+      "-fno-omit-frame-pointer",
+      "-Wl,-z,nodelete",
+      "src/fm_static.c",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/probes/v2-address.so"
+    ],
+    "environment": {},
+    "status": 0
+  },
+  {
+    "test": "address-allocator-first",
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/probes/owner"
+    ],
+    "environment": {
+      "LD_PRELOAD": "/workspace/faster-malloc/work/sanitizers/probes/v2-address.so"
+    },
+    "status": 1
+  },
+  {
+    "test": "address-runtime-first",
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/probes/owner"
+    ],
+    "environment": {
+      "LD_PRELOAD": "/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so:/workspace/faster-malloc/work/sanitizers/probes/v2-address.so"
+    },
+    "status": 0
+  },
+  {
+    "test": "address-order-disabled",
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/probes/owner"
+    ],
+    "environment": {
+      "LD_PRELOAD": "/workspace/faster-malloc/work/sanitizers/probes/v2-address.so",
+      "ASAN_OPTIONS": "verify_asan_link_order=0"
+    },
+    "status": -11
+  },
+  {
+    "test": "thread-plain-build",
+    "command": [
+      "/usr/bin/gcc",
+      "-O2",
+      "-g",
+      "-fsanitize=thread",
+      "/workspace/faster-malloc/work/sanitizers/probes/owner.c",
+      "-ldl",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/probes/thread-plain"
+    ],
+    "environment": {},
+    "status": 0
+  },
+  {
+    "test": "thread-plain",
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/probes/thread-plain"
+    ],
+    "environment": {},
+    "status": 0
+  },
+  {
+    "test": "thread-allocator-build",
+    "command": [
+      "/usr/bin/gcc",
+      "-O2",
+      "-g",
+      "-fPIC",
+      "-shared",
+      "-Isrc",
+      "-fsanitize=thread",
+      "-fno-omit-frame-pointer",
+      "-Wl,-z,nodelete",
+      "src/fm_static.c",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/probes/v2-thread.so"
+    ],
+    "environment": {},
+    "status": 0
+  },
+  {
+    "test": "thread-allocator-first",
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/probes/owner"
+    ],
+    "environment": {
+      "LD_PRELOAD": "/workspace/faster-malloc/work/sanitizers/probes/v2-thread.so"
+    },
+    "status": -11
+  },
+  {
+    "test": "thread-runtime-first",
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/probes/owner"
+    ],
+    "environment": {
+      "LD_PRELOAD": "/usr/lib/gcc/x86_64-linux-gnu/14/libtsan.so:/workspace/faster-malloc/work/sanitizers/probes/v2-thread.so"
+    },
+    "status": 0
+  },
+  {
+    "test": "incompatible",
+    "command": [
+      "/usr/bin/gcc",
+      "-fsanitize=address,thread",
+      "-c",
+      "/workspace/faster-malloc/work/sanitizers/probes/owner.c",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/probes/incompatible.o"
+    ],
+    "environment": {},
+    "status": 1
+  },
+  {
+    "test": "posix-build",
+    "command": [
+      "/usr/bin/gcc",
+      "-O2",
+      "/workspace/faster-malloc/work/sanitizers/probes/posix.c",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/probes/posix"
+    ],
+    "environment": {},
+    "status": 0
+  },
+  {
+    "test": "before-static-build",
+    "command": [
+      "/usr/bin/gcc",
+      "-O2",
+      "-g",
+      "-fPIC",
+      "-shared",
+      "-Isrc",
+      "-Wl,-z,nodelete",
+      "/workspace/faster-malloc/work/sanitizers/probes/before-static.c",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/probes/before-static.so"
+    ],
+    "environment": {},
+    "status": 0
+  },
+  {
+    "test": "before-static-posix",
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/probes/posix"
+    ],
+    "environment": {
+      "LD_PRELOAD": "/workspace/faster-malloc/work/sanitizers/probes/before-static.so"
+    },
+    "status": 1
+  },
+  {
+    "test": "after-static-build",
+    "command": [
+      "/usr/bin/gcc",
+      "-O2",
+      "-g",
+      "-fPIC",
+      "-shared",
+      "-Isrc",
+      "-Wl,-z,nodelete",
+      "src/fm_static.c",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/probes/after-static.so"
+    ],
+    "environment": {},
+    "status": 0
+  },
+  {
+    "test": "after-static-posix",
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/probes/posix"
+    ],
+    "environment": {
+      "LD_PRELOAD": "/workspace/faster-malloc/work/sanitizers/probes/after-static.so"
+    },
+    "status": 0
+  },
+  {
+    "test": "before-jit-build",
+    "command": [
+      "/usr/bin/gcc",
+      "-O2",
+      "-g",
+      "-fPIC",
+      "-shared",
+      "-Isrc",
+      "-Wl,-z,nodelete",
+      "/workspace/faster-malloc/work/sanitizers/probes/before-jit.c",
+      "src/jit_stubs.S",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/probes/before-jit.so"
+    ],
+    "environment": {},
+    "status": 0
+  },
+  {
+    "test": "before-jit-posix",
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/probes/posix"
+    ],
+    "environment": {
+      "LD_PRELOAD": "/workspace/faster-malloc/work/sanitizers/probes/before-jit.so"
+    },
+    "status": 1
+  },
+  {
+    "test": "after-jit-build",
+    "command": [
+      "/usr/bin/gcc",
+      "-O2",
+      "-g",
+      "-fPIC",
+      "-shared",
+      "-Isrc",
+      "-Wl,-z,nodelete",
+      "src/fm_jit.c",
+      "src/jit_stubs.S",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/probes/after-jit.so"
+    ],
+    "environment": {},
+    "status": 0
+  },
+  {
+    "test": "after-jit-posix",
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/probes/posix"
+    ],
+    "environment": {
+      "LD_PRELOAD": "/workspace/faster-malloc/work/sanitizers/probes/after-jit.so"
+    },
+    "status": 0
+  },
+  {
+    "test": "threads-build",
+    "command": [
+      "/usr/bin/gcc",
+      "-O2",
+      "-g",
+      "-fsanitize=thread",
+      "/workspace/faster-malloc/work/sanitizers/probes/threads.c",
+      "-pthread",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/probes/threads"
+    ],
+    "environment": {},
+    "status": 0
+  },
+  {
+    "test": "threads",
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/probes/threads"
+    ],
+    "environment": {},
+    "status": 0
+  },
+  {
+    "test": "before-jit-tsan-build",
+    "command": [
+      "/usr/bin/gcc",
+      "-O2",
+      "-g",
+      "-fno-omit-frame-pointer",
+      "-fsanitize=thread",
+      "-Dmalloc=fm_san_malloc",
+      "-Dfree=fm_san_free",
+      "-Dcalloc=fm_san_calloc",
+      "-Drealloc=fm_san_realloc",
+      "-Dreallocarray=fm_san_reallocarray",
+      "-Dposix_memalign=fm_san_posix_memalign",
+      "-Daligned_alloc=fm_san_aligned_alloc",
+      "-Dmemalign=fm_san_memalign",
+      "-Dvalloc=fm_san_valloc",
+      "-Dpvalloc=fm_san_pvalloc",
+      "-Dmalloc_usable_size=fm_san_malloc_usable_size",
+      "-Dmalloc_trim=fm_san_malloc_trim",
+      "-Dmallopt=fm_san_mallopt",
+      "-Dmalloc_stats=fm_san_malloc_stats",
+      "-Dmalloc_info=fm_san_malloc_info",
+      "-fPIC",
+      "-shared",
+      "-Isrc",
+      "-Wl,-z,nodelete",
+      "/workspace/faster-malloc/work/sanitizers/probes/before-jit-namespaced.c",
+      "src/jit_stubs.S",
+      "-pthread",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/probes/before-jit-tsan.so"
+    ],
+    "environment": {},
+    "status": 0
+  },
+  {
+    "test": "before-jitprofile-build",
+    "command": [
+      "/usr/bin/gcc",
+      "-O2",
+      "-g",
+      "-fno-omit-frame-pointer",
+      "-fsanitize=thread",
+      "-Dmalloc=fm_san_malloc",
+      "-Dfree=fm_san_free",
+      "-Dcalloc=fm_san_calloc",
+      "-Drealloc=fm_san_realloc",
+      "-Dreallocarray=fm_san_reallocarray",
+      "-Dposix_memalign=fm_san_posix_memalign",
+      "-Daligned_alloc=fm_san_aligned_alloc",
+      "-Dmemalign=fm_san_memalign",
+      "-Dvalloc=fm_san_valloc",
+      "-Dpvalloc=fm_san_pvalloc",
+      "-Dmalloc_usable_size=fm_san_malloc_usable_size",
+      "-Dmalloc_trim=fm_san_malloc_trim",
+      "-Dmallopt=fm_san_mallopt",
+      "-Dmalloc_stats=fm_san_malloc_stats",
+      "-Dmalloc_info=fm_san_malloc_info",
+      "bench/jitprofile.c",
+      "/workspace/faster-malloc/work/sanitizers/probes/before-jit-tsan.so",
+      "-pthread",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/probes/before-jitprofile"
+    ],
+    "environment": {},
+    "status": 0
+  },
+  {
+    "test": "before-jitprofile",
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/probes/before-jitprofile"
+    ],
+    "environment": {
+      "FM_JIT_MINSHARE": "101",
+      "FM_JIT_DEBUG": "1",
+      "TSAN_OPTIONS": "halt_on_error=0"
+    },
+    "status": 66
+  },
+  {
+    "test": "after-jit-tsan-build",
+    "command": [
+      "/usr/bin/gcc",
+      "-O2",
+      "-g",
+      "-fno-omit-frame-pointer",
+      "-fsanitize=thread",
+      "-Dmalloc=fm_san_malloc",
+      "-Dfree=fm_san_free",
+      "-Dcalloc=fm_san_calloc",
+      "-Drealloc=fm_san_realloc",
+      "-Dreallocarray=fm_san_reallocarray",
+      "-Dposix_memalign=fm_san_posix_memalign",
+      "-Daligned_alloc=fm_san_aligned_alloc",
+      "-Dmemalign=fm_san_memalign",
+      "-Dvalloc=fm_san_valloc",
+      "-Dpvalloc=fm_san_pvalloc",
+      "-Dmalloc_usable_size=fm_san_malloc_usable_size",
+      "-Dmalloc_trim=fm_san_malloc_trim",
+      "-Dmallopt=fm_san_mallopt",
+      "-Dmalloc_stats=fm_san_malloc_stats",
+      "-Dmalloc_info=fm_san_malloc_info",
+      "-fPIC",
+      "-shared",
+      "-Isrc",
+      "-Wl,-z,nodelete",
+      "/workspace/faster-malloc/work/sanitizers/probes/after-jit-namespaced.c",
+      "src/jit_stubs.S",
+      "-pthread",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/probes/after-jit-tsan.so"
+    ],
+    "environment": {},
+    "status": 0
+  },
+  {
+    "test": "after-jitprofile-build",
+    "command": [
+      "/usr/bin/gcc",
+      "-O2",
+      "-g",
+      "-fno-omit-frame-pointer",
+      "-fsanitize=thread",
+      "-Dmalloc=fm_san_malloc",
+      "-Dfree=fm_san_free",
+      "-Dcalloc=fm_san_calloc",
+      "-Drealloc=fm_san_realloc",
+      "-Dreallocarray=fm_san_reallocarray",
+      "-Dposix_memalign=fm_san_posix_memalign",
+      "-Daligned_alloc=fm_san_aligned_alloc",
+      "-Dmemalign=fm_san_memalign",
+      "-Dvalloc=fm_san_valloc",
+      "-Dpvalloc=fm_san_pvalloc",
+      "-Dmalloc_usable_size=fm_san_malloc_usable_size",
+      "-Dmalloc_trim=fm_san_malloc_trim",
+      "-Dmallopt=fm_san_mallopt",
+      "-Dmalloc_stats=fm_san_malloc_stats",
+      "-Dmalloc_info=fm_san_malloc_info",
+      "bench/jitprofile.c",
+      "/workspace/faster-malloc/work/sanitizers/probes/after-jit-tsan.so",
+      "-pthread",
+      "-o",
+      "/workspace/faster-malloc/work/sanitizers/probes/after-jitprofile"
+    ],
+    "environment": {},
+    "status": 0
+  },
+  {
+    "test": "after-jitprofile",
+    "command": [
+      "/workspace/faster-malloc/work/sanitizers/probes/after-jitprofile"
+    ],
+    "environment": {
+      "FM_JIT_MINSHARE": "101",
+      "FM_JIT_DEBUG": "1",
+      "TSAN_OPTIONS": "halt_on_error=0"
+    },
+    "status": 0
+  }
+]

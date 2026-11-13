@@ -64,3 +64,7 @@ mark were recorded when the work was done.
 | [0051](0051-shortlived-footprint-profile.md) | Existing footprint profile for short-lived apps | Rejected recommendation |
 | [0052](0052-shortlived-large-cache.md) | Opt-in shortlived profile | Accepted opt-in |
 | [0053](0053-shortlived-zero-age.md) | Zero-age span release for short-lived apps | Rejected |
+| [0054](0054-crossfree-trylock-diagnosis.md) | Cross-free trylock diagnosis | Accepted measurement |
+| [0055](0055-bounded-census-spin.md) | Bounded census spin | Rejected |
+| [0056](0056-census-contention-hint.md) | Advisory census busy hint | Rejected |
+| [0057](0057-census-thread-backoff.md) | Per-thread census backoff | Rejected |

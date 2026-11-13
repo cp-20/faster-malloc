@@ -1,0 +1,12 @@
+{"case": "cross", "build": "trylock", "rep": 0, "warmup": true, "seconds": 0.3756049189999544, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "identical", "rep": 0, "warmup": true, "seconds": 0.3167370040000037, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "identical", "rep": 1, "warmup": false, "seconds": 0.3182608750000213, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "trylock", "rep": 1, "warmup": false, "seconds": 0.3225936430000047, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "trylock", "rep": 2, "warmup": false, "seconds": 0.3380581949999737, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "identical", "rep": 2, "warmup": false, "seconds": 0.325536202999956, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "identical", "rep": 3, "warmup": false, "seconds": 0.3589304390000052, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "trylock", "rep": 3, "warmup": false, "seconds": 0.30612835799996674, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "trylock", "rep": 4, "warmup": false, "seconds": 0.31845927199998414, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "identical", "rep": 4, "warmup": false, "seconds": 0.4277502399999662, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "identical", "rep": 5, "warmup": false, "seconds": 0.33293398500001103, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "trylock", "rep": 5, "warmup": false, "seconds": 0.32930167600000004, "returncode": 0, "stdout": "", "stderr": ""}

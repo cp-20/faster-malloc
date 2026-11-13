@@ -1,0 +1,19 @@
+{
+  "cross": {
+    "blocking-no-census": {
+      "n": 5,
+      "median": 0.333475609000061,
+      "min": 0.29958435200001077,
+      "max": 0.5033618060000435
+    },
+    "trylock-no-census": {
+      "n": 5,
+      "median": 0.3451601940000728,
+      "min": 0.29973171399990406,
+      "max": 0.42995564500006367
+    },
+    "delta_percent": 3.5038799494357287,
+    "separated_win": false,
+    "faster_pairs": 4
+  }
+}

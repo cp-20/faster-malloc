@@ -1,0 +1,2 @@
+DIAG attempts=2 bail=1 acquired=1 walked=0 released=0 purged=0 spans=1
+diagnostic busy and explicit counters ok

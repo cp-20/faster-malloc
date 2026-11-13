@@ -1,0 +1,12 @@
+{"case": "cross", "build": "blocking-no-census", "rep": 0, "warmup": true, "seconds": 0.49539397700004884, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "trylock-no-census", "rep": 0, "warmup": true, "seconds": 0.45375423499990575, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "trylock-no-census", "rep": 1, "warmup": false, "seconds": 0.36005239500002517, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "blocking-no-census", "rep": 1, "warmup": false, "seconds": 0.3996128349999708, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "blocking-no-census", "rep": 2, "warmup": false, "seconds": 0.5033618060000435, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "trylock-no-census", "rep": 2, "warmup": false, "seconds": 0.3451601940000728, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "trylock-no-census", "rep": 3, "warmup": false, "seconds": 0.29973171399990406, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "blocking-no-census", "rep": 3, "warmup": false, "seconds": 0.3034020600000531, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "blocking-no-census", "rep": 4, "warmup": false, "seconds": 0.333475609000061, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "trylock-no-census", "rep": 4, "warmup": false, "seconds": 0.3190281419999792, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "trylock-no-census", "rep": 5, "warmup": false, "seconds": 0.42995564500006367, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "blocking-no-census", "rep": 5, "warmup": false, "seconds": 0.29958435200001077, "returncode": 0, "stdout": "", "stderr": ""}

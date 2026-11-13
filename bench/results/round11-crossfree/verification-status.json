@@ -1,0 +1,16 @@
+{
+  "base": "e598f281d2a15605f4b11424722aced8ca85f70e",
+  "ordinary_make_and_full_round7": [
+    "blocking: passed",
+    "default: passed"
+  ],
+  "debug_stress": "blocking/default x static/JIT x 3 = 12 passed",
+  "busy_census": "passed",
+  "full_debug_make_and_round7": "passed; separate full-debug driver exit 0",
+  "restored_ordinary_make": "passed",
+  "diagnostic_counter_selfcheck": "passed",
+  "binary_reproduction": "all seven SHA256 hashes match",
+  "initial_round11_wrapper": "exit 127 after successful underlying verifier; see verification-orchestration.txt",
+  "remaining_cause": "no measured bail-outs; exact residual timing cause unresolved",
+  "restored_v2_text": "matches measured default trylock DSO .text exactly"
+}

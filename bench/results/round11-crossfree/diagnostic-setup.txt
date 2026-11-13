@@ -1,0 +1,1 @@
+Initial diagnostic launcher failed before executing the benchmark: /usr/bin/time is absent (FileNotFoundError). Removed the optional RSS wrapper; retained census and span counters. No timed sample was discarded.

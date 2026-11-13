@@ -1,0 +1,7 @@
+work/round11/blocking.so: OK
+work/round11/trylock.so: OK
+work/round11/spin.so: OK
+work/round11/hint.so: OK
+work/round11/backoff.so: OK
+work/round11/blocking-diag.so: OK
+work/round11/trylock-diag.so: OK

@@ -1,0 +1,48 @@
+{"case": "local", "build": "trylock", "rep": 0, "warmup": true, "seconds": 0.42288171600000624, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "hint", "rep": 0, "warmup": true, "seconds": 0.4284652820000474, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "hint", "rep": 1, "warmup": false, "seconds": 0.42905334699997866, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "trylock", "rep": 1, "warmup": false, "seconds": 0.47045707699999184, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "trylock", "rep": 2, "warmup": false, "seconds": 0.42295597699995824, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "hint", "rep": 2, "warmup": false, "seconds": 0.4451441109999905, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "hint", "rep": 3, "warmup": false, "seconds": 0.4312115469999753, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "trylock", "rep": 3, "warmup": false, "seconds": 0.4721401040000046, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "trylock", "rep": 4, "warmup": false, "seconds": 0.4365520630000219, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "hint", "rep": 4, "warmup": false, "seconds": 0.4214422769999828, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "hint", "rep": 5, "warmup": false, "seconds": 0.44972890999997617, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "trylock", "rep": 5, "warmup": false, "seconds": 0.4345469749999893, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "trylock", "rep": 0, "warmup": true, "seconds": 0.24198180100000855, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "hint", "rep": 0, "warmup": true, "seconds": 0.22818616000000702, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "hint", "rep": 1, "warmup": false, "seconds": 0.32847894600001837, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "trylock", "rep": 1, "warmup": false, "seconds": 0.19424549499996147, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "trylock", "rep": 2, "warmup": false, "seconds": 0.34085738200002424, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "hint", "rep": 2, "warmup": false, "seconds": 0.24154435299999477, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "hint", "rep": 3, "warmup": false, "seconds": 0.426227329000028, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "trylock", "rep": 3, "warmup": false, "seconds": 0.19261576999997487, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "trylock", "rep": 4, "warmup": false, "seconds": 0.3264870439999754, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "hint", "rep": 4, "warmup": false, "seconds": 0.328313799, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "hint", "rep": 5, "warmup": false, "seconds": 0.33289459300004864, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "trylock", "rep": 5, "warmup": false, "seconds": 0.19170427599999584, "returncode": 0, "stdout": "", "stderr": ""}
+{"case": "many", "build": "trylock", "rep": 0, "warmup": true, "seconds": 1.688361284999985, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "hint", "rep": 0, "warmup": true, "seconds": 1.1379471980000062, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "hint", "rep": 1, "warmup": false, "seconds": 1.1680571030000237, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "trylock", "rep": 1, "warmup": false, "seconds": 1.7347919679999677, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "trylock", "rep": 2, "warmup": false, "seconds": 1.1975383920000127, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "hint", "rep": 2, "warmup": false, "seconds": 1.8959738430000357, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "hint", "rep": 3, "warmup": false, "seconds": 2.0178986349999946, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "trylock", "rep": 3, "warmup": false, "seconds": 1.5842084209999712, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "trylock", "rep": 4, "warmup": false, "seconds": 1.226268048999998, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "hint", "rep": 4, "warmup": false, "seconds": 1.8111900630000264, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "hint", "rep": 5, "warmup": false, "seconds": 1.0501294200000189, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "trylock", "rep": 5, "warmup": false, "seconds": 1.2493965439999783, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "census", "build": "trylock", "rep": 0, "warmup": true, "seconds": 2.946933079999951, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "hint", "rep": 0, "warmup": true, "seconds": 2.991421129999992, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "hint", "rep": 1, "warmup": false, "seconds": 3.0572714740000038, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "trylock", "rep": 1, "warmup": false, "seconds": 3.083074269000008, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "trylock", "rep": 2, "warmup": false, "seconds": 3.148902722999992, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "hint", "rep": 2, "warmup": false, "seconds": 2.831185373999972, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "hint", "rep": 3, "warmup": false, "seconds": 3.065001808999966, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "trylock", "rep": 3, "warmup": false, "seconds": 3.0476949000000104, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "trylock", "rep": 4, "warmup": false, "seconds": 3.382272576000048, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "hint", "rep": 4, "warmup": false, "seconds": 3.0096207219999656, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "hint", "rep": 5, "warmup": false, "seconds": 2.867164202999959, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "trylock", "rep": 5, "warmup": false, "seconds": 2.7472292379999885, "returncode": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}

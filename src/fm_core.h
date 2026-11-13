@@ -163,7 +163,7 @@ extern FM_Central fm_central[CLASS_COUNT];
 static pthread_mutex_t fm_census_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t fm_central_lock = PTHREAD_MUTEX_INITIALIZER;
 
-/* ADR 0048: measured default; compile with =0 for the blocking control. */
+/* ADR 0049: measured default; compile with =0 for the blocking control. */
 #ifndef FM_CENSUS_TRYLOCK
 #define FM_CENSUS_TRYLOCK 1
 #endif

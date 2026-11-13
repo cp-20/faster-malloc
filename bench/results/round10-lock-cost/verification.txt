@@ -1,0 +1,6 @@
+Pre-promotion blocking and adaptive make/round7: PASS
+FM_DEBUG blocking/adaptive static/JIT, three stress runs each (12): PASS
+Focused busy-census regression: PASS
+Promoted ordinary-default make and full round7: PASS
+Exact f90550c control .text comparison: PASS
+Promoted/final v2 .text vs measured adaptive candidate: PASS

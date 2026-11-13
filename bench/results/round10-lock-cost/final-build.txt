@@ -1,0 +1,2 @@
+cc -O3 -g -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -shared -Wl,-z,nodelete -o libfastmalloc2.so src/fm_static.c
+cc -O3 -g -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -shared -Wl,-z,nodelete -o libjitmalloc.so src/fm_jit.c src/jit_stubs.S

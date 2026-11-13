@@ -1,0 +1,4 @@
+5745bb0e32e9729ca872f0106915b17124428b20527cf55b78248bcf800f322d  work/lock-cost/base.text
+5745bb0e32e9729ca872f0106915b17124428b20527cf55b78248bcf800f322d  work/lock-cost/exact.text
+5e2bb32e1b19bdbe911b51b730f7a9b23d4bfeafa4a666f6addb9b8752226d43  work/lock-cost/candidate.text
+5e2bb32e1b19bdbe911b51b730f7a9b23d4bfeafa4a666f6addb9b8752226d43  work/lock-cost/promoted.text

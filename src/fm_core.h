@@ -163,6 +163,11 @@ extern FM_Central fm_central[CLASS_COUNT];
 static pthread_mutex_t fm_census_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t fm_central_lock = PTHREAD_MUTEX_INITIALIZER;
 
+/* ADR 0048: measured default; compile with =0 for the blocking control. */
+#ifndef FM_CENSUS_TRYLOCK
+#define FM_CENSUS_TRYLOCK 1
+#endif
+
 /* ADR 0041: experimental synchronous epochs; never enabled by default.
  * Closed admission + zero readers is a grace period for every old header. */
 #ifdef FM_RECLAIM_EPOCH
@@ -945,10 +950,17 @@ static int fm_batch_count_desc(const void *a, const void *b)
 __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t keep,
                                                       int instant)
 {
-    pthread_mutex_lock(&fm_census_lock);
     fm_census_walked = fm_census_marked = fm_census_waiting = 0;
     fm_census_reclaimed = fm_census_pg_waiting = 0;
     fm_census_purged = 0;
+#if FM_CENSUS_TRYLOCK
+    /* Automatic release is opportunistic; explicit trim still waits. */
+    if (!instant) {
+        if (pthread_mutex_trylock(&fm_census_lock) != 0)
+            return 0;
+    } else
+#endif
+        pthread_mutex_lock(&fm_census_lock);
     int was_in_census = fm_in_census;
     fm_in_census = 1; /* the flush below must not re-trigger release */
     fm_flush_bin(cls);

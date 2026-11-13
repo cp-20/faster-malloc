@@ -52,3 +52,11 @@ mark were recorded when the work was done.
 | [0037](0037-realloc-cache-search-measurements.md) | Real-application realloc cache-search measurements | Measurement accepted; default promotion rejected |
 | [0038](0038-ownership-locking-measurements.md) | Central/census ownership cost under many-class traffic | Measured; safe reclamation redesign deferred |
 | [0039](0039-app-matrix-cloud-refresh.md) | nginx/pgbench/Ruby cloud re-baseline and demo refresh | Measurement accepted; quiet-box ranking deferred |
+| [0040](0040-idle-timer-lifecycle.md) | Idle-timer dlclose/unload lifecycle via nodelete | Accepted; timer remains default-off |
+| [0041](0041-synchronous-epoch-reclamation.md) | Synchronous epoch batch reclamation prototype | Rejected for adoption; disabled prototype retained |
+| [0044](0044-posix-memalign-error-output.md) | posix_memalign error-path output pointer | Accepted |
+| [0045](0045-jit-profile-races.md) | JIT profiling trigger counter and give-up flag races | Accepted |
+| [0046](0046-idle-fault-counter.md) | Idle fault-injection counter atomicity | Accepted |
+| [0047](0047-v1-alignment-error-paths.md) | v1 alignment failure contracts | Accepted |
+| [0048](0048-central-lock-stripes.md) | Central-stack class-group lock stripes | Rejected for default adoption |
+| [0049](0049-opportunistic-automatic-census.md) | Skip busy automatic census without weakening ownership | Accepted default |

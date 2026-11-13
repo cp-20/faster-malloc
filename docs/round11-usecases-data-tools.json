@@ -1,0 +1,428 @@
+{
+  "reps": 5,
+  "input_bytes": 40020291,
+  "input_sha256": "81206924780b631b513265317837635a86f3a2511be95fdaa0017f563aa802a6",
+  "output_sha256": {
+    "sort": "aee50e7a90f0c9e6cd5a6fadebca3766615ddf831d5c274d6488779f4fd57cbe",
+    "xz": "5db980770640821de422eae3470f2433851ce3d3465cbf2e48c738cf7e42be94"
+  },
+  "commands": {
+    "sort": [
+      "sort",
+      "--parallel=1",
+      "-S",
+      "128M",
+      "-k1,1n",
+      "/workspace/faster-malloc/bench/apps/work/data-tools-qw46nm7e/events.tsv"
+    ],
+    "xz": [
+      "xz",
+      "-T1",
+      "-6",
+      "-c",
+      "/workspace/faster-malloc/bench/apps/work/data-tools-qw46nm7e/events.tsv"
+    ]
+  },
+  "libraries": {
+    "glibc": "",
+    "v2": "/workspace/faster-malloc/libfastmalloc2.so",
+    "jemalloc": "/lib/x86_64-linux-gnu/libjemalloc.so.2",
+    "mimalloc": "/workspace/faster-malloc/work/packages/extracted/usr/lib/x86_64-linux-gnu/libmimalloc.so.2"
+  },
+  "samples": [
+    {
+      "app": "sort",
+      "allocator": "glibc",
+      "rep": 1,
+      "seconds": 0.622,
+      "rss_kib": 58496
+    },
+    {
+      "app": "sort",
+      "allocator": "v2",
+      "rep": 1,
+      "seconds": 0.393,
+      "rss_kib": 59008
+    },
+    {
+      "app": "sort",
+      "allocator": "jemalloc",
+      "rep": 1,
+      "seconds": 0.408,
+      "rss_kib": 60160
+    },
+    {
+      "app": "sort",
+      "allocator": "mimalloc",
+      "rep": 1,
+      "seconds": 0.34,
+      "rss_kib": 58752
+    },
+    {
+      "app": "sort",
+      "allocator": "v2",
+      "rep": 2,
+      "seconds": 0.349,
+      "rss_kib": 59008
+    },
+    {
+      "app": "sort",
+      "allocator": "jemalloc",
+      "rep": 2,
+      "seconds": 0.366,
+      "rss_kib": 60160
+    },
+    {
+      "app": "sort",
+      "allocator": "mimalloc",
+      "rep": 2,
+      "seconds": 0.388,
+      "rss_kib": 58752
+    },
+    {
+      "app": "sort",
+      "allocator": "glibc",
+      "rep": 2,
+      "seconds": 0.357,
+      "rss_kib": 58496
+    },
+    {
+      "app": "sort",
+      "allocator": "jemalloc",
+      "rep": 3,
+      "seconds": 0.374,
+      "rss_kib": 60160
+    },
+    {
+      "app": "sort",
+      "allocator": "mimalloc",
+      "rep": 3,
+      "seconds": 0.354,
+      "rss_kib": 58752
+    },
+    {
+      "app": "sort",
+      "allocator": "glibc",
+      "rep": 3,
+      "seconds": 0.356,
+      "rss_kib": 58496
+    },
+    {
+      "app": "sort",
+      "allocator": "v2",
+      "rep": 3,
+      "seconds": 0.378,
+      "rss_kib": 59008
+    },
+    {
+      "app": "sort",
+      "allocator": "mimalloc",
+      "rep": 4,
+      "seconds": 0.356,
+      "rss_kib": 58752
+    },
+    {
+      "app": "sort",
+      "allocator": "glibc",
+      "rep": 4,
+      "seconds": 0.558,
+      "rss_kib": 58496
+    },
+    {
+      "app": "sort",
+      "allocator": "v2",
+      "rep": 4,
+      "seconds": 0.38,
+      "rss_kib": 59008
+    },
+    {
+      "app": "sort",
+      "allocator": "jemalloc",
+      "rep": 4,
+      "seconds": 0.392,
+      "rss_kib": 60160
+    },
+    {
+      "app": "sort",
+      "allocator": "glibc",
+      "rep": 5,
+      "seconds": 0.442,
+      "rss_kib": 58496
+    },
+    {
+      "app": "sort",
+      "allocator": "v2",
+      "rep": 5,
+      "seconds": 0.401,
+      "rss_kib": 59008
+    },
+    {
+      "app": "sort",
+      "allocator": "jemalloc",
+      "rep": 5,
+      "seconds": 0.355,
+      "rss_kib": 60160
+    },
+    {
+      "app": "sort",
+      "allocator": "mimalloc",
+      "rep": 5,
+      "seconds": 0.35,
+      "rss_kib": 58752
+    },
+    {
+      "app": "xz",
+      "allocator": "glibc",
+      "rep": 1,
+      "seconds": 34.729,
+      "rss_kib": 86016
+    },
+    {
+      "app": "xz",
+      "allocator": "v2",
+      "rep": 1,
+      "seconds": 33.51,
+      "rss_kib": 86784
+    },
+    {
+      "app": "xz",
+      "allocator": "jemalloc",
+      "rep": 1,
+      "seconds": 34.264,
+      "rss_kib": 88704
+    },
+    {
+      "app": "xz",
+      "allocator": "mimalloc",
+      "rep": 1,
+      "seconds": 34.7,
+      "rss_kib": 97152
+    },
+    {
+      "app": "xz",
+      "allocator": "v2",
+      "rep": 2,
+      "seconds": 34.327,
+      "rss_kib": 86656
+    },
+    {
+      "app": "xz",
+      "allocator": "jemalloc",
+      "rep": 2,
+      "seconds": 34.773,
+      "rss_kib": 88576
+    },
+    {
+      "app": "xz",
+      "allocator": "mimalloc",
+      "rep": 2,
+      "seconds": 36.544,
+      "rss_kib": 97024
+    },
+    {
+      "app": "xz",
+      "allocator": "glibc",
+      "rep": 2,
+      "seconds": 34.232,
+      "rss_kib": 86016
+    },
+    {
+      "app": "xz",
+      "allocator": "jemalloc",
+      "rep": 3,
+      "seconds": 34.162,
+      "rss_kib": 88704
+    },
+    {
+      "app": "xz",
+      "allocator": "mimalloc",
+      "rep": 3,
+      "seconds": 33.037,
+      "rss_kib": 97152
+    },
+    {
+      "app": "xz",
+      "allocator": "glibc",
+      "rep": 3,
+      "seconds": 34.01,
+      "rss_kib": 86016
+    },
+    {
+      "app": "xz",
+      "allocator": "v2",
+      "rep": 3,
+      "seconds": 35.303,
+      "rss_kib": 86656
+    },
+    {
+      "app": "xz",
+      "allocator": "mimalloc",
+      "rep": 4,
+      "seconds": 34.669,
+      "rss_kib": 97152
+    },
+    {
+      "app": "xz",
+      "allocator": "glibc",
+      "rep": 4,
+      "seconds": 33.885,
+      "rss_kib": 86016
+    },
+    {
+      "app": "xz",
+      "allocator": "v2",
+      "rep": 4,
+      "seconds": 35.043,
+      "rss_kib": 86784
+    },
+    {
+      "app": "xz",
+      "allocator": "jemalloc",
+      "rep": 4,
+      "seconds": 34.281,
+      "rss_kib": 88960
+    },
+    {
+      "app": "xz",
+      "allocator": "glibc",
+      "rep": 5,
+      "seconds": 34.532,
+      "rss_kib": 86016
+    },
+    {
+      "app": "xz",
+      "allocator": "v2",
+      "rep": 5,
+      "seconds": 34.741,
+      "rss_kib": 86656
+    },
+    {
+      "app": "xz",
+      "allocator": "jemalloc",
+      "rep": 5,
+      "seconds": 33.339,
+      "rss_kib": 88704
+    },
+    {
+      "app": "xz",
+      "allocator": "mimalloc",
+      "rep": 5,
+      "seconds": 32.813,
+      "rss_kib": 97152
+    }
+  ],
+  "summary": [
+    {
+      "app": "sort",
+      "allocator": "glibc",
+      "seconds": {
+        "median": 0.442,
+        "min": 0.356,
+        "max": 0.622
+      },
+      "rss_kib": {
+        "median": 58496,
+        "min": 58496,
+        "max": 58496
+      }
+    },
+    {
+      "app": "sort",
+      "allocator": "v2",
+      "seconds": {
+        "median": 0.38,
+        "min": 0.349,
+        "max": 0.401
+      },
+      "rss_kib": {
+        "median": 59008,
+        "min": 59008,
+        "max": 59008
+      }
+    },
+    {
+      "app": "sort",
+      "allocator": "jemalloc",
+      "seconds": {
+        "median": 0.374,
+        "min": 0.355,
+        "max": 0.408
+      },
+      "rss_kib": {
+        "median": 60160,
+        "min": 60160,
+        "max": 60160
+      }
+    },
+    {
+      "app": "sort",
+      "allocator": "mimalloc",
+      "seconds": {
+        "median": 0.354,
+        "min": 0.34,
+        "max": 0.388
+      },
+      "rss_kib": {
+        "median": 58752,
+        "min": 58752,
+        "max": 58752
+      }
+    },
+    {
+      "app": "xz",
+      "allocator": "glibc",
+      "seconds": {
+        "median": 34.232,
+        "min": 33.885,
+        "max": 34.729
+      },
+      "rss_kib": {
+        "median": 86016,
+        "min": 86016,
+        "max": 86016
+      }
+    },
+    {
+      "app": "xz",
+      "allocator": "v2",
+      "seconds": {
+        "median": 34.741,
+        "min": 33.51,
+        "max": 35.303
+      },
+      "rss_kib": {
+        "median": 86656,
+        "min": 86656,
+        "max": 86784
+      }
+    },
+    {
+      "app": "xz",
+      "allocator": "jemalloc",
+      "seconds": {
+        "median": 34.264,
+        "min": 33.339,
+        "max": 34.773
+      },
+      "rss_kib": {
+        "median": 88704,
+        "min": 88576,
+        "max": 88960
+      }
+    },
+    {
+      "app": "xz",
+      "allocator": "mimalloc",
+      "seconds": {
+        "median": 34.669,
+        "min": 32.813,
+        "max": 36.544
+      },
+      "rss_kib": {
+        "median": 97152,
+        "min": 97024,
+        "max": 97152
+      }
+    }
+  ]
+}

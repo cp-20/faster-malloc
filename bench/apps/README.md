@@ -82,3 +82,30 @@ Timing uses `run_timed.py` (fork/wait4 + rusage) instead of GNU
 time so the harness has no extra dependency; for redis, whose
 server daemonises, the wall time brackets redis-benchmark and
 RSS is the server's VmHWM.
+
+## Round-11 offline data tools
+
+Two additional standalone matrix cells use installed GNU sort and XZ, with
+no downloads or builds at runtime:
+
+```sh
+make
+MIMALLOC_LIB=/path/to/libmimalloc.so.2 REPS=5 python3 bench/apps/data_tools.py
+```
+
+`data_tools.py` creates a deterministic 400,000-row TSV event log, then runs
+single-threaded numeric-key sorting (`sort --parallel=1 -S 128M -k1,1n`) and
+log compression (`xz -T1 -6 -c`). It requires glibc, v2, jemalloc and mimalloc
+rather than silently skipping a comparison. `JEMALLOC_LIB` and `MIMALLOC_LIB`
+override library paths. Allocator profile variables are cleared, so v2 is
+balanced. Each repetition rotates the first allocator. A libc warmup is
+checked with `sort -c` or XZ decompression and a SHA-256 round trip; every
+measured output must match its reference hash. Failures stop the run.
+
+Unlike the older minimum-time cells, this reports separate medians and
+min/max ranges for wall seconds and peak RSS (KiB), plus all raw samples in
+`bench/apps/work/data-tools.json` (`RESULTS` overrides the destination).
+Timing reuses `run_timed.py` with the preload applied only to the child tool;
+fixture generation, reference validation, and hashing are outside timing.
+These measure warm-cache local data processing, not disk throughput or
+multithreaded compression. At least five repetitions are mandatory.

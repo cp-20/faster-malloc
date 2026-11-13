@@ -1,0 +1,53 @@
+--- a/src/fm_core.h
++++ b/src/fm_core.h
+@@ -164,0 +165,13 @@
++#ifdef FM_CENTRAL_STRIPES
++#ifdef FM_RECLAIM_EPOCH
++#error "central stripes and experimental epochs are separate prototypes"
++#endif
++/* Each header belongs to one class; fork takes every stripe in order. */
++static struct { pthread_mutex_t lock; char pad[64]; } fm_central_stripes[16];
++#define fm_class_exclusive(cls) pthread_mutex_lock(&fm_central_stripes[(cls) % 16].lock)
++#define fm_class_resume(cls) pthread_mutex_unlock(&fm_central_stripes[(cls) % 16].lock)
++#else
++#define fm_class_exclusive(cls) fm_stack_exclusive()
++#define fm_class_resume(cls) fm_stack_resume()
++#endif
++
+@@ -478 +491 @@
+-    fm_stack_exclusive();
++    fm_class_exclusive(cls);
+@@ -482 +495 @@
+-    fm_stack_resume();
++    fm_class_resume(cls);
+@@ -612,2 +625,2 @@
+-            fm_stack_exclusive();
+-            fm_stack_resume();
++            fm_class_exclusive(cls);
++            fm_class_resume(cls);
+@@ -616 +629 @@
+-        fm_stack_exclusive();
++        fm_class_exclusive(cls);
+@@ -622 +635 @@
+-        fm_stack_resume();
++        fm_class_resume(cls);
+@@ -960 +973 @@
+-    fm_stack_exclusive();
++    fm_class_exclusive(cls);
+@@ -964 +977 @@
+-    fm_stack_resume();
++    fm_class_resume(cls);
+@@ -1556,0 +1570,4 @@
++#ifdef FM_CENTRAL_STRIPES
++    for (unsigned i = 0; i < 16; i++)
++        pthread_mutex_lock(&fm_central_stripes[i].lock);
++#else
+@@ -1557,0 +1575 @@
++#endif
+@@ -1561,0 +1580,4 @@
++#ifdef FM_CENTRAL_STRIPES
++    for (unsigned i = 16; i-- > 0;)
++        pthread_mutex_unlock(&fm_central_stripes[i].lock);
++#else
+@@ -1562,0 +1585 @@
++#endif

@@ -1,0 +1,24 @@
+default static 1
+stress ok
+default static 2
+stress ok
+default static 3
+stress ok
+default jit 1
+stress ok
+default jit 2
+stress ok
+default jit 3
+stress ok
+adaptive static 1
+stress ok
+adaptive static 2
+stress ok
+adaptive static 3
+stress ok
+adaptive jit 1
+stress ok
+adaptive jit 2
+stress ok
+adaptive jit 3
+stress ok

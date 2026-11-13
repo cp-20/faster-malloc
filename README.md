@@ -501,7 +501,12 @@ What the JIT does demonstrate is real and useful:
   when the process is measured, and survivors scattered across
   partially-free spans (bursty's idle RSS: v2 88 MB, mimalloc
   54 MB — mimalloc purges at page granularity, v2 at span
-  granularity; see docs/round5-2026-11-13.md).
+  granularity; see docs/round5-2026-11-13.md). Round 6 closed
+  exactly that: the census now purges individual pages inside
+  partially-free spans (ADR 0030), and bursty's idle-2 RSS is
+  44 MB — best in the field, ahead of mimalloc's 55 MB; an opt-in
+  timer thread (`FM_IDLE_RELEASE=1`, ADR 0032) extends the same
+  return to processes that go completely silent.
 * **Locality on reuse.** glibc and mimalloc have fewer D1 misses than v2 on
   the churn workload (1264 and 1815 against 1731) because they reuse the
   same physical page over and over, while v2's blocks come from many
@@ -534,7 +539,9 @@ What the JIT does demonstrate is real and useful:
    Round 4: automatic small-span return landed, with dead-span
    ageing — ADR 0020. Round 5: occupancy-aware placement (ADR 0024),
    runtime profiles FM_PROFILE (ADR 0027), and an idle-process
-   release design pass, deferred — ADR 0029.)*
+   release design pass, deferred — ADR 0029. Round 6: page-granular
+   purge inside partially-free spans (ADR 0030) and the idle
+   release implemented behind FM_IDLE_RELEASE (ADR 0032).)*
 3. **Make the JIT's dispatch branchless** — a jump table indexed by
    `size >> 4` would replace N range tests with one indirect branch, which
    might make specialisation profitable for diverse workloads too.
@@ -598,6 +605,9 @@ docs/
                    two rejected regrouping/dispatch variants)
   round5-2026-11-13.md   the round-5 log (occupancy placement,
                    profiles, four new use-case cells, Pareto scoring)
+  round6-2026-11-13.md   the round-6 log (page-granular purge,
+                   lua decomposition, idle release, a rejected
+                   realloc extension)
 ```
 
 ### Correctness

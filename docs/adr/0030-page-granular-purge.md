@@ -108,19 +108,22 @@ simpler (no runs), and captures nearly the whole ceiling.
 
 ## Measurements (this VM, within-session)
 
-Bursty cell (canonical harness, min-wall run):
+Bursty cell (canonical harness; the final build's run, with the
+round-5 figures alongside):
 
 | allocator | idle-1 RSS | idle-2 RSS |
 |---|---|---|
-| glibc | 74.6 MB | 103.6 MB |
+| glibc | 75.0 MB | 106.3 MB |
 | v2 (round 5) | ~78 MB | 88.2 MB |
-| **v2 + purge** | **52.4 MB** | **46.3 MB** |
+| **v2 + purge** | 77.8 MB | **44.2 MB** |
 | mimalloc | 79.3 MB | 54.8 MB |
-| jemalloc | 177.5 MB | 177.2 MB |
+| jemalloc | 81.5 MB | 114.5 MB |
 
 The headline gap is not just closed but reversed: v2 now holds
-the bursty idle title. Checksums identical across allocators;
-wall times within noise of each other (2.4–2.6 s).
+the bursty idle-2 title. Idle-2 is the stable column (v2 44–47 MB
+across every run this round); idle-1 is load-sensitive (a
+quieter mid-round run showed v2 at 52.4 MB). Checksums identical
+across allocators.
 
 Decomposition instrument (`bench/apps/bursty2.c`, a diagnostic
 fork of bursty that computes the exact purge ceiling from live

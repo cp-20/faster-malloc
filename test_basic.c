@@ -13,8 +13,10 @@
 #include <errno.h>
 #include <malloc.h>
 
-int main(void)
+int main(int argc, char **argv)
 {
+    int no_large_cache = argc == 2 && !strcmp(argv[1], "--no-large-cache");
+    if (argc > 1 && !no_large_cache) return 2;
     enum { N = 100000 };
     void *p[N];
     for (int i = 0; i < N; i++) {
@@ -171,7 +173,9 @@ int main(void)
         }
     }
     /* A 128 KiB request searches both possible buckets of a freed
-     * 200 KiB mapping; 40 KiB cannot reach either under this cache policy. */
+     * 200 KiB mapping; 40 KiB cannot reach either under this cache policy.
+     * With --no-large-cache only the reuse-specific pointer assertions
+     * are disabled; allocation, full writes and realloc data checks remain. */
     {
         malloc_trim(0);
         unsigned char *q = malloc(200 * 1024);
@@ -180,7 +184,7 @@ int main(void)
         free(q);
         q = malloc(128 * 1024);
         if (!q) { printf("large-cache reuse null\n"); return 1; }
-        if ((uintptr_t)q != cached) {
+        if (!no_large_cache && (uintptr_t)q != cached) {
             printf("large-cache mapping not reused\n");
             return 1;
         }
@@ -190,7 +194,7 @@ int main(void)
         unsigned char *grown = realloc(q, 150 * 1024);
         if (!grown) { printf("large-cache realloc null\n"); free(q); return 1; }
         q = grown;
-        if ((uintptr_t)q != previous) {
+        if (!no_large_cache && (uintptr_t)q != previous) {
             printf("large-cache realloc moved despite spare capacity\n");
             return 1;
         }

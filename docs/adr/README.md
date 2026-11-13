@@ -52,3 +52,7 @@ mark were recorded when the work was done.
 | [0037](0037-realloc-cache-search-measurements.md) | Real-application realloc cache-search measurements | Measurement accepted; default promotion rejected |
 | [0038](0038-ownership-locking-measurements.md) | Central/census ownership cost under many-class traffic | Measured; safe reclamation redesign deferred |
 | [0039](0039-app-matrix-cloud-refresh.md) | nginx/pgbench/Ruby cloud re-baseline and demo refresh | Measurement accepted; quiet-box ranking deferred |
+| [0047](0047-shortlived-rss-attribution.md) | Python/Node peak RSS attribution | Accepted measurement |
+| [0048](0048-shortlived-footprint-profile.md) | Existing footprint profile for short-lived apps | Rejected recommendation |
+| [0049](0049-shortlived-large-cache.md) | Opt-in shortlived profile | Accepted opt-in |
+| [0050](0050-shortlived-zero-age.md) | Zero-age span release for short-lived apps | Rejected |

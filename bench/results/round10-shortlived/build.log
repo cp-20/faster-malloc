@@ -1,0 +1,15 @@
+cc -O2 -g -o test_basic test_basic.c
+test_basic.c: In function ‘main’:
+test_basic.c:286:13: warning: product ‘9223372036854775807 * 3’ of arguments 1 and 2 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+  286 |         if (calloc(SIZE_MAX / 2, 3) != NULL) { printf("calloc overflow\n"); return 1; }
+      |             ^~~~~~~~~~~~~~~~~~~~~~~
+In file included from test_basic.c:14:
+/usr/include/malloc.h:43:14: note: in a call to allocation function ‘calloc’ declared here
+   43 | extern void *calloc (size_t __nmemb, size_t __size)
+      |              ^~~~~~
+test_basic.c:289:13: warning: product ‘9223372036854775807 * 3’ of arguments 2 and 3 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+  289 |         if (reallocarray(p, SIZE_MAX / 2, 3) != NULL) { printf("reallocarray overflow\n"); return 1; }
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/malloc.h:59:14: note: in a call to allocation function ‘reallocarray’ declared here
+   59 | extern void *reallocarray (void *__ptr, size_t __nmemb, size_t __size)
+      |              ^~~~~~~~~~~~

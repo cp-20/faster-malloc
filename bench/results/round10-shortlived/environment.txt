@@ -1,0 +1,18 @@
+Date: 2026-11-13 (one continuous cloud-container session)
+Base: f90550c (origin/main)
+OS: Debian GNU/Linux 13 (trixie), x86_64, 4096-byte pages
+CPU quota: cpu.max = 200000 100000 (2 CPUs); shared cloud host
+Compiler: GCC 14.2.0
+Python: 3.12.14
+Node: v24.22.1
+jemalloc: distro libjemalloc.so.2 (5.3.0)
+mimalloc: v2.1.7, GCC -O3 shared static.c build (README reproduction)
+mimalloc source archive SHA256: 0eed39319f139afde8515010ff59baf24de9e47ea316a315398e8027d198202d
+big.json SHA256: bc56bf7bc7e0ffa916e4f36c11755d2a8d88bee278a26a65a5f98a8530371a84
+Final matrix: 5 rotated rounds, 2 apps x 7 variants, 70 samples, serial.
+Final decomposition: 3 rounds, 2 apps x 2 variants, sampled paused-process snapshots.
+Guard probes: 5 alternating balanced/shortlived pairs per workload, serial.
+Startup: 5 rounds, 2 apps x 4 allocators, serial.
+Exploratory matrix overlaps diagnostic/build activity: excluded from final tables.
+The first round7 attempt stopped at a cache-reuse-specific assertion under
+shortlived; --no-large-cache now skips only the two pointer-reuse assertions.

@@ -669,3 +669,9 @@ the handlers. The v2/JIT shared libraries use ELF `NODELETE` (ADR 0040):
 callbacks and allocator state remain resident until process termination;
 normal exit does not join the worker, and the kernel reclaims all resources.
 Custom v2/JIT builds must also link with `-Wl,-z,nodelete`. Run `bash bench/round7.sh` for the correctness battery.
+
+For allocation-heavy short-lived Python/Node jobs, `FM_PROFILE=shortlived`
+uses balanced span policy with large-block caching disabled. It trades large
+allocation reuse for lower peak RSS; `FM_LCACHE_MAX_BYTES` still overrides it.
+See ADR [0052](docs/adr/0052-shortlived-large-cache.md) and the same-session
+[round-10 measurements](docs/round10-2026-11-13.md#short-lived-python-and-node-rss).

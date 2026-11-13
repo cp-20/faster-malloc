@@ -273,8 +273,7 @@ extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec"
 /* slow-path knobs are runtime-configurable through the environment. */
 /*                                                                     */
 /*   FM_PROFILE            balanced (default) | throughput |         */
-/*                         footprint -- named presets for the whole  */
-/*                         knob set                                  */
+/*                         footprint | shortlived -- named presets   */
 /*   FM_RELEASE_AGE_MS     dead-span ageing before automatic unmap   */
 /*   FM_RELEASE_KEEP       dead spans retained per class             */
 /*   FM_RELEASE_MIN_DEPTH  central batches before a class is         */
@@ -344,6 +343,9 @@ static void fm_config_init(void)
             c.release_walk_div = 25;
             c.lcache_max_bytes = 256ull << 20;
             c.page_purge = 0;
+        } else if (!strcmp(prof, "shortlived")) {
+            /* ADR 0052: avoid retaining large temporaries across app phases. */
+            c.lcache_max_bytes = 0;
         } else if (!strcmp(prof, "footprint")) {
             /* Return memory eagerly; keep almost nothing back. */
             c.release_age_ms = 25;

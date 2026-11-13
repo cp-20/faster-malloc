@@ -60,3 +60,7 @@ mark were recorded when the work was done.
 | [0047](0047-v1-alignment-error-paths.md) | v1 alignment failure contracts | Accepted |
 | [0048](0048-central-lock-stripes.md) | Central-stack class-group lock stripes | Rejected for default adoption |
 | [0049](0049-opportunistic-automatic-census.md) | Skip busy automatic census without weakening ownership | Accepted default |
+| [0050](0050-shortlived-rss-attribution.md) | Python/Node peak RSS attribution | Accepted measurement |
+| [0051](0051-shortlived-footprint-profile.md) | Existing footprint profile for short-lived apps | Rejected recommendation |
+| [0052](0052-shortlived-large-cache.md) | Opt-in shortlived profile | Accepted opt-in |
+| [0053](0053-shortlived-zero-age.md) | Zero-age span release for short-lived apps | Rejected |

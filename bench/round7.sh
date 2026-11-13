@@ -11,6 +11,8 @@ for lib in libfastmalloc2.so libjitmalloc.so; do
     for profile in balanced throughput footprint; do
         FM_PROFILE=$profile ./test_basic
     done
+    FM_PROFILE=shortlived ./test_basic --no-large-cache
+    FM_PROFILE=shortlived ./bench/stress
     for rep in 1 2 3; do ./bench/stress; done
     ./bench/check
     ./bench/mt 0

@@ -1,0 +1,47 @@
+{
+  "base": "3d1e114cc9982ed19f96205b5833e7eb4e5c6a05",
+  "decision": "reject: Lua peak passes; guard neutrality not established",
+  "batteries": {
+    "bench/results/round12/verification/ordinary-mode0-battery.txt": {
+      "last_line": "epoch stalled-reader grace ok",
+      "lines": 60,
+      "stress_successes": 10
+    },
+    "bench/results/round12/verification/debug-mode1-battery.txt": {
+      "last_line": "epoch stalled-reader grace ok",
+      "lines": 60,
+      "stress_successes": 10
+    },
+    "bench/results/round12/verification/debug-mode0-battery.txt": {
+      "last_line": "epoch stalled-reader grace ok",
+      "lines": 60,
+      "stress_successes": 10
+    },
+    "bench/results/round12/verification/ordinary-mode1-battery.txt": {
+      "last_line": "epoch stalled-reader grace ok",
+      "lines": 60,
+      "stress_successes": 10
+    },
+    "bench/results/round12/final-verification/debug-battery.txt": {
+      "last_line": "epoch stalled-reader grace ok",
+      "lines": 60,
+      "stress_successes": 10
+    },
+    "bench/results/round12/final-verification/ordinary-battery.txt": {
+      "last_line": "epoch stalled-reader grace ok",
+      "lines": 60,
+      "stress_successes": 10
+    }
+  },
+  "focused_debug_test": "passed, including final volatile calloc check",
+  "prototype_sha256": "df620dd3043764b9a2f42a41dafc51305e52e74370270541ca5ab9d99d70c512",
+  "final_sha256": "a3058061c39274f9406061b63f135c548dffce6c3594c8fbd87efe2c6d9f09b9",
+  "final_matches_measured_base": true,
+  "production_sources_unchanged": true,
+  "measured_samples": {
+    "baseline": 20,
+    "lua_comparison": 10,
+    "initial_guards_including_warmups": 72,
+    "churn_confirmation": 160
+  }
+}

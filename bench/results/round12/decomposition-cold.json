@@ -1,0 +1,62 @@
+[
+  {
+    "rep": 0,
+    "peak": {
+      "small_resident_kb": 9336,
+      "large_live_resident_kb": 3148,
+      "cached_large_resident_kb": 260,
+      "small_spans": 161,
+      "fully_free_small_resident_kb": 2104,
+      "partial_small_resident_kb": 7232,
+      "small_live_capacity_kb": 5893.953125,
+      "diag_large_live_kb": 3136.0,
+      "diag_small_live_kb": 5893.953125,
+      "rss_kb": 14380,
+      "other_resident_kb": 1636,
+      "baseline_mappings_resident_kb": 1344,
+      "other_anonymous_resident_kb": 292
+    },
+    "stdout": "lua-churn checksum\t19466078\n",
+    "stderr": ""
+  },
+  {
+    "rep": 1,
+    "peak": {
+      "small_resident_kb": 9384,
+      "large_live_resident_kb": 3148,
+      "cached_large_resident_kb": 260,
+      "small_spans": 163,
+      "fully_free_small_resident_kb": 2220,
+      "partial_small_resident_kb": 7164,
+      "small_live_capacity_kb": 5893.953125,
+      "diag_large_live_kb": 3136.0,
+      "diag_small_live_kb": 5893.953125,
+      "rss_kb": 14432,
+      "other_resident_kb": 1640,
+      "baseline_mappings_resident_kb": 1348,
+      "other_anonymous_resident_kb": 292
+    },
+    "stdout": "lua-churn checksum\t19466078\n",
+    "stderr": ""
+  },
+  {
+    "rep": 2,
+    "peak": {
+      "small_resident_kb": 9408,
+      "large_live_resident_kb": 3148,
+      "cached_large_resident_kb": 260,
+      "small_spans": 158,
+      "fully_free_small_resident_kb": 2464,
+      "partial_small_resident_kb": 6944,
+      "small_live_capacity_kb": 5893.953125,
+      "diag_large_live_kb": 3136.0,
+      "diag_small_live_kb": 5893.953125,
+      "rss_kb": 14456,
+      "other_resident_kb": 1640,
+      "baseline_mappings_resident_kb": 1344,
+      "other_anonymous_resident_kb": 296
+    },
+    "stdout": "lua-churn checksum\t19466078\n",
+    "stderr": ""
+  }
+]

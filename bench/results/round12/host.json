@@ -1,0 +1,13 @@
+{
+  "base": "3d1e114cc9982ed19f96205b5833e7eb4e5c6a05",
+  "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+  "compiler": "cc (Debian 14.2.0-19) 14.2.0",
+  "cpu_max": "200000 100000\n",
+  "lua": "Lua 5.4.7  Copyright (C) 1994-2024 Lua.org, PUC-Rio\n",
+  "packages": [
+    "lua5.4_5.4.7-1+b2_amd64.deb",
+    "libmimalloc3_3.0.1+ds-2.1_amd64.deb"
+  ],
+  "clock": "time.monotonic",
+  "policy": "all measured samples retained; no build/test overlap with timings"
+}

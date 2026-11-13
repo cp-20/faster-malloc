@@ -68,3 +68,4 @@ mark were recorded when the work was done.
 | [0055](0055-bounded-census-spin.md) | Bounded census spin | Rejected |
 | [0056](0056-census-contention-hint.md) | Advisory census busy hint | Rejected |
 | [0057](0057-census-thread-backoff.md) | Per-thread census backoff | Rejected |
+| [0058](0058-cold-large-cache-payload-purge.md) | Cold large-cache payload purge | Rejected: guard regression |

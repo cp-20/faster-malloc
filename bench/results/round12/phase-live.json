@@ -1,0 +1,38 @@
+[
+  {
+    "rep": 0,
+    "build": "base",
+    "stdout": "snap start      lua_live_kb=      28 rss_kb=2824\nsnap p1-round1  lua_live_kb=     216 rss_kb=3460\nsnap p1-done    lua_live_kb=     289 rss_kb=3624\nsnap p2-done    lua_live_kb=    1591 rss_kb=6800\nsnap p3-built   lua_live_kb=    7639 rss_kb=17412\nsnap p3-sorted  lua_live_kb=    7641 rss_kb=17480\nsnap post-gc    lua_live_kb=    7640 rss_kb=17480\nlua-churn checksum\t19466078\n",
+    "stderr": ""
+  },
+  {
+    "rep": 0,
+    "build": "cold",
+    "stdout": "snap start      lua_live_kb=      28 rss_kb=2824\nsnap p1-round1  lua_live_kb=     216 rss_kb=3428\nsnap p1-done    lua_live_kb=     289 rss_kb=3628\nsnap p2-done    lua_live_kb=    1591 rss_kb=6816\nsnap p3-built   lua_live_kb=    7639 rss_kb=14572\nsnap p3-sorted  lua_live_kb=    7641 rss_kb=14640\nsnap post-gc    lua_live_kb=    7640 rss_kb=14640\nlua-churn checksum\t19466078\n",
+    "stderr": ""
+  },
+  {
+    "rep": 1,
+    "build": "base",
+    "stdout": "snap start      lua_live_kb=      28 rss_kb=2824\nsnap p1-round1  lua_live_kb=     216 rss_kb=3460\nsnap p1-done    lua_live_kb=     289 rss_kb=3624\nsnap p2-done    lua_live_kb=    1591 rss_kb=6740\nsnap p3-built   lua_live_kb=    7639 rss_kb=17408\nsnap p3-sorted  lua_live_kb=    7641 rss_kb=17476\nsnap post-gc    lua_live_kb=    7640 rss_kb=17476\nlua-churn checksum\t19466078\n",
+    "stderr": ""
+  },
+  {
+    "rep": 1,
+    "build": "cold",
+    "stdout": "snap start      lua_live_kb=      28 rss_kb=2828\nsnap p1-round1  lua_live_kb=     216 rss_kb=3432\nsnap p1-done    lua_live_kb=     289 rss_kb=3632\nsnap p2-done    lua_live_kb=    1591 rss_kb=6812\nsnap p3-built   lua_live_kb=    7639 rss_kb=14600\nsnap p3-sorted  lua_live_kb=    7641 rss_kb=14668\nsnap post-gc    lua_live_kb=    7640 rss_kb=14668\nlua-churn checksum\t19466078\n",
+    "stderr": ""
+  },
+  {
+    "rep": 2,
+    "build": "base",
+    "stdout": "snap start      lua_live_kb=      28 rss_kb=2828\nsnap p1-round1  lua_live_kb=     216 rss_kb=3464\nsnap p1-done    lua_live_kb=     289 rss_kb=3628\nsnap p2-done    lua_live_kb=    1591 rss_kb=6820\nsnap p3-built   lua_live_kb=    7639 rss_kb=17488\nsnap p3-sorted  lua_live_kb=    7641 rss_kb=17556\nsnap post-gc    lua_live_kb=    7640 rss_kb=17556\nlua-churn checksum\t19466078\n",
+    "stderr": ""
+  },
+  {
+    "rep": 2,
+    "build": "cold",
+    "stdout": "snap start      lua_live_kb=      28 rss_kb=2824\nsnap p1-round1  lua_live_kb=     216 rss_kb=3428\nsnap p1-done    lua_live_kb=     289 rss_kb=3628\nsnap p2-done    lua_live_kb=    1591 rss_kb=6768\nsnap p3-built   lua_live_kb=    7639 rss_kb=14556\nsnap p3-sorted  lua_live_kb=    7641 rss_kb=14624\nsnap post-gc    lua_live_kb=    7640 rss_kb=14624\nlua-churn checksum\t19466078\n",
+    "stderr": ""
+  }
+]

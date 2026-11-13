@@ -1,0 +1,162 @@
+[
+  {
+    "rep": 0,
+    "build": "glibc",
+    "seconds": 0.511,
+    "rss": 10416,
+    "stdout": "lua-churn checksum\t19466078\n",
+    "stderr": "R3TIME elapsed=0.511 maxrss_kb=10416 exit=0\n"
+  },
+  {
+    "rep": 0,
+    "build": "v2",
+    "seconds": 0.375,
+    "rss": 17828,
+    "stdout": "lua-churn checksum\t19466078\n",
+    "stderr": "R3TIME elapsed=0.375 maxrss_kb=17828 exit=0\n"
+  },
+  {
+    "rep": 0,
+    "build": "jemalloc",
+    "seconds": 0.452,
+    "rss": 14592,
+    "stdout": "lua-churn checksum\t19466078\n",
+    "stderr": "R3TIME elapsed=0.452 maxrss_kb=14592 exit=0\n"
+  },
+  {
+    "rep": 0,
+    "build": "mimalloc",
+    "seconds": 0.381,
+    "rss": 11028,
+    "stdout": "lua-churn checksum\t19466078\n",
+    "stderr": "R3TIME elapsed=0.381 maxrss_kb=11028 exit=0\n"
+  },
+  {
+    "rep": 1,
+    "build": "v2",
+    "seconds": 0.398,
+    "rss": 17496,
+    "stdout": "lua-churn checksum\t19466078\n",
+    "stderr": "R3TIME elapsed=0.398 maxrss_kb=17496 exit=0\n"
+  },
+  {
+    "rep": 1,
+    "build": "jemalloc",
+    "seconds": 0.429,
+    "rss": 14596,
+    "stdout": "lua-churn checksum\t19466078\n",
+    "stderr": "R3TIME elapsed=0.429 maxrss_kb=14596 exit=0\n"
+  },
+  {
+    "rep": 1,
+    "build": "mimalloc",
+    "seconds": 0.361,
+    "rss": 11028,
+    "stdout": "lua-churn checksum\t19466078\n",
+    "stderr": "R3TIME elapsed=0.361 maxrss_kb=11028 exit=0\n"
+  },
+  {
+    "rep": 1,
+    "build": "glibc",
+    "seconds": 0.452,
+    "rss": 10368,
+    "stdout": "lua-churn checksum\t19466078\n",
+    "stderr": "R3TIME elapsed=0.452 maxrss_kb=10368 exit=0\n"
+  },
+  {
+    "rep": 2,
+    "build": "jemalloc",
+    "seconds": 0.452,
+    "rss": 14604,
+    "stdout": "lua-churn checksum\t19466078\n",
+    "stderr": "R3TIME elapsed=0.452 maxrss_kb=14604 exit=0\n"
+  },
+  {
+    "rep": 2,
+    "build": "mimalloc",
+    "seconds": 0.392,
+    "rss": 11028,
+    "stdout": "lua-churn checksum\t19466078\n",
+    "stderr": "R3TIME elapsed=0.392 maxrss_kb=11028 exit=0\n"
+  },
+  {
+    "rep": 2,
+    "build": "glibc",
+    "seconds": 0.508,
+    "rss": 10416,
+    "stdout": "lua-churn checksum\t19466078\n",
+    "stderr": "R3TIME elapsed=0.508 maxrss_kb=10416 exit=0\n"
+  },
+  {
+    "rep": 2,
+    "build": "v2",
+    "seconds": 0.384,
+    "rss": 17812,
+    "stdout": "lua-churn checksum\t19466078\n",
+    "stderr": "R3TIME elapsed=0.384 maxrss_kb=17812 exit=0\n"
+  },
+  {
+    "rep": 3,
+    "build": "mimalloc",
+    "seconds": 0.43,
+    "rss": 11024,
+    "stdout": "lua-churn checksum\t19466078\n",
+    "stderr": "R3TIME elapsed=0.430 maxrss_kb=11024 exit=0\n"
+  },
+  {
+    "rep": 3,
+    "build": "glibc",
+    "seconds": 0.471,
+    "rss": 10388,
+    "stdout": "lua-churn checksum\t19466078\n",
+    "stderr": "R3TIME elapsed=0.471 maxrss_kb=10388 exit=0\n"
+  },
+  {
+    "rep": 3,
+    "build": "v2",
+    "seconds": 0.4,
+    "rss": 17948,
+    "stdout": "lua-churn checksum\t19466078\n",
+    "stderr": "R3TIME elapsed=0.400 maxrss_kb=17948 exit=0\n"
+  },
+  {
+    "rep": 3,
+    "build": "jemalloc",
+    "seconds": 0.393,
+    "rss": 14600,
+    "stdout": "lua-churn checksum\t19466078\n",
+    "stderr": "R3TIME elapsed=0.393 maxrss_kb=14600 exit=0\n"
+  },
+  {
+    "rep": 4,
+    "build": "glibc",
+    "seconds": 0.465,
+    "rss": 10372,
+    "stdout": "lua-churn checksum\t19466078\n",
+    "stderr": "R3TIME elapsed=0.465 maxrss_kb=10372 exit=0\n"
+  },
+  {
+    "rep": 4,
+    "build": "v2",
+    "seconds": 0.353,
+    "rss": 18216,
+    "stdout": "lua-churn checksum\t19466078\n",
+    "stderr": "R3TIME elapsed=0.353 maxrss_kb=18216 exit=0\n"
+  },
+  {
+    "rep": 4,
+    "build": "jemalloc",
+    "seconds": 0.424,
+    "rss": 14652,
+    "stdout": "lua-churn checksum\t19466078\n",
+    "stderr": "R3TIME elapsed=0.424 maxrss_kb=14652 exit=0\n"
+  },
+  {
+    "rep": 4,
+    "build": "mimalloc",
+    "seconds": 0.371,
+    "rss": 11036,
+    "stdout": "lua-churn checksum\t19466078\n",
+    "stderr": "R3TIME elapsed=0.371 maxrss_kb=11036 exit=0\n"
+  }
+]

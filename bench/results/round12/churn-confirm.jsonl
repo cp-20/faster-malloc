@@ -1,0 +1,160 @@
+{"case": "local", "build": "base", "rep": 0, "seconds": 0.4441648560000431, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "base-repeat", "rep": 0, "seconds": 0.4281639119999454, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "cold", "rep": 0, "seconds": 0.4652473149999423, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "cold-off", "rep": 0, "seconds": 0.45683276899990233, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "base", "rep": 1, "seconds": 0.45540177999987463, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "cold-off", "rep": 1, "seconds": 0.6011684539998896, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "cold", "rep": 1, "seconds": 0.4298373070000707, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "base-repeat", "rep": 1, "seconds": 0.4568070840000473, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "cold", "rep": 2, "seconds": 0.43838063400016836, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "cold-off", "rep": 2, "seconds": 0.4699137449999853, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "base", "rep": 2, "seconds": 0.42552399000010155, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "base-repeat", "rep": 2, "seconds": 0.46036821699999564, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "cold", "rep": 3, "seconds": 0.4544827649999661, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "base-repeat", "rep": 3, "seconds": 0.5544778629998746, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "base", "rep": 3, "seconds": 0.45156296999994083, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "cold-off", "rep": 3, "seconds": 0.476301254999953, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "base", "rep": 4, "seconds": 0.4798789870001201, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "base-repeat", "rep": 4, "seconds": 0.4329905460001555, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "cold", "rep": 4, "seconds": 0.47968954700013455, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "cold-off", "rep": 4, "seconds": 0.4679865120001523, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "base", "rep": 5, "seconds": 0.443919742999924, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "cold-off", "rep": 5, "seconds": 0.46875911000006454, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "cold", "rep": 5, "seconds": 0.48492051900007027, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "base-repeat", "rep": 5, "seconds": 0.4334224980000272, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "cold", "rep": 6, "seconds": 0.4750588950000747, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "cold-off", "rep": 6, "seconds": 0.4367334359999404, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "base", "rep": 6, "seconds": 0.4546570840000186, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "base-repeat", "rep": 6, "seconds": 0.4214689770001314, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "cold", "rep": 7, "seconds": 0.49018752799997856, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "base-repeat", "rep": 7, "seconds": 0.6000875649999671, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "base", "rep": 7, "seconds": 0.4850631300000714, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "cold-off", "rep": 7, "seconds": 0.457407541000066, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "base", "rep": 8, "seconds": 0.4511298600000373, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "base-repeat", "rep": 8, "seconds": 0.47873062999997273, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "cold", "rep": 8, "seconds": 0.4444519129999662, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "cold-off", "rep": 8, "seconds": 0.4960257149998597, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "base", "rep": 9, "seconds": 0.47356201800016606, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "cold-off", "rep": 9, "seconds": 0.46431667499996365, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "cold", "rep": 9, "seconds": 0.47747885500007214, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "local", "build": "base-repeat", "rep": 9, "seconds": 0.47936313400009567, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "base", "rep": 0, "seconds": 0.5120036699997854, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "base-repeat", "rep": 0, "seconds": 0.3637895199999548, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "cold", "rep": 0, "seconds": 0.5726319649998004, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "cold-off", "rep": 0, "seconds": 0.3639072839998789, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "base", "rep": 1, "seconds": 0.4995641569998952, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "cold-off", "rep": 1, "seconds": 0.4816202519998569, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "cold", "rep": 1, "seconds": 0.2126134140000886, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "base-repeat", "rep": 1, "seconds": 0.4850954670000647, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "cold", "rep": 2, "seconds": 0.33609630499995546, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "cold-off", "rep": 2, "seconds": 0.2387637930000892, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "base", "rep": 2, "seconds": 0.42339967199995954, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "base-repeat", "rep": 2, "seconds": 0.21846591300004548, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "cold", "rep": 3, "seconds": 0.36466629500000636, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "base-repeat", "rep": 3, "seconds": 0.21195628200007377, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "base", "rep": 3, "seconds": 0.33452572600003805, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "cold-off", "rep": 3, "seconds": 0.215745699000081, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "base", "rep": 4, "seconds": 0.3387721380001949, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "base-repeat", "rep": 4, "seconds": 0.20490090100020097, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "cold", "rep": 4, "seconds": 0.4473076950000632, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "cold-off", "rep": 4, "seconds": 0.20974604699995325, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "base", "rep": 5, "seconds": 0.32817429900001116, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "cold-off", "rep": 5, "seconds": 0.22087934700016376, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "cold", "rep": 5, "seconds": 0.3805149429999801, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "base-repeat", "rep": 5, "seconds": 0.419574392000186, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "cold", "rep": 6, "seconds": 0.21325642600004358, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "cold-off", "rep": 6, "seconds": 0.35859674599987557, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "base", "rep": 6, "seconds": 0.214150613999891, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "base-repeat", "rep": 6, "seconds": 0.32930970300003537, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "cold", "rep": 7, "seconds": 0.3422692189999452, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "base-repeat", "rep": 7, "seconds": 0.21067441700006384, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "base", "rep": 7, "seconds": 0.281015927999988, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "cold-off", "rep": 7, "seconds": 0.2109841859999051, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "base", "rep": 8, "seconds": 0.3832032430000254, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "base-repeat", "rep": 8, "seconds": 0.4276354060000358, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "cold", "rep": 8, "seconds": 0.22081393500002378, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "cold-off", "rep": 8, "seconds": 0.3757120220000161, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "base", "rep": 9, "seconds": 0.3613501689999339, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "cold-off", "rep": 9, "seconds": 0.23045086599995557, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "cold", "rep": 9, "seconds": 0.35469698499991864, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "cross", "build": "base-repeat", "rep": 9, "seconds": 0.3932924739999635, "rc": 0, "stdout": "", "stderr": ""}
+{"case": "many", "build": "base", "rep": 0, "seconds": 1.9301822680001806, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "base-repeat", "rep": 0, "seconds": 0.9436234909999257, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "cold", "rep": 0, "seconds": 2.1246429820000685, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "cold-off", "rep": 0, "seconds": 1.008438293999916, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "base", "rep": 1, "seconds": 0.8991682119999496, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "cold-off", "rep": 1, "seconds": 1.909929332999809, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "cold", "rep": 1, "seconds": 1.2154759729999114, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "base-repeat", "rep": 1, "seconds": 1.194083546999991, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "cold", "rep": 2, "seconds": 1.382872918999965, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "cold-off", "rep": 2, "seconds": 1.343900226000187, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "base", "rep": 2, "seconds": 0.8513862190000054, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "base-repeat", "rep": 2, "seconds": 1.230165174999911, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "cold", "rep": 3, "seconds": 1.2620252579999942, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "base-repeat", "rep": 3, "seconds": 1.3465729469999133, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "base", "rep": 3, "seconds": 1.272576473999834, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "cold-off", "rep": 3, "seconds": 1.171972056999948, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "base", "rep": 4, "seconds": 0.7961649290000423, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "base-repeat", "rep": 4, "seconds": 1.2398548279998067, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "cold", "rep": 4, "seconds": 1.597034080000185, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "cold-off", "rep": 4, "seconds": 1.8425780700001724, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "base", "rep": 5, "seconds": 1.3878885560000072, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "cold-off", "rep": 5, "seconds": 1.1883790449999196, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "cold", "rep": 5, "seconds": 1.256557364000173, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "base-repeat", "rep": 5, "seconds": 1.1529915759999767, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "cold", "rep": 6, "seconds": 0.9781303259999277, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "cold-off", "rep": 6, "seconds": 1.0759234580000339, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "base", "rep": 6, "seconds": 1.1313733900001353, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "base-repeat", "rep": 6, "seconds": 1.1638757089999672, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "cold", "rep": 7, "seconds": 1.2362488530000064, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "base-repeat", "rep": 7, "seconds": 1.0644274129999758, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "base", "rep": 7, "seconds": 1.093573464999963, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "cold-off", "rep": 7, "seconds": 0.963514663000069, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "base", "rep": 8, "seconds": 1.0497847859999183, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "base-repeat", "rep": 8, "seconds": 1.0988440640001045, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "cold", "rep": 8, "seconds": 1.09026814799995, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "cold-off", "rep": 8, "seconds": 1.235773750999897, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "base", "rep": 9, "seconds": 1.0303927159998238, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "cold-off", "rep": 9, "seconds": 1.1346516409998912, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "cold", "rep": 9, "seconds": 1.834433165000064, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "many", "build": "base-repeat", "rep": 9, "seconds": 1.3983608120001918, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=0\n", "stderr": ""}
+{"case": "census", "build": "base", "rep": 0, "seconds": 2.7894892900001196, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "base-repeat", "rep": 0, "seconds": 2.6101024240001607, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "cold", "rep": 0, "seconds": 2.827682617000164, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "cold-off", "rep": 0, "seconds": 2.8475029359999553, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "base", "rep": 1, "seconds": 2.778338309999981, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "cold-off", "rep": 1, "seconds": 2.7306097429998317, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "cold", "rep": 1, "seconds": 2.8287753889999294, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "base-repeat", "rep": 1, "seconds": 3.1093644190000305, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "cold", "rep": 2, "seconds": 2.93234966, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "cold-off", "rep": 2, "seconds": 3.0562428799998997, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "base", "rep": 2, "seconds": 3.240499125000042, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "base-repeat", "rep": 2, "seconds": 3.4617924389999644, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "cold", "rep": 3, "seconds": 3.1307675369998833, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "base-repeat", "rep": 3, "seconds": 3.1674066749999383, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "base", "rep": 3, "seconds": 2.6092331329998615, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "cold-off", "rep": 3, "seconds": 2.8816651810000167, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "base", "rep": 4, "seconds": 3.048738204000074, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "base-repeat", "rep": 4, "seconds": 2.938401607999822, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "cold", "rep": 4, "seconds": 3.082745152000143, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "cold-off", "rep": 4, "seconds": 2.572192221000023, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "base", "rep": 5, "seconds": 2.9292057729999215, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "cold-off", "rep": 5, "seconds": 2.7192466510000486, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "cold", "rep": 5, "seconds": 3.124647999999979, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "base-repeat", "rep": 5, "seconds": 3.0868217660001847, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "cold", "rep": 6, "seconds": 3.0214487030000328, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "cold-off", "rep": 6, "seconds": 2.8363070209998114, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "base", "rep": 6, "seconds": 2.8067612540000937, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "base-repeat", "rep": 6, "seconds": 2.798930573000007, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "cold", "rep": 7, "seconds": 2.965597895999963, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "base-repeat", "rep": 7, "seconds": 2.757845250999935, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "base", "rep": 7, "seconds": 3.3427536290000717, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "cold-off", "rep": 7, "seconds": 2.955919318000042, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "base", "rep": 8, "seconds": 3.1300937749999775, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "base-repeat", "rep": 8, "seconds": 2.9693285490000108, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "cold", "rep": 8, "seconds": 2.8633447289998912, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "cold-off", "rep": 8, "seconds": 2.6095423050001045, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "base", "rep": 9, "seconds": 2.580740135999804, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "cold-off", "rep": 9, "seconds": 3.02876338100009, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "cold", "rep": 9, "seconds": 2.763425395000013, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}
+{"case": "census", "build": "base-repeat", "rep": 9, "seconds": 2.8529268629999933, "rc": 0, "stdout": "ownership ok: 800000 transfers, trim=1\n", "stderr": ""}

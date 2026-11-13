@@ -1,0 +1,61 @@
+diff --git a/src/fm_core.h b/src/fm_core.h
+index 958b457..4faf0fd 100644
+--- a/src/fm_core.h
++++ b/src/fm_core.h
+@@ -309,6 +309,7 @@ typedef struct FM_Config {
+     uint32_t purge_min_pages;
+     uint32_t idle_release;
+     uint32_t realloc_cache_search;
++    uint32_t lcache_cold_purge;
+ } FM_Config;
+ 
+ extern FM_Config fm_cfg;
+@@ -329,6 +330,7 @@ static void fm_config_init(void)
+     c.purge_min_pages = 4;
+     c.idle_release = 0;
+     c.realloc_cache_search = 0;
++    c.lcache_cold_purge = 0;
+ 
+     const char *prof = getenv("FM_PROFILE");
+     if (prof) {
+@@ -373,6 +375,7 @@ static void fm_config_init(void)
+         { "FM_PURGE_MIN_PAGES", &c.purge_min_pages, 1, 15 },
+         { "FM_IDLE_RELEASE", &c.idle_release, 0, 1 },
+         { "FM_REALLOC_CACHE_SEARCH", &c.realloc_cache_search, 0, 1 },
++        { "FM_LCACHE_COLD_PURGE", &c.lcache_cold_purge, 0, 1 },
+     };
+     for (size_t i = 0; i < sizeof(num) / sizeof(num[0]); i++) {
+         const char *v = getenv(num[i].name);
+@@ -1720,6 +1723,9 @@ static inline size_t fm_large_usable(const FM_Span *sp)
+     return sp->map_size - ((uintptr_t)sp - sp->map_base);
+ }
+ 
++/* Thread-owned cache history; a hit keeps its bucket warm until thread exit. */
++static __thread uint64_t fm_lcache_hit_mask __attribute__((tls_model("initial-exec")));
++
+ static inline void fm_large_free(FM_Span *sp, void *p)
+ {
+     if (sp->align == 0 && (uintptr_t)p == (uintptr_t)sp + HEADER_SIZE) {
+@@ -1727,6 +1733,14 @@ static inline void fm_large_free(FM_Span *sp, void *p)
+         int b = 63 - __builtin_clzll(fm_large_usable(sp));
+         if (b < FM_LCACHE_BUCKETS &&
+             fm_lcache_bytes + ms <= FM_CFG()->lcache_max_bytes) {
++            if (FM_CFG()->lcache_cold_purge &&
++                !(fm_lcache_hit_mask & (1ull << b))) {
++                /* Preserve the header page; freed payload has no readers. */
++                uintptr_t first = FM_ALIGN_UP((uintptr_t)sp + HEADER_SIZE, FM_PAGE_SIZE);
++                uintptr_t end = sp->map_base + sp->map_size;
++                if (end > first)
++                    madvise((void *)first, end - first, MADV_DONTNEED);
++            }
+             sp->lnext = (uintptr_t)fm_lcache_head[b];
+             fm_lcache_head[b] = sp;
+             fm_lcache_bytes += ms;
+@@ -1779,6 +1793,7 @@ __attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *z
+             if (fm_large_usable(sp) >= need_map) {
+                 *link = (FM_Span *)sp->lnext;
+                 fm_lcache_bytes -= sp->map_size;
++                fm_lcache_hit_mask |= 1ull << b;
+                 sp->user_size = size;
+                 sp->lnext = 0;
+                 if (zeroed)

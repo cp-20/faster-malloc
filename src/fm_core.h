@@ -13,9 +13,10 @@
  * deallocation is a push, and neither touches shared state.
  *
  * When a local list grows past its limit it is handed to the *central* list
- * of that class in one atomic operation.  The central list is a Treiber stack
- * of batches: a refill takes a whole batch with one CAS, a flush publishes a
- * whole batch with one CAS.  No lock is ever taken on the allocation path.
+ * of that class as one batch.  The central list is a stack
+ * of batches. A refill takes a whole batch and a flush publishes one;
+ * slow-path stack ownership is serialized to protect recycled headers.
+ * Thread-local allocation and free fast paths take no locks.
  *
  * Shaping (ADR 0014) -- tried, measured, not adopted
  * ------------------
@@ -65,6 +66,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <signal.h>
 #ifdef FM_DEBUG
 #include <stdio.h>
 #endif
@@ -90,13 +92,13 @@ typedef struct FM_Span {
     uint32_t cls;       /* size class, or LARGE_CLASS */
     uint32_t magic;
     uint32_t nblocks;
-    uint32_t dead_mark; /* ADR 0020: ms timestamp of the first census
+    _Atomic uint32_t dead_mark; /* ADR 0020: ms timestamp of the first census
                          * that found this span entirely free; 0 =
                          * unmarked.  A marked span is unmapped by the
                          * automatic release only once the mark is
                          * FM_RELEASE_AGE_MS old.  Written by census
-                         * threads and cleared on refill; plain
-                         * heuristic data, races are benign. */
+                         * threads and cleared on refill; atomic
+                         * heuristic data shared with refill. */
     uintptr_t map_base; /* start of the mapping (for munmap) */
     size_t map_size;
     size_t user_size;   /* bytes requested (large / aligned) */
@@ -155,6 +157,11 @@ typedef struct FM_Central {
 } FM_Central;
 
 extern FM_Central fm_central[CLASS_COUNT];
+/* Cold-path ownership: censuses share span metadata; detached batch
+ * headers must not be recycled while a pop still reads their links. */
+static pthread_mutex_t fm_census_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t fm_central_lock = PTHREAD_MUTEX_INITIALIZER;
+
 /* Per-thread flush counter per class: the automatic span release
  * runs its census once every FM_RELEASE_EVERY flushes of a class.
  * fm_in_census suppresses the trigger while a census (trim or
@@ -233,7 +240,9 @@ extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec"
 /*   FM_LCACHE_MAX_BYTES   per-thread large-block cache budget       */
 /*   FM_PAGE_PURGE         page-granular return in partial spans     */
 /*                         (ADR 0030): 0 = off, 1 = on               */
-/*   FM_PURGE_MIN_PAGES    smallest purge run, in pages, per span    */
+/*   FM_PURGE_MIN_PAGES    minimum new purge pages per span         */
+/*   FM_REALLOC_CACHE_SEARCH  widen plain large realloc search      */
+/*   FM_IDLE_RELEASE       opt-in maintenance thread (0036)         */
 /*                                                                     */
 /* Individual FM_* variables override the profile.  Values are       */
 /* parsed once, lazily, on the first slow path (pthread_once), so    */
@@ -254,6 +263,7 @@ typedef struct FM_Config {
     uint32_t page_purge;
     uint32_t purge_min_pages;
     uint32_t idle_release;
+    uint32_t realloc_cache_search;
 } FM_Config;
 
 extern FM_Config fm_cfg;
@@ -273,6 +283,7 @@ static void fm_config_init(void)
     c.page_purge = 1;
     c.purge_min_pages = 4;
     c.idle_release = 0;
+    c.realloc_cache_search = 0;
 
     const char *prof = getenv("FM_PROFILE");
     if (prof) {
@@ -313,6 +324,7 @@ static void fm_config_init(void)
         { "FM_PAGE_PURGE", &c.page_purge, 0, 1 },
         { "FM_PURGE_MIN_PAGES", &c.purge_min_pages, 1, 15 },
         { "FM_IDLE_RELEASE", &c.idle_release, 0, 1 },
+        { "FM_REALLOC_CACHE_SEARCH", &c.realloc_cache_search, 0, 1 },
     };
     for (size_t i = 0; i < sizeof(num) / sizeof(num[0]); i++) {
         const char *v = getenv(num[i].name);
@@ -397,7 +409,7 @@ static inline void fm_batch_release(FM_Batch *b)
 }
 
 /* ------------------------------------------------------------------ */
-/* central list: a Treiber stack of batches                            */
+/* central list: a serialized stack of batches                            */
 /* ------------------------------------------------------------------ */
 
 /*
@@ -411,13 +423,11 @@ static inline void fm_batch_release(FM_Batch *b)
 
 static inline void fm_central_push(uint32_t cls, FM_Batch *b)
 {
-    FM_Batch *old = atomic_load_explicit(&fm_central[cls].head, memory_order_relaxed);
-    do {
-        b->next = old;
-    } while (!atomic_compare_exchange_weak_explicit(&fm_central[cls].head, &old, b,
-                                                    memory_order_release,
-                                                    memory_order_relaxed));
+    pthread_mutex_lock(&fm_central_lock);
+    b->next = atomic_load_explicit(&fm_central[cls].head, memory_order_relaxed);
+    atomic_store_explicit(&fm_central[cls].head, b, memory_order_relaxed);
     atomic_fetch_add_explicit(&fm_central[cls].depth, 1, memory_order_relaxed);
+    pthread_mutex_unlock(&fm_central_lock);
 }
 
 /* Publish a chain of blocks as one batch, recording its length and
@@ -536,14 +546,14 @@ __attribute__((noinline)) void *fm_refill_class(uint32_t cls)
 
     /* Try the central list first: take a whole batch, O(1). */
     {
+        pthread_mutex_lock(&fm_central_lock);
         FM_Batch *b = atomic_load_explicit(&fm_central[cls].head, memory_order_relaxed);
-        while (b) {
-            FM_Batch *next = b->next;
-            if (!atomic_compare_exchange_weak_explicit(&fm_central[cls].head, &b, next,
-                                                       memory_order_acquire,
-                                                       memory_order_relaxed))
-                continue; /* b was reloaded with the current head */
+        if (b) {
+            atomic_store_explicit(&fm_central[cls].head, b->next, memory_order_relaxed);
             atomic_fetch_sub_explicit(&fm_central[cls].depth, 1, memory_order_relaxed);
+        }
+        pthread_mutex_unlock(&fm_central_lock);
+        if (b) {
             /* A span-pure batch going back into service witnesses
              * its span alive: cancel any dead mark (ADR 0020). */
             if ((b->count & FM_COUNT_MASK) && (b->count & FM_COUNT_PURE))
@@ -622,7 +632,7 @@ __attribute__((noinline)) static void fm_flush_bin(uint32_t cls)
     fm_cnt[cls] = 0;
     if (!h)
         return;
-    /* Publish the whole list in free order with one CAS, as before
+    /* Publish the whole list in free order, as before
      * ADR 0014: grouping this list by span was implemented and
      * measured, and the walk cost more than the locality it bought
      * (see the ADR).  The count is not recorded -- computing it
@@ -767,7 +777,7 @@ static int fm_census_grow(FM_Census *c)
 /* Set when a census add had to be dropped (table full and growth
  * failed): counts are then underestimates, which is safe for the
  * dead-span proof but invalidates exact-count assertions. */
-static int fm_census_dropped;
+static _Thread_local int fm_census_dropped;
 
 /* Add n to the free-block count of `span`.  On allocation failure the
  * add is dropped: the span simply will not look free, which is safe. */
@@ -800,13 +810,13 @@ static FM_CensusEnt *fm_census_find(FM_Census *c, uintptr_t span)
  * blocks it had to walk one by one (span-pure batches with a known
  * count are accounted wholesale and do not count).  The automatic
  * release reads them to set the class's next interval (ADR 0020). */
-static uint32_t fm_census_marked, fm_census_waiting, fm_census_walked;
+static _Thread_local uint32_t fm_census_marked, fm_census_waiting, fm_census_walked;
 /* ADR 0030: bytes returned by the most recent census's page purge,
  * and how many spans it reclaimed (re-carved) -- the automatic
  * release reads them alongside `released` when deciding whether
  * the census found anything to do. */
-static size_t fm_census_purged;
-static uint32_t fm_census_reclaimed;
+static _Thread_local size_t fm_census_purged;
+static _Thread_local uint32_t fm_census_reclaimed;
 /* Purge marks/applications get their own counter, separate from
  * fm_census_waiting: unlike a dead span (rare, and gone once
  * released), a partially-free span is the *common* case under
@@ -817,7 +827,7 @@ static uint32_t fm_census_reclaimed;
  * not exempt the interval from doubling; a long drain still gets
  * its purges, at widening intervals, each batching everything
  * then eligible. */
-static uint32_t fm_census_pg_waiting;
+static _Thread_local uint32_t fm_census_pg_waiting;
 
 /* ADR 0030: record one free block in a candidate span's per-page
  * coverage counts.  Pages are 4 KiB slices of the 64 KiB span; a
@@ -856,12 +866,10 @@ static int fm_batch_count_desc(const void *a, const void *b)
  * are only *partially* free cannot be unmapped, but their wholly
  * free, resident pages can be returned with MADV_DONTNEED.  The
  * coverage pass counts, per page, the blocks intersecting it; a
- * page is purgeable when every intersecting block is free in
- * central (blocks elsewhere are invisible, which only ever makes
- * the count too small -- the safe direction) and wholly contained
- * in a purge run of at least FM_PURGE_MIN_PAGES pages.  Contained
- * blocks are withheld from the rebuilt chains and accounted in the
- * span header, so the span's effective free count stays exact and
+ * page is purgeable when every intersecting and starting block is
+ * free in central; at least FM_PURGE_MIN_PAGES pages must qualify.
+ * Blocks starting in those pages are withheld from rebuilt chains
+ * and accounted in the span header, so the span's effective free count stays exact and
  * the dead-span proof above is unaffected.  Auto mode ages purge
  * decisions on purge_mark exactly like dead-span marks; instant
  * (trim) mode purges immediately.  A span whose circulating supply
@@ -869,6 +877,10 @@ static int fm_batch_count_desc(const void *a, const void *b)
 __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t keep,
                                                       int instant)
 {
+    pthread_mutex_lock(&fm_census_lock);
+    fm_census_walked = fm_census_marked = fm_census_waiting = 0;
+    fm_census_reclaimed = fm_census_pg_waiting = 0;
+    fm_census_purged = 0;
     int was_in_census = fm_in_census;
     fm_in_census = 1; /* the flush below must not re-trigger release */
     fm_flush_bin(cls);
@@ -877,11 +889,14 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
      * after this point land on the fresh stack; batches another
      * thread's refill already popped are out of reach.  Both only
      * shrink what the census can see. */
+    pthread_mutex_lock(&fm_central_lock);
     FM_Batch *all = atomic_exchange_explicit(&fm_central[cls].head, NULL,
                                              memory_order_acq_rel);
     atomic_store_explicit(&fm_central[cls].depth, 0, memory_order_relaxed);
+    pthread_mutex_unlock(&fm_central_lock);
     if (!all) {
         fm_in_census = was_in_census;
+        pthread_mutex_unlock(&fm_census_lock);
         return 0;
     }
 
@@ -897,6 +912,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             all = nx;
         }
         fm_in_census = was_in_census;
+        pthread_mutex_unlock(&fm_census_lock);
         return 0;
     }
 
@@ -1386,6 +1402,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
     }
     fm_census_destroy(&cen);
     fm_in_census = was_in_census;
+    pthread_mutex_unlock(&fm_census_lock);
     return released;
 }
 
@@ -1454,32 +1471,49 @@ static void fm_auto_release_tick(uint32_t flushed_cls)
 /* timer thread watches the flush-tick timestamp; after a full       */
 /* second without one it runs the same ageing censuses the free      */
 /* path would have run, so dead-span marks age out and purge         */
-/* decisions land while the process is silent.  The thread holds     */
-/* no locks (the census is lock-free by design), is spawned lazily   */
-/* on the first tick, and is re-armable after fork via atfork: the   */
-/* child of a fork has no timer thread, so the child handler just    */
-/* resets the state and the next tick in the child respawns it.      */
+/* decisions land while the process is silent.  Fork prepare drains  */
+/* census ownership before the snapshot; the child disables its      */
+/* inherited timer until exec.  No signal handler runs a census.     */
 /* ------------------------------------------------------------------ */
 
 static _Atomic uint32_t fm_last_activity_ms;
-static _Atomic int fm_idle_thread_state; /* 0 none, 1 running */
+static _Atomic int fm_idle_thread_state; /* -1 disabled in fork child, 0 none, 1 starting/running */
+
+static _Atomic int fm_atfork_ready;
+
+static void fm_fork_prepare(void)
+{
+    pthread_mutex_lock(&fm_census_lock);
+    pthread_mutex_lock(&fm_central_lock);
+}
+
+static void fm_fork_parent(void)
+{
+    pthread_mutex_unlock(&fm_central_lock);
+    pthread_mutex_unlock(&fm_census_lock);
+}
 
 static void fm_idle_after_fork_child(void)
 {
-    atomic_store_explicit(&fm_idle_thread_state, 0, memory_order_relaxed);
+    /* A multithreaded fork child may only call async-signal-safe
+     * functions before exec: never spawn a timer in that window. */
+    atomic_store_explicit(&fm_idle_thread_state, -1, memory_order_relaxed);
     atomic_store_explicit(&fm_last_activity_ms, 0, memory_order_relaxed);
+    fm_fork_parent();
 }
 
 static void *fm_idle_thread_main(void *arg)
 {
     (void)arg;
+    uint32_t last_sweep = 0;
     for (;;) {
         struct timespec ts = { 0, 200 * 1000 * 1000 };
         nanosleep(&ts, NULL);
         uint32_t now = fm_now_ms();
         uint32_t last = atomic_load_explicit(&fm_last_activity_ms,
                                               memory_order_relaxed);
-        if (!last || (uint32_t)(now - last) < 1000)
+        if (!last || (uint32_t)(now - last) < 1000 ||
+            (last_sweep && (uint32_t)(now - last_sweep) < 1000))
             continue;
         const FM_Config *cfg = FM_CFG();
         for (uint32_t cls = 0; cls < CLASS_COUNT; cls++) {
@@ -1491,28 +1525,43 @@ static void *fm_idle_thread_main(void *arg)
         /* Sweep at most once a second while silence lasts; each
          * sweep's censuses are a full ageing step apart, which is
          * what the mark-age-release pipeline needs. */
-        atomic_store_explicit(&fm_last_activity_ms, now,
-                              memory_order_relaxed);
+        last_sweep = fm_now_ms();
     }
     return NULL;
 }
 
 static void fm_idle_kick(uint32_t now)
 {
+    if (!atomic_load_explicit(&fm_atfork_ready, memory_order_acquire) ||
+        atomic_load_explicit(&fm_idle_thread_state, memory_order_relaxed) < 0)
+        return;
     atomic_store_explicit(&fm_last_activity_ms, now, memory_order_relaxed);
     int expected = 0;
     if (!atomic_compare_exchange_strong_explicit(
             &fm_idle_thread_state, &expected, 1, memory_order_acq_rel,
             memory_order_relaxed))
         return;
-    pthread_atfork(NULL, NULL, fm_idle_after_fork_child);
-    pthread_t th;
-    if (pthread_create(&th, NULL, fm_idle_thread_main, NULL) != 0) {
-        atomic_store_explicit(&fm_idle_thread_state, 0,
-                              memory_order_relaxed);
+    /* Keep application signal handlers off the maintenance thread.
+     * It inherits this mask; restore the creator's exact mask. */
+    sigset_t blocked, previous;
+    sigfillset(&blocked);
+    if (pthread_sigmask(SIG_BLOCK, &blocked, &previous) != 0) {
+        atomic_store_explicit(&fm_idle_thread_state, 0, memory_order_relaxed);
         return;
     }
-    pthread_detach(th);
+    pthread_attr_t attr;
+    int err = pthread_attr_init(&attr);
+    if (!err) {
+        err = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+        if (!err) {
+            pthread_t th;
+            err = pthread_create(&th, &attr, fm_idle_thread_main, NULL);
+        }
+        pthread_attr_destroy(&attr);
+    }
+    pthread_sigmask(SIG_SETMASK, &previous, NULL);
+    if (err != 0)
+        atomic_store_explicit(&fm_idle_thread_state, 0, memory_order_relaxed);
 }
 
 static inline size_t fm_trim_spans(void)
@@ -1616,15 +1665,17 @@ static inline size_t fm_large_cache_drain(void)
 /* Allocate a large block.  *zeroed (when non-NULL) reports whether the
  * memory is known to be zero-filled: fresh anonymous mappings are,
  * cache hits are not.  calloc depends on this distinction. */
-__attribute__((noinline)) static void *fm_large_alloc2(size_t size, int *zeroed)
+__attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *zeroed, int wide)
 {
     fm_arm_thread_exit();
     size_t need_map = FM_ALIGN_UP(size + HEADER_SIZE, FM_PAGE_SIZE);
     int nb = 63 - __builtin_clzll(need_map);
     /* Search the need's own bucket, then the next one up: a block's
      * usable length can spill one bucket above its request size
-     * because of the untrimmed head slack. */
-    for (int b = nb; b <= nb + 1 && b < FM_LCACHE_BUCKETS; b++) {
+     * because of the untrimmed head slack. Opt-in realloc growth
+     * searches every remaining bucket, still bounded to eight entries
+     * per bucket and preferring smaller capacities first. */
+    for (int b = nb; b < FM_LCACHE_BUCKETS && (wide || b <= nb + 1); b++) {
         /* Walk a few entries of the bucket list for one large enough;
          * blocks in a bucket differ by less than 2x, so the head
          * usually fits. */
@@ -1660,6 +1711,11 @@ __attribute__((noinline)) static void *fm_large_alloc2(size_t size, int *zeroed)
     if (zeroed)
         *zeroed = 1;
     return (void *)(base + HEADER_SIZE);
+}
+
+static void *fm_large_alloc2(size_t size, int *zeroed)
+{
+    return fm_large_alloc_search(size, zeroed, 0);
 }
 
 __attribute__((noinline)) static void *fm_large_alloc(size_t size)
@@ -1762,7 +1818,14 @@ static void fm_exit_key_dtor(void *v)
     fm_thread_exit_flush();
 }
 
-static void fm_exit_make_key(void) { pthread_key_create(&fm_exit_key, fm_exit_key_dtor); }
+static void fm_exit_make_key(void)
+{
+    pthread_key_create(&fm_exit_key, fm_exit_key_dtor);
+    /* Register once, before any timer can start (including create retries). */
+    if (pthread_atfork(fm_fork_prepare, fm_fork_parent,
+                       fm_idle_after_fork_child) == 0)
+        atomic_store_explicit(&fm_atfork_ready, 1, memory_order_release);
+}
 
 static void fm_arm_thread_exit(void)
 {
@@ -1938,7 +2001,9 @@ static inline void *fm_realloc(void *p, size_t size)
     } else if (size <= sp->user_size) {
         return p;
     }
-    void *q = sp->align ? fm_aligned_alloc_impl(sp->align, size) : fm_large_alloc(size);
+    void *q = sp->align ? fm_aligned_alloc_impl(sp->align, size)
+                       : fm_large_alloc_search(size, NULL,
+                                                FM_CFG()->realloc_cache_search);
     if (!q)
         return NULL;
     memcpy(q, p, sp->user_size);

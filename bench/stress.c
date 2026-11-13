@@ -16,10 +16,12 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <malloc.h>
+#include <assert.h>
 
 #define N_SLOTS 4096
 
-static uint64_t rng_state = 0x243F6A8885A308D3ull;
+static _Thread_local uint64_t rng_state = 0x243F6A8885A308D3ull;
 
 static inline uint64_t rng(void)
 {
@@ -141,6 +143,9 @@ static void *worker(void *arg)
             void *q = realloc(p, ns);
             if (!q) {
                 fail("realloc returned NULL\n");
+                pthread_mutex_lock(&lock);
+                s->reserved = 0;
+                pthread_mutex_unlock(&lock);
                 continue;
             }
             pthread_mutex_lock(&lock);
@@ -165,11 +170,12 @@ static void *worker(void *arg)
         /* --- occasionally test calloc and aligned allocation --- */
         if ((rng() & 63) == 0) {
             size_t cn = 1 + rng() % 100;
-            unsigned char *cp = calloc(cn, 1 + rng() % 64);
+            size_t cs = 1 + rng() % 64;
+            unsigned char *cp = calloc(cn, cs);
             if (!cp) {
                 fail("calloc NULL\n");
             } else {
-                for (size_t k = 0; k < cn; k++)
+                for (size_t k = 0; k < cn * cs; k++)
                     if (cp[k]) {
                         fail("CALLOC NOT ZERO\n");
                         break;
@@ -195,6 +201,48 @@ static void *worker(void *arg)
                 free(ap);
             }
         }
+        pthread_mutex_lock(&lock);
+        s->reserved = 0;
+        pthread_mutex_unlock(&lock);
+    }
+    return NULL;
+}
+
+/* Keep live islands and local free lists while other threads trim/realloc.
+ * 896-byte blocks straddle page boundaries: check every live byte. */
+static void *purge_worker(void *arg)
+{
+    unsigned char tag = (uintptr_t)arg + 31;
+    void *p[2048];
+    for (int round = 0; round < 24; round++) {
+        for (int i = 0; i < 2048; i++) {
+            p[i] = malloc(896);
+            assert(p[i]);
+            memset(p[i], tag, 896);
+        }
+        for (int i = 0; i < 2048; i++)
+            if (i % 16) free(p[i]);
+        malloc_trim(0);
+        /* Refill the purged class while its live islands still pin spans. */
+        for (int i = 0; i < 2048; i++) if (i % 16) {
+            p[i] = malloc(896);
+            assert(p[i]);
+            memset(p[i], tag, 896);
+        }
+        for (int i = 0; i < 2048; i++) if (i % 16) {
+            for (int j = 0; j < 896; j++)
+                if (((unsigned char *)p[i])[j] != tag)
+                    fail("purge refill corrupted\n");
+            free(p[i]);
+        }
+        for (int i = 0; i < 2048; i += 16) {
+            unsigned char *q = realloc(p[i], 1792);
+            assert(q);
+            for (int j = 0; j < 896; j++)
+                if (q[j] != tag) fail("purge live data corrupted\n");
+            free(q);
+        }
+        malloc_trim(0);
     }
     return NULL;
 }
@@ -202,16 +250,22 @@ static void *worker(void *arg)
 int main(void)
 {
     int nthreads = 4;
-    pthread_t th[8];
+    pthread_t th[8], purge[8];
+    for (int i = 0; i < 8; i++)
+        assert(!pthread_create(&purge[i], NULL, purge_worker, (void *)(uintptr_t)i));
     for (int i = 0; i < nthreads; i++)
-        pthread_create(&th[i], NULL, worker, (void *)(uintptr_t)(i + 1));
+        assert(!pthread_create(&th[i], NULL, worker, (void *)(uintptr_t)(i + 1)));
     for (int i = 0; i < nthreads; i++)
-        pthread_join(th[i], NULL);
+        assert(!pthread_join(th[i], NULL));
+
+    for (int i = 0; i < 8; i++)
+        assert(!pthread_join(purge[i], NULL));
 
     /* single-threaded edge cases */
-    if (!malloc(0))
+    void *zero = malloc(0);
+    if (!zero)
         fail("malloc(0) returned NULL\n");
-    free(malloc(0));
+    free(zero);
     for (size_t sz = 1; sz <= 300000; sz = sz * 3 / 2 + 1) {
         void *q = malloc(sz);
         if (!q) {
@@ -233,8 +287,10 @@ int main(void)
     }
 
     for (int i = 0; i < N_SLOTS; i++)
-        if (slots[i].ptr)
+        if (slots[i].ptr) {
+            check_slot(&slots[i], "final");
             free(slots[i].ptr);
+        }
 
     if (failures) {
         fprintf(stderr, "STRESS FAILED: %d failures\n", failures);

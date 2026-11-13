@@ -29,3 +29,7 @@ bench/apps/work/
 /bench/usableprobe
 /bench/purgeprobe
 /bench/apps/bursty2
+
+/work/
+/bench/realloccache
+/bench/idlefork

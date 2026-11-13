@@ -1,0 +1,80 @@
+{"case": "local", "build": "round6", "rep": 0, "warmup": true, "seconds": 0.42390804799998705, "rss_kib": 9600, "output": ""}
+{"case": "local", "build": "round7", "rep": 0, "warmup": true, "seconds": 0.5571152769999799, "rss_kib": 9600, "output": ""}
+{"case": "local", "build": "round7", "rep": 1, "warmup": false, "seconds": 0.5096563149999724, "rss_kib": 9600, "output": ""}
+{"case": "local", "build": "round6", "rep": 1, "warmup": false, "seconds": 0.47456545399995775, "rss_kib": 9600, "output": ""}
+{"case": "local", "build": "round6", "rep": 2, "warmup": false, "seconds": 0.44016192100002627, "rss_kib": 9600, "output": ""}
+{"case": "local", "build": "round7", "rep": 2, "warmup": false, "seconds": 0.509309361000021, "rss_kib": 9600, "output": ""}
+{"case": "local", "build": "round7", "rep": 3, "warmup": false, "seconds": 0.5092610089999994, "rss_kib": 9600, "output": ""}
+{"case": "local", "build": "round6", "rep": 3, "warmup": false, "seconds": 0.4742007220000346, "rss_kib": 9600, "output": ""}
+{"case": "local", "build": "round6", "rep": 4, "warmup": false, "seconds": 0.47866484000002174, "rss_kib": 9600, "output": ""}
+{"case": "local", "build": "round7", "rep": 4, "warmup": false, "seconds": 0.4878899270000261, "rss_kib": 9600, "output": ""}
+{"case": "local", "build": "round7", "rep": 5, "warmup": false, "seconds": 0.5136070759999711, "rss_kib": 9600, "output": ""}
+{"case": "local", "build": "round6", "rep": 5, "warmup": false, "seconds": 0.44309420000001865, "rss_kib": 9600, "output": ""}
+{"case": "local", "build": "round6", "rep": 6, "warmup": false, "seconds": 0.4899709839999673, "rss_kib": 9600, "output": ""}
+{"case": "local", "build": "round7", "rep": 6, "warmup": false, "seconds": 0.4959000570000285, "rss_kib": 9600, "output": ""}
+{"case": "local", "build": "round7", "rep": 7, "warmup": false, "seconds": 0.5047801409999693, "rss_kib": 9600, "output": ""}
+{"case": "local", "build": "round6", "rep": 7, "warmup": false, "seconds": 0.4606298360000096, "rss_kib": 9600, "output": ""}
+{"case": "local", "build": "round6", "rep": 8, "warmup": false, "seconds": 0.45963180100000045, "rss_kib": 9600, "output": ""}
+{"case": "local", "build": "round7", "rep": 8, "warmup": false, "seconds": 0.47993697300000804, "rss_kib": 9600, "output": ""}
+{"case": "local", "build": "round7", "rep": 9, "warmup": false, "seconds": 0.5269419219999918, "rss_kib": 9600, "output": ""}
+{"case": "local", "build": "round6", "rep": 9, "warmup": false, "seconds": 0.4560552280000252, "rss_kib": 9600, "output": ""}
+{"case": "cross", "build": "round6", "rep": 0, "warmup": true, "seconds": 0.40130375900002946, "rss_kib": 79744, "output": ""}
+{"case": "cross", "build": "round7", "rep": 0, "warmup": true, "seconds": 0.25665200399998866, "rss_kib": 79488, "output": ""}
+{"case": "cross", "build": "round7", "rep": 1, "warmup": false, "seconds": 0.4378614629999902, "rss_kib": 79168, "output": ""}
+{"case": "cross", "build": "round6", "rep": 1, "warmup": false, "seconds": 0.2360383170000091, "rss_kib": 79232, "output": ""}
+{"case": "cross", "build": "round6", "rep": 2, "warmup": false, "seconds": 0.5254999640000051, "rss_kib": 79652, "output": ""}
+{"case": "cross", "build": "round7", "rep": 2, "warmup": false, "seconds": 0.5035125599999901, "rss_kib": 79232, "output": ""}
+{"case": "cross", "build": "round7", "rep": 3, "warmup": false, "seconds": 0.4327674180000258, "rss_kib": 79760, "output": ""}
+{"case": "cross", "build": "round6", "rep": 3, "warmup": false, "seconds": 0.2327629840000327, "rss_kib": 79232, "output": ""}
+{"case": "cross", "build": "round6", "rep": 4, "warmup": false, "seconds": 0.5410469660000103, "rss_kib": 79360, "output": ""}
+{"case": "cross", "build": "round7", "rep": 4, "warmup": false, "seconds": 0.24137134800002968, "rss_kib": 79360, "output": ""}
+{"case": "cross", "build": "round7", "rep": 5, "warmup": false, "seconds": 0.36945735999995577, "rss_kib": 79704, "output": ""}
+{"case": "cross", "build": "round6", "rep": 5, "warmup": false, "seconds": 0.23514703000000736, "rss_kib": 79360, "output": ""}
+{"case": "cross", "build": "round6", "rep": 6, "warmup": false, "seconds": 0.23885392799996907, "rss_kib": 79232, "output": ""}
+{"case": "cross", "build": "round7", "rep": 6, "warmup": false, "seconds": 0.34404124100001354, "rss_kib": 79744, "output": ""}
+{"case": "cross", "build": "round7", "rep": 7, "warmup": false, "seconds": 0.25664558300002227, "rss_kib": 79360, "output": ""}
+{"case": "cross", "build": "round6", "rep": 7, "warmup": false, "seconds": 0.4315931269999851, "rss_kib": 79872, "output": ""}
+{"case": "cross", "build": "round6", "rep": 8, "warmup": false, "seconds": 0.24103070999996135, "rss_kib": 79232, "output": ""}
+{"case": "cross", "build": "round7", "rep": 8, "warmup": false, "seconds": 0.3509979389999671, "rss_kib": 80256, "output": ""}
+{"case": "cross", "build": "round7", "rep": 9, "warmup": false, "seconds": 0.2286429020000469, "rss_kib": 79348, "output": ""}
+{"case": "cross", "build": "round6", "rep": 9, "warmup": false, "seconds": 0.38136687200000097, "rss_kib": 79852, "output": ""}
+{"case": "many", "build": "round6", "rep": 0, "warmup": true, "seconds": 3.4300131229999806, "rss_kib": 294752, "output": "ownership ok: 800000 transfers, trim=0"}
+{"case": "many", "build": "round7", "rep": 0, "warmup": true, "seconds": 4.304639845999986, "rss_kib": 293644, "output": "ownership ok: 800000 transfers, trim=0"}
+{"case": "many", "build": "round7", "rep": 1, "warmup": false, "seconds": 2.5785053559999938, "rss_kib": 298136, "output": "ownership ok: 800000 transfers, trim=0"}
+{"case": "many", "build": "round6", "rep": 1, "warmup": false, "seconds": 3.5481024879999836, "rss_kib": 289640, "output": "ownership ok: 800000 transfers, trim=0"}
+{"case": "many", "build": "round6", "rep": 2, "warmup": false, "seconds": 2.8708539119999728, "rss_kib": 294088, "output": "ownership ok: 800000 transfers, trim=0"}
+{"case": "many", "build": "round7", "rep": 2, "warmup": false, "seconds": 3.797091466999973, "rss_kib": 293296, "output": "ownership ok: 800000 transfers, trim=0"}
+{"case": "many", "build": "round7", "rep": 3, "warmup": false, "seconds": 3.3645330030000196, "rss_kib": 291944, "output": "ownership ok: 800000 transfers, trim=0"}
+{"case": "many", "build": "round6", "rep": 3, "warmup": false, "seconds": 2.082929277000005, "rss_kib": 309576, "output": "ownership ok: 800000 transfers, trim=0"}
+{"case": "many", "build": "round6", "rep": 4, "warmup": false, "seconds": 2.5398652779999793, "rss_kib": 301884, "output": "ownership ok: 800000 transfers, trim=0"}
+{"case": "many", "build": "round7", "rep": 4, "warmup": false, "seconds": 4.080882436000024, "rss_kib": 289940, "output": "ownership ok: 800000 transfers, trim=0"}
+{"case": "many", "build": "round7", "rep": 5, "warmup": false, "seconds": 4.840353562000018, "rss_kib": 286392, "output": "ownership ok: 800000 transfers, trim=0"}
+{"case": "many", "build": "round6", "rep": 5, "warmup": false, "seconds": 2.25180492100003, "rss_kib": 305672, "output": "ownership ok: 800000 transfers, trim=0"}
+{"case": "many", "build": "round6", "rep": 6, "warmup": false, "seconds": 2.5064084350000257, "rss_kib": 298340, "output": "ownership ok: 800000 transfers, trim=0"}
+{"case": "many", "build": "round7", "rep": 6, "warmup": false, "seconds": 4.060208487000011, "rss_kib": 291420, "output": "ownership ok: 800000 transfers, trim=0"}
+{"case": "many", "build": "round7", "rep": 7, "warmup": false, "seconds": 6.561205342999983, "rss_kib": 289928, "output": "ownership ok: 800000 transfers, trim=0"}
+{"case": "many", "build": "round6", "rep": 7, "warmup": false, "seconds": 8.191435834999993, "rss_kib": 288844, "output": "ownership ok: 800000 transfers, trim=0"}
+{"case": "many", "build": "round6", "rep": 8, "warmup": false, "seconds": 2.9574656959999857, "rss_kib": 295084, "output": "ownership ok: 800000 transfers, trim=0"}
+{"case": "many", "build": "round7", "rep": 8, "warmup": false, "seconds": 5.040176378999945, "rss_kib": 290664, "output": "ownership ok: 800000 transfers, trim=0"}
+{"case": "many", "build": "round7", "rep": 9, "warmup": false, "seconds": 3.629790698000022, "rss_kib": 296972, "output": "ownership ok: 800000 transfers, trim=0"}
+{"case": "many", "build": "round6", "rep": 9, "warmup": false, "seconds": 2.7484157129999858, "rss_kib": 297600, "output": "ownership ok: 800000 transfers, trim=0"}
+{"case": "census", "build": "round6", "rep": 0, "warmup": true, "seconds": 3.4923095589999775, "rss_kib": 298840, "output": "ownership ok: 800000 transfers, trim=1"}
+{"case": "census", "build": "round7", "rep": 0, "warmup": true, "seconds": 4.841241285000024, "rss_kib": 303544, "output": "ownership ok: 800000 transfers, trim=1"}
+{"case": "census", "build": "round7", "rep": 1, "warmup": false, "seconds": 3.904683757999976, "rss_kib": 301116, "output": "ownership ok: 800000 transfers, trim=1"}
+{"case": "census", "build": "round6", "rep": 1, "warmup": false, "seconds": 3.02433004400001, "rss_kib": 301588, "output": "ownership ok: 800000 transfers, trim=1"}
+{"case": "census", "build": "round6", "rep": 2, "warmup": false, "seconds": 3.101399440000023, "rss_kib": 299112, "output": "ownership ok: 800000 transfers, trim=1"}
+{"case": "census", "build": "round7", "rep": 2, "warmup": false, "seconds": 4.056494047000001, "rss_kib": 304772, "output": "ownership ok: 800000 transfers, trim=1"}
+{"case": "census", "build": "round7", "rep": 3, "warmup": false, "seconds": 3.9319267479999667, "rss_kib": 299136, "output": "ownership ok: 800000 transfers, trim=1"}
+{"case": "census", "build": "round6", "rep": 3, "warmup": false, "seconds": 3.0525132289999988, "rss_kib": 299036, "output": "ownership ok: 800000 transfers, trim=1"}
+{"case": "census", "build": "round6", "rep": 4, "warmup": false, "seconds": 3.0228286230000094, "rss_kib": 299284, "output": "ownership ok: 800000 transfers, trim=1"}
+{"case": "census", "build": "round7", "rep": 4, "warmup": false, "seconds": 3.5993392049999784, "rss_kib": 298160, "output": "ownership ok: 800000 transfers, trim=1"}
+{"case": "census", "build": "round7", "rep": 5, "warmup": false, "seconds": 4.192092746999947, "rss_kib": 297996, "output": "ownership ok: 800000 transfers, trim=1"}
+{"case": "census", "build": "round6", "rep": 5, "warmup": false, "seconds": 2.9633976369999573, "rss_kib": 300040, "output": "ownership ok: 800000 transfers, trim=1"}
+{"case": "census", "build": "round6", "rep": 6, "warmup": false, "seconds": 3.119114292000006, "rss_kib": 302040, "output": "ownership ok: 800000 transfers, trim=1"}
+{"case": "census", "build": "round7", "rep": 6, "warmup": false, "seconds": 4.029342612999983, "rss_kib": 303004, "output": "ownership ok: 800000 transfers, trim=1"}
+{"case": "census", "build": "round7", "rep": 7, "warmup": false, "seconds": 3.5643487709999704, "rss_kib": 300296, "output": "ownership ok: 800000 transfers, trim=1"}
+{"case": "census", "build": "round6", "rep": 7, "warmup": false, "seconds": 2.9935895830000163, "rss_kib": 301860, "output": "ownership ok: 800000 transfers, trim=1"}
+{"case": "census", "build": "round6", "rep": 8, "warmup": false, "seconds": 3.0612315789999798, "rss_kib": 306536, "output": "ownership ok: 800000 transfers, trim=1"}
+{"case": "census", "build": "round7", "rep": 8, "warmup": false, "seconds": 4.2452828670000144, "rss_kib": 298984, "output": "ownership ok: 800000 transfers, trim=1"}
+{"case": "census", "build": "round7", "rep": 9, "warmup": false, "seconds": 3.7844986140000287, "rss_kib": 302812, "output": "ownership ok: 800000 transfers, trim=1"}
+{"case": "census", "build": "round6", "rep": 9, "warmup": false, "seconds": 3.0594308170000204, "rss_kib": 300072, "output": "ownership ok: 800000 transfers, trim=1"}

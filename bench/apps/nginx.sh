@@ -33,6 +33,11 @@ error_log $WORK/error.log warn;
 events { worker_connections 256; }
 http {
   access_log off;
+  client_body_temp_path $WORK/body;
+  proxy_temp_path $WORK/proxy;
+  fastcgi_temp_path $WORK/fastcgi;
+  uwsgi_temp_path $WORK/uwsgi;
+  scgi_temp_path $WORK/scgi;
   sendfile on;
   # nginx closes a keep-alive connection after 1000 requests by
   # default; wrk drives ~3500 requests per connection in 10 s and
@@ -64,9 +69,9 @@ for name in "${NAMES[@]}"; do
   for ((r = 0; r < REPS; r++)); do
     rm -f "$WORK/error.log"
     if [ -n "$LIB" ]; then
-      LD_PRELOAD="$LIB" nginx -c "$WORK/nginx.conf" -p "$WORK" &
+      LD_PRELOAD="$LIB" nginx -c "$WORK/nginx.conf" -p "$WORK" -e "$WORK/startup.log" &
     else
-      nginx -c "$WORK/nginx.conf" -p "$WORK" &
+      nginx -c "$WORK/nginx.conf" -p "$WORK" -e "$WORK/startup.log" &
     fi
     NG=$!
     # wait for the port
@@ -103,7 +108,8 @@ for name in "${NAMES[@]}"; do
           [ -n "$v" ] && s=$((s + v))
         done
         [ $s -gt $peak ] && peak=$s
-        echo $peak > "$WORK/peak"
+        echo $peak > "$WORK/peak.next"
+        mv "$WORK/peak.next" "$WORK/peak"
         sleep 0.2
       done ) &
     SAMPLER=$!

@@ -1,0 +1,16 @@
+000000000000e140 b fm_census_lock
+000000000000e100 b fm_central_lock
+local
+mutex_offset=0xe100 calls=626404 inclusive_lock_ns=2120894521
+mutex_offset=0xe140 calls=202 inclusive_lock_ns=105838115
+cross
+mutex_offset=0xe100 calls=78597 inclusive_lock_ns=19534123
+mutex_offset=0xe140 calls=23 inclusive_lock_ns=966
+many
+mutex_offset=0xe100 calls=315570 inclusive_lock_ns=427522699
+mutex_offset=0xe140 calls=5662 inclusive_lock_ns=5262617129
+ownership ok: 800000 transfers, trim=0
+census
+mutex_offset=0xe100 calls=331750 inclusive_lock_ns=247413636
+mutex_offset=0xe140 calls=14062 inclusive_lock_ns=6647288114
+ownership ok: 800000 transfers, trim=1

@@ -1,0 +1,13 @@
+0 nginx v2 0 ['v2             46537.9        31       171      16732       0']
+0 pgbench jit 0 ['jit         4312.574400       0.928       271052        0']
+0 pgbench jemalloc 0 ['jemalloc    4001.960160       1.000       254780        0']
+0 pgbench mimalloc 0 ['mimalloc    4583.891477       0.873       254112        0']
+0 pgbench tcmalloc 0 ['tcmalloc    4834.290144       0.827       286940        0']
+0 ruby glibc 0 ['glibc       FAIL']
+Traceback (most recent call last):
+  File "/workspace/faster-malloc/bench/round8/matrix.py", line 41, in <module>
+    main()
+  File "/workspace/faster-malloc/bench/round8/matrix.py", line 38, in main
+    assert valid(row),row
+           ^^^^^^^^^^
+AssertionError: {'rep': 0, 'app': 'ruby', 'allocator': 'glibc', 'exit': 0, 'stdout': 'allocator        secs    peak_rss     checksum\nglibc       FAIL\n', 'stderr': 'RUN FAILED (rc=127): ruby /workspace/faster-malloc/bench/apps/bench.rb\nbench/apps/cellib.sh: line 36: /usr/bin/time: No such file or directory\n', 'driver_seconds': 0.015089740000007623}

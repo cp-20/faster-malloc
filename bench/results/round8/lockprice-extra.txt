@@ -1,0 +1,28 @@
+rep=2 case=local
+mutex_offset=0xe100 calls=628140 inclusive_lock_ns=2746796686
+mutex_offset=0xe140 calls=449 inclusive_lock_ns=436164585
+rep=2 case=cross
+mutex_offset=0xe100 calls=78615 inclusive_lock_ns=36476744
+mutex_offset=0xe140 calls=35 inclusive_lock_ns=1789
+rep=2 case=many
+mutex_offset=0xe100 calls=317644 inclusive_lock_ns=420158709
+mutex_offset=0xe140 calls=5550 inclusive_lock_ns=5210851096
+ownership ok: 800000 transfers, trim=0
+rep=2 case=census
+mutex_offset=0xe100 calls=332582 inclusive_lock_ns=294443854
+mutex_offset=0xe140 calls=15028 inclusive_lock_ns=8023881280
+ownership ok: 800000 transfers, trim=1
+rep=3 case=local
+mutex_offset=0xe100 calls=626396 inclusive_lock_ns=1986649679
+mutex_offset=0xe140 calls=208 inclusive_lock_ns=62419585
+rep=3 case=cross
+mutex_offset=0xe100 calls=78239 inclusive_lock_ns=4050473
+mutex_offset=0xe140 calls=11 inclusive_lock_ns=564
+rep=3 case=many
+mutex_offset=0xe100 calls=313102 inclusive_lock_ns=438031300
+mutex_offset=0xe140 calls=5814 inclusive_lock_ns=5441906164
+ownership ok: 800000 transfers, trim=0
+rep=3 case=census
+mutex_offset=0xe100 calls=332190 inclusive_lock_ns=308843873
+mutex_offset=0xe140 calls=13621 inclusive_lock_ns=4686872009
+ownership ok: 800000 transfers, trim=1

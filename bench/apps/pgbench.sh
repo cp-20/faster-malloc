@@ -15,17 +15,20 @@
 set -u
 . "$(dirname "$0")/cellib.sh"
 REPS=${PGREPS:-1}
-PGBIN=$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -1)
+PGBIN=${PGBIN:-$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -1)}
+if [ "$(id -u)" = 0 ]; then PGUSER=nobody; else PGUSER=$(id -un); fi
 PORT=15433
 WORK=$(mktemp -d /tmp/fm-pg-XXXXXX)
 cleanup() {
-  su nobody -s /bin/bash -c "$PGBIN/pg_ctl -D $WORK/data -m immediate -w stop" >/dev/null 2>&1
+  as_nobody "$PGBIN/pg_ctl -D $WORK/data -m immediate -w stop" >/dev/null 2>&1
   rm -rf "$WORK"
 }
 trap cleanup EXIT
-chown nobody:nogroup "$WORK"
+[ "$(id -u)" != 0 ] || chown nobody:nogroup "$WORK"
 
-as_nobody() { su nobody -s /bin/bash -c "$1"; }
+as_nobody() {
+  if [ "$(id -u)" = 0 ]; then su nobody -s /bin/bash -c "$1"; else bash -c "$1"; fi
+}
 
 as_nobody "$PGBIN/initdb -D $WORK/data -A trust --no-instructions" >/dev/null 2>&1 || {
   echo "initdb failed" >&2; exit 1; }
@@ -43,7 +46,7 @@ stop_server() {
 
 # initialize the pgbench schema once, under glibc
 start_server "" || { echo "initial server start failed" >&2; exit 1; }
-"$PGBIN/pgbench" -h "$WORK" -p $PORT -U nobody -d postgres -i -s 5 -q >/dev/null 2>&1 || {
+"$PGBIN/pgbench" -h "$WORK" -p $PORT -U "$PGUSER" -d postgres -i -s 5 -q >/dev/null 2>&1 || {
   # pgbench connects as the invoking user by default; create via socket as nobody db user
   as_nobody "$PGBIN/pgbench -h $WORK -p $PORT -d postgres -i -s 5 -q" >/dev/null 2>&1 || {
     echo "pgbench -i failed" >&2; exit 1; }
@@ -57,17 +60,19 @@ for name in "${NAMES[@]}"; do
   best=""
   for ((r = 0; r < REPS; r++)); do
     start_server "$LIB" || { best="FAIL"; break; }
-    # peak summed RSS sampler over the postgres process group
+    # Sample only this server and its children (including for non-root runs).
+    master=$(head -1 "$WORK/data/postmaster.pid")
     ( peak=0
       while :; do
         s=0; any=0
-        for p in $(pgrep -u nobody postgres 2>/dev/null); do
+        for p in "$master" $(pgrep -P "$master" 2>/dev/null); do
           v=$(awk '/VmRSS/{print $2}' "/proc/$p/status" 2>/dev/null)
           [ -n "$v" ] && { s=$((s + v)); any=1; }
         done
         [ $any -eq 0 ] && break
         [ $s -gt $peak ] && peak=$s
-        echo $peak > "$WORK/peak"
+        echo $peak > "$WORK/peak.next"
+        mv "$WORK/peak.next" "$WORK/peak"
         sleep 0.5
       done ) &
     SAMPLER=$!

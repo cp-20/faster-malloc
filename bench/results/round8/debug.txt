@@ -1,0 +1,12 @@
+v2 debug stress 1
+stress ok
+v2 debug stress 2
+stress ok
+v2 debug stress 3
+stress ok
+jit debug stress 1
+stress ok
+jit debug stress 2
+stress ok
+jit debug stress 3
+stress ok

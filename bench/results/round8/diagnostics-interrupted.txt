@@ -1,0 +1,1 @@
+bench/round8/diagnostics.sh: line 35: nch/results/round8/lockprice.txt: No such file or directory

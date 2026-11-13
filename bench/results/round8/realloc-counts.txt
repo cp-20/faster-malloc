@@ -1,0 +1,28 @@
+lua
+mode=0
+lua-churn checksum	19466078
+realloc_calls=2970667 requests_gt_32768=103 nonnull=671 large_growth=72
+mode=1
+lua-churn checksum	19466078
+realloc_calls=2970667 requests_gt_32768=103 nonnull=671 large_growth=72
+jq
+mode=0
+66395
+realloc_calls=118 requests_gt_32768=0 nonnull=0 large_growth=0
+mode=1
+66395
+realloc_calls=118 requests_gt_32768=0 nonnull=0 large_growth=0
+ruby
+mode=0
+{"secs":1.089,"rss_kb":74376,"checksum":32103}
+realloc_calls=832 requests_gt_32768=126 nonnull=830 large_growth=125
+mode=1
+{"secs":1.184,"rss_kb":74028,"checksum":32103}
+realloc_calls=832 requests_gt_32768=126 nonnull=830 large_growth=125
+python
+mode=0
+python-churn checksum 625726
+realloc_calls=1209 requests_gt_32768=785 nonnull=1205 large_growth=777
+mode=1
+python-churn checksum 625726
+realloc_calls=1209 requests_gt_32768=785 nonnull=1205 large_growth=777

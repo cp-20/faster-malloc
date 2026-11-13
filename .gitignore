@@ -24,3 +24,6 @@
 callgrind.out.*
 cachegrind.out.*
 bench/apps/work/
+/bench/consprobe
+/bench/decayprobe
+/bench/usableprobe

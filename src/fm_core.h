@@ -1857,6 +1857,29 @@ static inline void *fm_realloc(void *p, size_t size)
             sp->user_size = size;
             return p;
         }
+        /* ADR 0033: otherwise try to extend the mapping in place
+         * with an anonymous page run glued exactly at its end
+         * (MAP_FIXED_NOREPLACE: if anything already lives there,
+         * the mmap fails and we fall back to alloc+copy).  The
+         * header never moves, no bytes are copied, and the block
+         * stays out of the large cache's growth trail.  This is
+         * the safe remnant of ADR 0018's mremap idea: no existing
+         * mapping is ever relocated or shrunk. */
+        size_t need = FM_ALIGN_UP(off + size, FM_PAGE_SIZE);
+        if (need > old_len) {
+            void *ext = mmap(old_raw + old_len, need - old_len,
+                             PROT_READ | PROT_WRITE,
+                             MAP_PRIVATE | MAP_ANONYMOUS |
+                                 MAP_FIXED_NOREPLACE,
+                             -1, 0);
+            if (ext == (void *)(old_raw + old_len)) {
+                sp->map_size = need;
+                sp->user_size = size;
+                return p;
+            }
+            if (ext != MAP_FAILED)
+                munmap(ext, need - old_len); /* cannot happen */
+        }
     } else if (size <= sp->user_size) {
         return p;
     }

@@ -1,0 +1,5 @@
+local complete
+cross complete
+many complete
+census complete
+bursty complete

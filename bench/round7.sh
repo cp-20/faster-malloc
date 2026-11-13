@@ -25,3 +25,4 @@ done
 bash bench/earlyinit.sh
 bash bench/tlsexit.sh
 bash bench/idlelifecycle.sh
+bash bench/round9/grace.sh

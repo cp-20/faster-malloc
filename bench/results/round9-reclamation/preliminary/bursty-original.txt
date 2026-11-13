@@ -1,0 +1,7 @@
+start  rss=804
+ramp1  rss=76536 live_kb=65535 ops=76074
+idle1  rss=76612 live_kb=65548 ops=76248
+ramp2  rss=107808 live_kb=96253 ops=124692
+drain  rss=111080 live_kb=8726 ops=215644
+idle2  rss=41912 live_kb=17319 ops=245233
+final  rss=41912 live_kb=17319 ops=245233 checksum=230115700662

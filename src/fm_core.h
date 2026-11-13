@@ -62,6 +62,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <stdatomic.h>
+#include <sched.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -161,6 +162,46 @@ extern FM_Central fm_central[CLASS_COUNT];
  * headers must not be recycled while a pop still reads their links. */
 static pthread_mutex_t fm_census_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t fm_central_lock = PTHREAD_MUTEX_INITIALIZER;
+
+/* ADR 0041: experimental synchronous epochs; never enabled by default.
+ * Closed admission + zero readers is a grace period for every old header. */
+#ifdef FM_RECLAIM_EPOCH
+static _Atomic unsigned fm_stack_epoch;
+#define FM_EPOCH_CLOSED (1u << 31)
+static void fm_epoch_enter(void)
+{
+    unsigned n = atomic_load_explicit(&fm_stack_epoch, memory_order_relaxed);
+    for (;;) {
+        if (n & FM_EPOCH_CLOSED) {
+            sched_yield();
+            n = atomic_load_explicit(&fm_stack_epoch, memory_order_relaxed);
+        } else if (atomic_compare_exchange_weak_explicit(&fm_stack_epoch, &n, n + 1,
+                    memory_order_acquire, memory_order_relaxed)) {
+            return;
+        }
+    }
+}
+static void fm_epoch_leave(void)
+{
+    atomic_fetch_sub_explicit(&fm_stack_epoch, 1, memory_order_release);
+}
+
+static void fm_stack_exclusive(void)
+{
+    pthread_mutex_lock(&fm_central_lock);
+    atomic_fetch_or_explicit(&fm_stack_epoch, FM_EPOCH_CLOSED, memory_order_acq_rel);
+    while (atomic_load_explicit(&fm_stack_epoch, memory_order_acquire) != FM_EPOCH_CLOSED)
+        sched_yield();
+}
+static void fm_stack_resume(void)
+{
+    atomic_store_explicit(&fm_stack_epoch, 0, memory_order_release);
+    pthread_mutex_unlock(&fm_central_lock);
+}
+#else
+#define fm_stack_exclusive() pthread_mutex_lock(&fm_central_lock)
+#define fm_stack_resume() pthread_mutex_unlock(&fm_central_lock)
+#endif
 
 /* Per-thread flush counter per class: the automatic span release
  * runs its census once every FM_RELEASE_EVERY flushes of a class.
@@ -423,11 +464,23 @@ static inline void fm_batch_release(FM_Batch *b)
 
 static inline void fm_central_push(uint32_t cls, FM_Batch *b)
 {
-    pthread_mutex_lock(&fm_central_lock);
+#ifdef FM_RECLAIM_EPOCH
+    fm_epoch_enter();
+    FM_Batch *top = atomic_load_explicit(&fm_central[cls].head, memory_order_acquire);
+    /* Count pending publications too: a pop must never underflow depth. */
+    atomic_fetch_add_explicit(&fm_central[cls].depth, 1, memory_order_relaxed);
+    do {
+        b->next = top;
+    } while (!atomic_compare_exchange_weak_explicit(&fm_central[cls].head, &top, b,
+                memory_order_acq_rel, memory_order_acquire));
+    fm_epoch_leave();
+#else
+    fm_stack_exclusive();
     b->next = atomic_load_explicit(&fm_central[cls].head, memory_order_relaxed);
     atomic_store_explicit(&fm_central[cls].head, b, memory_order_relaxed);
     atomic_fetch_add_explicit(&fm_central[cls].depth, 1, memory_order_relaxed);
-    pthread_mutex_unlock(&fm_central_lock);
+    fm_stack_resume();
+#endif
 }
 
 /* Publish a chain of blocks as one batch, recording its length and
@@ -546,13 +599,28 @@ __attribute__((noinline)) void *fm_refill_class(uint32_t cls)
 
     /* Try the central list first: take a whole batch, O(1). */
     {
-        pthread_mutex_lock(&fm_central_lock);
+#ifdef FM_RECLAIM_EPOCH
+        fm_epoch_enter();
+        FM_Batch *b = atomic_load_explicit(&fm_central[cls].head, memory_order_acquire);
+        while (b && !atomic_compare_exchange_weak_explicit(&fm_central[cls].head,
+                    &b, b->next, memory_order_acq_rel, memory_order_acquire)) {}
+        if (b)
+            atomic_fetch_sub_explicit(&fm_central[cls].depth, 1, memory_order_relaxed);
+        fm_epoch_leave();
+        if (b) {
+            /* Retired header stays immutable until all stale readers leave. */
+            fm_stack_exclusive();
+            fm_stack_resume();
+        }
+#else
+        fm_stack_exclusive();
         FM_Batch *b = atomic_load_explicit(&fm_central[cls].head, memory_order_relaxed);
         if (b) {
             atomic_store_explicit(&fm_central[cls].head, b->next, memory_order_relaxed);
             atomic_fetch_sub_explicit(&fm_central[cls].depth, 1, memory_order_relaxed);
         }
-        pthread_mutex_unlock(&fm_central_lock);
+        fm_stack_resume();
+#endif
         if (b) {
             /* A span-pure batch going back into service witnesses
              * its span alive: cancel any dead mark (ADR 0020). */
@@ -889,11 +957,11 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
      * after this point land on the fresh stack; batches another
      * thread's refill already popped are out of reach.  Both only
      * shrink what the census can see. */
-    pthread_mutex_lock(&fm_central_lock);
+    fm_stack_exclusive();
     FM_Batch *all = atomic_exchange_explicit(&fm_central[cls].head, NULL,
                                              memory_order_acq_rel);
     atomic_store_explicit(&fm_central[cls].depth, 0, memory_order_relaxed);
-    pthread_mutex_unlock(&fm_central_lock);
+    fm_stack_resume();
     if (!all) {
         fm_in_census = was_in_census;
         pthread_mutex_unlock(&fm_census_lock);
@@ -1486,12 +1554,12 @@ static _Atomic int fm_atfork_ready;
 static void fm_fork_prepare(void)
 {
     pthread_mutex_lock(&fm_census_lock);
-    pthread_mutex_lock(&fm_central_lock);
+    fm_stack_exclusive();
 }
 
 static void fm_fork_parent(void)
 {
-    pthread_mutex_unlock(&fm_central_lock);
+    fm_stack_resume();
     pthread_mutex_unlock(&fm_census_lock);
 }
 

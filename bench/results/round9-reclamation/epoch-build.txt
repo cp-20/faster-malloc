@@ -1,0 +1,35 @@
+python3 src/gen_classes.py src/size_classes.h
+python3 src/gen_classes2.py src/size_classes2.h
+cc -O2 -g -o bench/micro bench/micro.c -lpthread -ldl
+cc -O2 -g -o bench/macro bench/macro.c -lpthread
+classes=129 arith_classes=32 big_table=2049 limit_cap=256
+cc -O2 -g -o bench/mt bench/mt.c -lpthread
+cc -O2 -g -o bench/stress bench/stress.c -lpthread
+classes=128 table=2016
+cc -O2 -g -o bench/instr bench/instr.c
+cc -O2 -g -o bench/check bench/check.c
+cc -O2 -g -o bench/rgrow bench/rgrow.c
+cc -O2 -g -o bench/consprobe bench/consprobe.c
+cc -O2 -g -o bench/decayprobe bench/decayprobe.c
+cc -O2 -g -o bench/usableprobe bench/usableprobe.c
+cc -O2 -g -o bench/purgeprobe bench/purgeprobe.c
+cc -O2 -g -Wall -Wextra -o bench/realloccache bench/realloccache.c
+cc -O2 -g -Wall -Wextra -o bench/idlefork bench/idlefork.c -pthread
+cc -O2 -g -o test_basic test_basic.c
+cc -O3 -g -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -DFM_RECLAIM_EPOCH -shared -o libfastmalloc.so src/alloc_v1.c 
+test_basic.c: In function ‘main’:
+test_basic.c:282:13: warning: product ‘9223372036854775807 * 3’ of arguments 1 and 2 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+  282 |         if (calloc(SIZE_MAX / 2, 3) != NULL) { printf("calloc overflow\n"); return 1; }
+      |             ^~~~~~~~~~~~~~~~~~~~~~~
+In file included from test_basic.c:14:
+/usr/include/malloc.h:43:14: note: in a call to allocation function ‘calloc’ declared here
+   43 | extern void *calloc (size_t __nmemb, size_t __size)
+      |              ^~~~~~
+test_basic.c:285:13: warning: product ‘9223372036854775807 * 3’ of arguments 2 and 3 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+  285 |         if (reallocarray(p, SIZE_MAX / 2, 3) != NULL) { printf("reallocarray overflow\n"); return 1; }
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/malloc.h:59:14: note: in a call to allocation function ‘reallocarray’ declared here
+   59 | extern void *reallocarray (void *__ptr, size_t __nmemb, size_t __size)
+      |              ^~~~~~~~~~~~
+cc -O3 -g -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -DFM_RECLAIM_EPOCH -shared -Wl,-z,nodelete -o libfastmalloc2.so src/fm_static.c 
+cc -O3 -g -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -DFM_RECLAIM_EPOCH -shared -Wl,-z,nodelete -o libjitmalloc.so src/fm_jit.c src/jit_stubs.S 

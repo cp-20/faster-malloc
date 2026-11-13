@@ -1,0 +1,9 @@
+local complete
+cross complete
+many complete
+census complete
+Traceback (most recent call last):
+  File "/workspace/faster-malloc/bench/round9/measure.py", line 20, in <module>
+    assert p.returncode == 0, (case,build,p.returncode,p.stderr)
+           ^^^^^^^^^^^^^^^^^
+AssertionError: ('bursty', 'locked', -11, '')

@@ -1,0 +1,60 @@
+{"case": "local", "build": "locked", "rep": 0, "warmup": true, "seconds": 0.3828017839999802, "output": ""}
+{"case": "local", "build": "epoch", "rep": 0, "warmup": true, "seconds": 0.559660067999971, "output": ""}
+{"case": "local", "build": "epoch", "rep": 1, "warmup": false, "seconds": 0.5251565610000171, "output": ""}
+{"case": "local", "build": "locked", "rep": 1, "warmup": false, "seconds": 0.40620542099998147, "output": ""}
+{"case": "local", "build": "locked", "rep": 2, "warmup": false, "seconds": 0.40775436600000603, "output": ""}
+{"case": "local", "build": "epoch", "rep": 2, "warmup": false, "seconds": 0.5483092669999792, "output": ""}
+{"case": "local", "build": "epoch", "rep": 3, "warmup": false, "seconds": 0.5065994219999652, "output": ""}
+{"case": "local", "build": "locked", "rep": 3, "warmup": false, "seconds": 0.40149276599998984, "output": ""}
+{"case": "local", "build": "locked", "rep": 4, "warmup": false, "seconds": 0.39248091599995405, "output": ""}
+{"case": "local", "build": "epoch", "rep": 4, "warmup": false, "seconds": 0.5301530950000028, "output": ""}
+{"case": "local", "build": "epoch", "rep": 5, "warmup": false, "seconds": 0.5293369199999916, "output": ""}
+{"case": "local", "build": "locked", "rep": 5, "warmup": false, "seconds": 0.3953234189999648, "output": ""}
+{"case": "cross", "build": "locked", "rep": 0, "warmup": true, "seconds": 0.4368254799999818, "output": ""}
+{"case": "cross", "build": "epoch", "rep": 0, "warmup": true, "seconds": 0.3498311979999471, "output": ""}
+{"case": "cross", "build": "epoch", "rep": 1, "warmup": false, "seconds": 0.4819305699999745, "output": ""}
+{"case": "cross", "build": "locked", "rep": 1, "warmup": false, "seconds": 0.351388868000015, "output": ""}
+{"case": "cross", "build": "locked", "rep": 2, "warmup": false, "seconds": 0.36598796099997344, "output": ""}
+{"case": "cross", "build": "epoch", "rep": 2, "warmup": false, "seconds": 0.2810313360000123, "output": ""}
+{"case": "cross", "build": "epoch", "rep": 3, "warmup": false, "seconds": 0.3029657410000368, "output": ""}
+{"case": "cross", "build": "locked", "rep": 3, "warmup": false, "seconds": 0.3110641449999889, "output": ""}
+{"case": "cross", "build": "locked", "rep": 4, "warmup": false, "seconds": 0.3149596220000035, "output": ""}
+{"case": "cross", "build": "epoch", "rep": 4, "warmup": false, "seconds": 0.31320264800001496, "output": ""}
+{"case": "cross", "build": "epoch", "rep": 5, "warmup": false, "seconds": 0.2984170240000026, "output": ""}
+{"case": "cross", "build": "locked", "rep": 5, "warmup": false, "seconds": 0.40838333499999635, "output": ""}
+{"case": "many", "build": "locked", "rep": 0, "warmup": true, "seconds": 3.9320470709999995, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "many", "build": "epoch", "rep": 0, "warmup": true, "seconds": 3.677135270000008, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "many", "build": "epoch", "rep": 1, "warmup": false, "seconds": 3.0883914629999936, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "many", "build": "locked", "rep": 1, "warmup": false, "seconds": 3.064351658000021, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "many", "build": "locked", "rep": 2, "warmup": false, "seconds": 2.1533874759999776, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "many", "build": "epoch", "rep": 2, "warmup": false, "seconds": 4.310923274000004, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "many", "build": "epoch", "rep": 3, "warmup": false, "seconds": 4.643281650999995, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "many", "build": "locked", "rep": 3, "warmup": false, "seconds": 2.813762449999956, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "many", "build": "locked", "rep": 4, "warmup": false, "seconds": 3.4347765559999743, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "many", "build": "epoch", "rep": 4, "warmup": false, "seconds": 3.4160306489999925, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "many", "build": "epoch", "rep": 5, "warmup": false, "seconds": 4.685942469999986, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "many", "build": "locked", "rep": 5, "warmup": false, "seconds": 3.722924400000011, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "census", "build": "locked", "rep": 0, "warmup": true, "seconds": 3.1925757000000203, "output": "ownership ok: 800000 transfers, trim=1\n"}
+{"case": "census", "build": "epoch", "rep": 0, "warmup": true, "seconds": 3.4023227260000226, "output": "ownership ok: 800000 transfers, trim=1\n"}
+{"case": "census", "build": "epoch", "rep": 1, "warmup": false, "seconds": 3.8353920010000024, "output": "ownership ok: 800000 transfers, trim=1\n"}
+{"case": "census", "build": "locked", "rep": 1, "warmup": false, "seconds": 3.1355724599999917, "output": "ownership ok: 800000 transfers, trim=1\n"}
+{"case": "census", "build": "locked", "rep": 2, "warmup": false, "seconds": 3.122594608999975, "output": "ownership ok: 800000 transfers, trim=1\n"}
+{"case": "census", "build": "epoch", "rep": 2, "warmup": false, "seconds": 3.228877791000002, "output": "ownership ok: 800000 transfers, trim=1\n"}
+{"case": "census", "build": "epoch", "rep": 3, "warmup": false, "seconds": 3.8297215819999906, "output": "ownership ok: 800000 transfers, trim=1\n"}
+{"case": "census", "build": "locked", "rep": 3, "warmup": false, "seconds": 4.499307278000003, "output": "ownership ok: 800000 transfers, trim=1\n"}
+{"case": "census", "build": "locked", "rep": 4, "warmup": false, "seconds": 4.796691484000007, "output": "ownership ok: 800000 transfers, trim=1\n"}
+{"case": "census", "build": "epoch", "rep": 4, "warmup": false, "seconds": 4.667090042999973, "output": "ownership ok: 800000 transfers, trim=1\n"}
+{"case": "census", "build": "epoch", "rep": 5, "warmup": false, "seconds": 4.465431201999991, "output": "ownership ok: 800000 transfers, trim=1\n"}
+{"case": "census", "build": "locked", "rep": 5, "warmup": false, "seconds": 3.923803012999997, "output": "ownership ok: 800000 transfers, trim=1\n"}
+{"case": "bursty", "build": "locked", "rep": 0, "warmup": true, "seconds": 7.590661213999965, "output": "start  rss=804\nramp1  rss=76536 live_kb=65535 ops=76074\nidle1  rss=76612 live_kb=65548 ops=76248\nramp2  rss=107808 live_kb=96253 ops=124692\ndrain  rss=111112 live_kb=8726 ops=215644\nidle2  rss=43192 live_kb=17319 ops=245233\nfinal  rss=43192 live_kb=17319 ops=245233 checksum=230115700662\n"}
+{"case": "bursty", "build": "epoch", "rep": 0, "warmup": true, "seconds": 7.5468928180000034, "output": "start  rss=804\nramp1  rss=76536 live_kb=65535 ops=76074\nidle1  rss=76612 live_kb=65548 ops=76248\nramp2  rss=107808 live_kb=96253 ops=124692\ndrain  rss=111132 live_kb=8726 ops=215644\nidle2  rss=42288 live_kb=17319 ops=245233\nfinal  rss=42288 live_kb=17319 ops=245233 checksum=230115700662\n"}
+{"case": "bursty", "build": "epoch", "rep": 1, "warmup": false, "seconds": 7.55532952599998, "output": "start  rss=804\nramp1  rss=76536 live_kb=65535 ops=76074\nidle1  rss=76612 live_kb=65548 ops=76248\nramp2  rss=107808 live_kb=96253 ops=124692\ndrain  rss=111100 live_kb=8726 ops=215644\nidle2  rss=43212 live_kb=17319 ops=245233\nfinal  rss=43212 live_kb=17319 ops=245233 checksum=230115700662\n"}
+{"case": "bursty", "build": "locked", "rep": 1, "warmup": false, "seconds": 7.565828791000001, "output": "start  rss=804\nramp1  rss=76536 live_kb=65535 ops=76074\nidle1  rss=76612 live_kb=65548 ops=76248\nramp2  rss=107808 live_kb=96253 ops=124692\ndrain  rss=111136 live_kb=8726 ops=215644\nidle2  rss=42068 live_kb=17319 ops=245233\nfinal  rss=42068 live_kb=17319 ops=245233 checksum=230115700662\n"}
+{"case": "bursty", "build": "locked", "rep": 2, "warmup": false, "seconds": 7.611018676000015, "output": "start  rss=804\nramp1  rss=76536 live_kb=65535 ops=76074\nidle1  rss=76612 live_kb=65548 ops=76248\nramp2  rss=107808 live_kb=96253 ops=124692\ndrain  rss=111136 live_kb=8726 ops=215644\nidle2  rss=43052 live_kb=17319 ops=245233\nfinal  rss=43052 live_kb=17319 ops=245233 checksum=230115700662\n"}
+{"case": "bursty", "build": "epoch", "rep": 2, "warmup": false, "seconds": 7.565692133000027, "output": "start  rss=804\nramp1  rss=76536 live_kb=65535 ops=76074\nidle1  rss=76612 live_kb=65548 ops=76248\nramp2  rss=107808 live_kb=96253 ops=124692\ndrain  rss=111136 live_kb=8726 ops=215644\nidle2  rss=42804 live_kb=17319 ops=245233\nfinal  rss=42804 live_kb=17319 ops=245233 checksum=230115700662\n"}
+{"case": "bursty", "build": "epoch", "rep": 3, "warmup": false, "seconds": 7.547095318999993, "output": "start  rss=804\nramp1  rss=76536 live_kb=65535 ops=76074\nidle1  rss=76612 live_kb=65548 ops=76248\nramp2  rss=107808 live_kb=96253 ops=124692\ndrain  rss=111136 live_kb=8726 ops=215644\nidle2  rss=43060 live_kb=17319 ops=245233\nfinal  rss=43060 live_kb=17319 ops=245233 checksum=230115700662\n"}
+{"case": "bursty", "build": "locked", "rep": 3, "warmup": false, "seconds": 7.708372467999993, "output": "start  rss=804\nramp1  rss=76536 live_kb=65535 ops=76074\nidle1  rss=76612 live_kb=65548 ops=76248\nramp2  rss=107808 live_kb=96253 ops=124692\ndrain  rss=87436 live_kb=8726 ops=215644\nidle2  rss=43052 live_kb=17319 ops=245233\nfinal  rss=43052 live_kb=17319 ops=245233 checksum=230115700662\n"}
+{"case": "bursty", "build": "locked", "rep": 4, "warmup": false, "seconds": 7.550038789999974, "output": "start  rss=804\nramp1  rss=76536 live_kb=65535 ops=76074\nidle1  rss=76612 live_kb=65548 ops=76248\nramp2  rss=107808 live_kb=96253 ops=124692\ndrain  rss=111064 live_kb=8726 ops=215644\nidle2  rss=42196 live_kb=17319 ops=245233\nfinal  rss=42196 live_kb=17319 ops=245233 checksum=230115700662\n"}
+{"case": "bursty", "build": "epoch", "rep": 4, "warmup": false, "seconds": 7.550271162000001, "output": "start  rss=804\nramp1  rss=76536 live_kb=65535 ops=76074\nidle1  rss=76612 live_kb=65548 ops=76248\nramp2  rss=107808 live_kb=96253 ops=124692\ndrain  rss=111064 live_kb=8726 ops=215644\nidle2  rss=42316 live_kb=17319 ops=245233\nfinal  rss=42316 live_kb=17319 ops=245233 checksum=230115700662\n"}
+{"case": "bursty", "build": "epoch", "rep": 5, "warmup": false, "seconds": 7.734992172000034, "output": "start  rss=804\nramp1  rss=76536 live_kb=65535 ops=76074\nidle1  rss=76612 live_kb=65548 ops=76248\nramp2  rss=107808 live_kb=96253 ops=124692\ndrain  rss=84360 live_kb=8726 ops=215644\nidle2  rss=43344 live_kb=17319 ops=245233\nfinal  rss=43344 live_kb=17319 ops=245233 checksum=230115700662\n"}
+{"case": "bursty", "build": "locked", "rep": 5, "warmup": false, "seconds": 7.680909085999986, "output": "start  rss=808\nramp1  rss=76540 live_kb=65535 ops=76074\nidle1  rss=76616 live_kb=65548 ops=76248\nramp2  rss=107812 live_kb=96253 ops=124692\ndrain  rss=91296 live_kb=8726 ops=215644\nidle2  rss=43484 live_kb=17319 ops=245233\nfinal  rss=43484 live_kb=17319 ops=245233 checksum=230115700662\n"}

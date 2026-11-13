@@ -1,0 +1,48 @@
+{"case": "local", "build": "locked", "rep": 0, "warmup": true, "seconds": 0.3907506539999872, "output": ""}
+{"case": "local", "build": "epoch", "rep": 0, "warmup": true, "seconds": 0.506248008, "output": ""}
+{"case": "local", "build": "epoch", "rep": 1, "warmup": false, "seconds": 0.5385067830000025, "output": ""}
+{"case": "local", "build": "locked", "rep": 1, "warmup": false, "seconds": 0.40073930099998734, "output": ""}
+{"case": "local", "build": "locked", "rep": 2, "warmup": false, "seconds": 0.42010001699998156, "output": ""}
+{"case": "local", "build": "epoch", "rep": 2, "warmup": false, "seconds": 0.5014236470000242, "output": ""}
+{"case": "local", "build": "epoch", "rep": 3, "warmup": false, "seconds": 0.5447914730000036, "output": ""}
+{"case": "local", "build": "locked", "rep": 3, "warmup": false, "seconds": 0.4176926799999876, "output": ""}
+{"case": "local", "build": "locked", "rep": 4, "warmup": false, "seconds": 0.5144440880000047, "output": ""}
+{"case": "local", "build": "epoch", "rep": 4, "warmup": false, "seconds": 0.6145631950000165, "output": ""}
+{"case": "local", "build": "epoch", "rep": 5, "warmup": false, "seconds": 0.7031298419999814, "output": ""}
+{"case": "local", "build": "locked", "rep": 5, "warmup": false, "seconds": 0.4617717099999936, "output": ""}
+{"case": "cross", "build": "locked", "rep": 0, "warmup": true, "seconds": 0.6644789739999908, "output": ""}
+{"case": "cross", "build": "epoch", "rep": 0, "warmup": true, "seconds": 0.2746400489999985, "output": ""}
+{"case": "cross", "build": "epoch", "rep": 1, "warmup": false, "seconds": 0.459492608000005, "output": ""}
+{"case": "cross", "build": "locked", "rep": 1, "warmup": false, "seconds": 0.3540858430000071, "output": ""}
+{"case": "cross", "build": "locked", "rep": 2, "warmup": false, "seconds": 0.3846496660000014, "output": ""}
+{"case": "cross", "build": "epoch", "rep": 2, "warmup": false, "seconds": 0.37968658500000174, "output": ""}
+{"case": "cross", "build": "epoch", "rep": 3, "warmup": false, "seconds": 0.6238681880000172, "output": ""}
+{"case": "cross", "build": "locked", "rep": 3, "warmup": false, "seconds": 0.3147347069999853, "output": ""}
+{"case": "cross", "build": "locked", "rep": 4, "warmup": false, "seconds": 0.280026859000003, "output": ""}
+{"case": "cross", "build": "epoch", "rep": 4, "warmup": false, "seconds": 0.48020616200000177, "output": ""}
+{"case": "cross", "build": "epoch", "rep": 5, "warmup": false, "seconds": 0.3506327839999983, "output": ""}
+{"case": "cross", "build": "locked", "rep": 5, "warmup": false, "seconds": 0.3265580740000189, "output": ""}
+{"case": "many", "build": "locked", "rep": 0, "warmup": true, "seconds": 5.004654840000001, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "many", "build": "epoch", "rep": 0, "warmup": true, "seconds": 5.704161142000004, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "many", "build": "epoch", "rep": 1, "warmup": false, "seconds": 3.587234873, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "many", "build": "locked", "rep": 1, "warmup": false, "seconds": 3.6007608589999904, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "many", "build": "locked", "rep": 2, "warmup": false, "seconds": 1.822631408999996, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "many", "build": "epoch", "rep": 2, "warmup": false, "seconds": 3.037773262999991, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "many", "build": "epoch", "rep": 3, "warmup": false, "seconds": 4.3081739870000035, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "many", "build": "locked", "rep": 3, "warmup": false, "seconds": 2.394748523000004, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "many", "build": "locked", "rep": 4, "warmup": false, "seconds": 4.48971139599999, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "many", "build": "epoch", "rep": 4, "warmup": false, "seconds": 3.7897454040000014, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "many", "build": "epoch", "rep": 5, "warmup": false, "seconds": 4.900487664999986, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "many", "build": "locked", "rep": 5, "warmup": false, "seconds": 3.614918459999984, "output": "ownership ok: 800000 transfers, trim=0\n"}
+{"case": "census", "build": "locked", "rep": 0, "warmup": true, "seconds": 2.94769192199999, "output": "ownership ok: 800000 transfers, trim=1\n"}
+{"case": "census", "build": "epoch", "rep": 0, "warmup": true, "seconds": 3.286107367999989, "output": "ownership ok: 800000 transfers, trim=1\n"}
+{"case": "census", "build": "epoch", "rep": 1, "warmup": false, "seconds": 3.3463438189999977, "output": "ownership ok: 800000 transfers, trim=1\n"}
+{"case": "census", "build": "locked", "rep": 1, "warmup": false, "seconds": 2.3845876199999907, "output": "ownership ok: 800000 transfers, trim=1\n"}
+{"case": "census", "build": "locked", "rep": 2, "warmup": false, "seconds": 3.001449272000002, "output": "ownership ok: 800000 transfers, trim=1\n"}
+{"case": "census", "build": "epoch", "rep": 2, "warmup": false, "seconds": 3.139423645000022, "output": "ownership ok: 800000 transfers, trim=1\n"}
+{"case": "census", "build": "epoch", "rep": 3, "warmup": false, "seconds": 3.486651987999977, "output": "ownership ok: 800000 transfers, trim=1\n"}
+{"case": "census", "build": "locked", "rep": 3, "warmup": false, "seconds": 2.9074618950000115, "output": "ownership ok: 800000 transfers, trim=1\n"}
+{"case": "census", "build": "locked", "rep": 4, "warmup": false, "seconds": 2.8697372700000017, "output": "ownership ok: 800000 transfers, trim=1\n"}
+{"case": "census", "build": "epoch", "rep": 4, "warmup": false, "seconds": 3.8776803530000166, "output": "ownership ok: 800000 transfers, trim=1\n"}
+{"case": "census", "build": "epoch", "rep": 5, "warmup": false, "seconds": 3.5261843039999974, "output": "ownership ok: 800000 transfers, trim=1\n"}
+{"case": "census", "build": "locked", "rep": 5, "warmup": false, "seconds": 3.0552994960000035, "output": "ownership ok: 800000 transfers, trim=1\n"}

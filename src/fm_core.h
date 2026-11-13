@@ -102,7 +102,25 @@ typedef struct FM_Span {
     size_t user_size;   /* bytes requested (large / aligned) */
     size_t align;       /* alignment requested (aligned allocs) */
     uintptr_t lnext;    /* next span in the large-block cache bucket */
-    char reserved[64 - 56];
+    /* ADR 0030 page purge: pages of this span that the census has
+     * returned to the OS with MADV_DONTNEED while the span still has
+     * live blocks.  Bit p of purged_mask names page p (page 0, which
+     * holds this header, is never purged).  Every block STARTING in
+     * a purged page is withheld from circulation (it is in no free
+     * list, so it can never be handed out or freed again while
+     * withheld); withheld_cnt counts them.  The purge decision
+     * guarantees every block intersecting a purged page is free and
+     * every block starting in one was seized by the census, so the
+     * withheld set is exactly "blocks starting in purged pages" and
+     * can be recomputed from the mask at any time -- that is what
+     * makes reclaim (re-carving) safe.  purge_mark is the ageing
+     * timestamp of the purge machinery, mirroring dead_mark: set
+     * when a census first finds the span purge-worthy, stamped
+     * again when a purge lands (the reclaim age is measured from
+     * it). */
+    uint32_t purge_mark;
+    uint16_t purged_mask;
+    uint16_t withheld_cnt;
 } FM_Span;
 
 typedef struct FM_Batch FM_Batch;
@@ -213,6 +231,9 @@ extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec"
 /*   FM_RELEASE_WALK_DIV   walked blocks per ms of census interval   */
 /*   FM_REGROUP_MIN        min blocks for a span-pure batch (0024)   */
 /*   FM_LCACHE_MAX_BYTES   per-thread large-block cache budget       */
+/*   FM_PAGE_PURGE         page-granular return in partial spans     */
+/*                         (ADR 0030): 0 = off, 1 = on               */
+/*   FM_PURGE_MIN_PAGES    smallest purge run, in pages, per span    */
 /*                                                                     */
 /* Individual FM_* variables override the profile.  Values are       */
 /* parsed once, lazily, on the first slow path (pthread_once), so    */
@@ -230,6 +251,8 @@ typedef struct FM_Config {
     uint32_t release_walk_div;
     uint32_t regroup_min;
     uint64_t lcache_max_bytes;
+    uint32_t page_purge;
+    uint32_t purge_min_pages;
 } FM_Config;
 
 extern FM_Config fm_cfg;
@@ -246,6 +269,8 @@ static void fm_config_init(void)
     c.release_walk_div = 100;
     c.regroup_min = FM_REGROUP_MIN;
     c.lcache_max_bytes = FM_LCACHE_MAX_BYTES;
+    c.page_purge = 1;
+    c.purge_min_pages = 4;
 
     const char *prof = getenv("FM_PROFILE");
     if (prof) {
@@ -259,6 +284,7 @@ static void fm_config_init(void)
             c.release_max_interval_ms = 30000;
             c.release_walk_div = 25;
             c.lcache_max_bytes = 256ull << 20;
+            c.page_purge = 0;
         } else if (!strcmp(prof, "footprint")) {
             /* Return memory eagerly; keep almost nothing back. */
             c.release_age_ms = 25;
@@ -268,6 +294,7 @@ static void fm_config_init(void)
             c.release_max_interval_ms = 1000;
             c.release_walk_div = 400;
             c.lcache_max_bytes = 8ull << 20;
+            c.purge_min_pages = 2;
         }
         /* "balanced" and anything unrecognised keep the defaults. */
     }
@@ -281,6 +308,8 @@ static void fm_config_init(void)
         { "FM_RELEASE_MAX_INTERVAL_MS", &c.release_max_interval_ms, 1, 3600000 },
         { "FM_RELEASE_WALK_DIV", &c.release_walk_div, 1, 1000000 },
         { "FM_REGROUP_MIN", &c.regroup_min, 1, 4096 },
+        { "FM_PAGE_PURGE", &c.page_purge, 0, 1 },
+        { "FM_PURGE_MIN_PAGES", &c.purge_min_pages, 1, 15 },
     };
     for (size_t i = 0; i < sizeof(num) / sizeof(num[0]); i++) {
         const char *v = getenv(num[i].name);
@@ -443,10 +472,14 @@ static inline void *fm_span_new(uint32_t cls, void **tail_out, uint32_t *count_o
     sp->cls = cls;
     sp->magic = FM_SPAN_MAGIC;
     sp->nblocks = (uint32_t)n;
+    sp->dead_mark = 0;
     sp->map_base = (uintptr_t)base;
     sp->map_size = SPAN_SIZE;
     sp->user_size = 0;
     sp->align = 0;
+    sp->purge_mark = 0;
+    sp->purged_mask = 0;
+    sp->withheld_cnt = 0;
 
     char *p = base + HEADER_SIZE;
     void *head = p;
@@ -635,7 +668,30 @@ typedef struct FM_CensusEnt {
     void *ahead;
     void *atail;
     uint32_t acnt;
+    /* ADR 0030 page purge.  For candidate spans the coverage pass
+     * counts, per page, how many blocks intersecting the page are
+     * free in central (page_free); page_tot is the same count over
+     * all blocks of the span, computed arithmetically.  A page whose
+     * two counts agree is fully free.  pg_new_mask / pg_new_withheld
+     * record the purge this census decided to apply: its pages are
+     * dropped during the rebuild (their blocks withheld), then
+     * MADV_DONTNEED is applied to them.  pg_reclaim asks the rebuild
+     * to first re-carve the span's previously withheld blocks back
+     * into its survivor chain. */
+    uint16_t page_free[16];
+    uint16_t page_tot[16];
+    uint16_t page_sfree[16];
+    uint16_t page_stot[16];
+    uint16_t pg_new_mask;
+    uint16_t pg_new_withheld;
+    uint16_t pg_skip_cnt;
+    uint16_t pg_reclaim_cnt;
+    uint32_t pg_flags;
 } FM_CensusEnt;
+
+/* FM_CensusEnt.pg_flags bits */
+#define FM_PG_CANDIDATE 1u /* coverage pass should visit this span */
+#define FM_PG_RECLAIM 2u   /* re-carve withheld blocks in the rebuild */
 
 typedef struct FM_Census {
     FM_CensusEnt *ents;
@@ -689,6 +745,15 @@ static int fm_census_grow(FM_Census *c)
             e->ahead = NULL;
             e->atail = NULL;
             e->acnt = 0;
+            e->pg_new_mask = 0;
+            e->pg_new_withheld = 0;
+            e->pg_skip_cnt = 0;
+            e->pg_reclaim_cnt = 0;
+            e->pg_flags = 0;
+            memset(e->page_free, 0, sizeof(e->page_free));
+            memset(e->page_tot, 0, sizeof(e->page_tot));
+            memset(e->page_sfree, 0, sizeof(e->page_sfree));
+            memset(e->page_stot, 0, sizeof(e->page_stot));
             c->used++;
         }
     }
@@ -733,6 +798,41 @@ static FM_CensusEnt *fm_census_find(FM_Census *c, uintptr_t span)
  * count are accounted wholesale and do not count).  The automatic
  * release reads them to set the class's next interval (ADR 0020). */
 static uint32_t fm_census_marked, fm_census_waiting, fm_census_walked;
+/* ADR 0030: bytes returned by the most recent census's page purge,
+ * and how many spans it reclaimed (re-carved) -- the automatic
+ * release reads them alongside `released` when deciding whether
+ * the census found anything to do. */
+static size_t fm_census_purged;
+static uint32_t fm_census_reclaimed;
+/* Purge marks/applications get their own counter, separate from
+ * fm_census_waiting: unlike a dead span (rare, and gone once
+ * released), a partially-free span is the *common* case under
+ * churn and can stay purge-worthy indefinitely, so letting purge
+ * activity hold the census interval at its floor -- the exemption
+ * dead-span release relies on -- would keep every churning class
+ * censusing at full rate forever.  Purge findings therefore do
+ * not exempt the interval from doubling; a long drain still gets
+ * its purges, at widening intervals, each batching everything
+ * then eligible. */
+static uint32_t fm_census_pg_waiting;
+
+/* ADR 0030: record one free block in a candidate span's per-page
+ * coverage counts.  Pages are 4 KiB slices of the 64 KiB span; a
+ * block touches the pages between its first and last byte
+ * (page_free), and starts in exactly one of them (page_sfree) --
+ * the purge decision needs both, for different reasons (see the
+ * decision phase in fm_trim_class). */
+static inline void fm_pg_cover(FM_CensusEnt *e, uintptr_t span, void *p,
+                               size_t bs)
+{
+    uint32_t idx = (uint32_t)(((uintptr_t)p - span - HEADER_SIZE) / bs);
+    uint32_t fp = (uint32_t)((HEADER_SIZE + (size_t)idx * bs) / FM_PAGE_SIZE);
+    uint32_t lp = (uint32_t)((HEADER_SIZE + (size_t)(idx + 1) * bs - 1) /
+                             FM_PAGE_SIZE);
+    for (uint32_t pg = fp; pg <= lp; pg++)
+        e->page_free[pg]++;
+    e->page_sfree[fp]++;
+}
 
 /* qsort comparator: descending free-block count (ADR 0024). */
 static int fm_batch_count_desc(const void *a, const void *b)
@@ -747,7 +847,22 @@ static int fm_batch_count_desc(const void *a, const void *b)
  * reuse).  instant != 0 is the malloc_trim behaviour of ADR 0015
  * (every fully-free span dies now); instant == 0 is the automatic
  * release of ADR 0020, where a fully-free span must also carry a
- * dead mark at least FM_RELEASE_AGE_MS old. */
+ * dead mark at least FM_RELEASE_AGE_MS old.
+ *
+ * The same census also runs the page purge of ADR 0030: spans that
+ * are only *partially* free cannot be unmapped, but their wholly
+ * free, resident pages can be returned with MADV_DONTNEED.  The
+ * coverage pass counts, per page, the blocks intersecting it; a
+ * page is purgeable when every intersecting block is free in
+ * central (blocks elsewhere are invisible, which only ever makes
+ * the count too small -- the safe direction) and wholly contained
+ * in a purge run of at least FM_PURGE_MIN_PAGES pages.  Contained
+ * blocks are withheld from the rebuilt chains and accounted in the
+ * span header, so the span's effective free count stays exact and
+ * the dead-span proof above is unaffected.  Auto mode ages purge
+ * decisions on purge_mark exactly like dead-span marks; instant
+ * (trim) mode purges immediately.  A span whose circulating supply
+ * runs out gets its withheld blocks re-carved (reclaim) instead. */
 __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t keep,
                                                       int instant)
 {
@@ -802,41 +917,209 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
      * Instant mode kills candidates outright.  Automatic mode only
      * *marks* a candidate the first time; it dies once a later
      * census finds it still a candidate with an aged mark.  A span
-     * seen with blocks missing is alive -- clear its mark. */
+     * seen with blocks missing is alive -- clear its mark.
+     *
+     * The count that matters is the *effective* free count: blocks
+     * in central plus blocks withheld in purged pages (ADR 0030),
+     * which are free by construction.  Spans that are not fully
+     * free are considered for the page purge (and for reclaim of
+     * previously withheld blocks) in the phases below. */
+    const FM_Config *cfg = FM_CFG();
+    const size_t bs = kClassSize[cls];
     uint32_t now = instant ? 0 : fm_now_ms();
     fm_census_marked = 0;
     fm_census_waiting = 0;
+    fm_census_purged = 0;
+    fm_census_reclaimed = 0;
+    fm_census_pg_waiting = 0;
+    int any_candidate = 0;
     for (size_t i = 0; i < cen.cap; i++) {
         FM_CensusEnt *e = &cen.ents[i];
         if (!e->span)
             continue;
         FM_Span *sp = (FM_Span *)e->span;
         uint32_t nb = sp->nblocks;
+        uint32_t eff = e->cnt + sp->withheld_cnt;
 #ifdef FM_DEBUG
-        if (e->cnt > nb) {
+        if (eff > nb) {
             fprintf(stderr, "[fm] CENSUS OVERCOUNT cls=%u span=%p cnt=%u "
-                            "nblocks=%u\n",
-                    cls, (void *)e->span, e->cnt, nb);
+                            "withheld=%u nblocks=%u\n",
+                    cls, (void *)e->span, e->cnt, sp->withheld_cnt, nb);
             abort();
         }
 #endif
-        if (e->cnt == nb) {
+        if (eff == nb) {
             if (instant) {
                 e->dead = 1;
             } else if (!sp->dead_mark) {
                 sp->dead_mark = now ? now : 1;
                 fm_census_marked++;
             } else if ((uint32_t)(now - sp->dead_mark) >=
-                       FM_CFG()->release_age_ms) {
+                       cfg->release_age_ms) {
                 e->dead = 1;
             } else {
                 fm_census_waiting++;
             }
-        } else {
-            sp->dead_mark = 0;
+            continue;
+        }
+        sp->dead_mark = 0;
+        if (!cfg->page_purge)
+            continue;
+        /* ADR 0030 reclaim: a span whose withheld blocks are its
+         * only free supply left (nothing of it circulates in
+         * central) and whose purge has aged gets its blocks back --
+         * demand has clearly returned to this span.  Auto mode
+         * only: trim's job is to release, not to re-fault pages. */
+        if (!instant && sp->purged_mask && e->cnt == 0 &&
+            (uint32_t)(now - sp->purge_mark) >= cfg->release_age_ms) {
+            e->pg_flags |= FM_PG_RECLAIM;
+            continue;
+        }
+        /* Purge candidacy: enough free bytes in central that a
+         * minimum-size purge run could exist.  The coverage pass
+         * decides whether it really does. */
+        if (e->cnt && (uint64_t)e->cnt * bs >=
+                          (uint64_t)(cfg->purge_min_pages - 1) * FM_PAGE_SIZE) {
+            e->pg_flags |= FM_PG_CANDIDATE;
+            any_candidate = 1;
+            for (uint32_t idx = 0; idx < nb; idx++) {
+                uint32_t fp = (uint32_t)((HEADER_SIZE + (size_t)idx * bs) /
+                                         FM_PAGE_SIZE);
+                uint32_t lp = (uint32_t)((HEADER_SIZE +
+                                          (size_t)(idx + 1) * bs - 1) /
+                                         FM_PAGE_SIZE);
+                for (uint32_t pg = fp; pg <= lp; pg++)
+                    e->page_tot[pg]++;
+                e->page_stot[fp]++;
+            }
+        } else if (!sp->purged_mask) {
+            sp->purge_mark = 0;
         }
     }
 
+    /* ADR 0030 coverage pass: for candidate spans, count per page
+     * how many of the blocks intersecting it are free in central.
+     * Span-pure batches of non-candidates are skipped wholesale;
+     * mixed batches are walked (their blocks decide candidacy
+     * block by block).  The walk is deliberately NOT charged to
+     * fm_census_walked: that counter prices the census for the
+     * release cadence, and charging the scouting pass doubled the
+     * interval after every large census, starving the dead-span
+     * machinery the purge shares the census with (measured on
+     * consprobe: 9 censuses without the charge, 2 with it, and the
+     * settled RSS went 9.0 -> 17.7 MB).  The coverage cost is
+     * bounded by the candidate mass it can return, and the rebuild
+     * walk below keeps the cadence honest. */
+    uint32_t walked_pre_coverage = fm_census_walked;
+    if (any_candidate) {
+        for (FM_Batch *b = all; b; b = b->next) {
+            uint32_t cnt = b->count & FM_COUNT_MASK;
+            if (cnt && (b->count & FM_COUNT_PURE)) {
+                FM_CensusEnt *e =
+                    fm_census_find(&cen, (uintptr_t)b->head & SPAN_MASK);
+                if (!e || !(e->pg_flags & FM_PG_CANDIDATE))
+                    continue;
+                for (void *p = b->head; p; p = *(void **)p) {
+                    fm_census_walked++;
+                    fm_pg_cover(e, e->span, p, bs);
+                }
+            } else {
+                for (void *p = b->head; p; p = *(void **)p) {
+                    fm_census_walked++;
+                    FM_CensusEnt *e =
+                        fm_census_find(&cen, (uintptr_t)p & SPAN_MASK);
+                    if (e && (e->pg_flags & FM_PG_CANDIDATE))
+                        fm_pg_cover(e, e->span, p, bs);
+                }
+            }
+        }
+    }
+
+    /* ADR 0030 purge decision: a page of a candidate span is
+     * purgeable when two exact counts agree --
+     *
+     *   - every block INTERSECTING the page is free in central
+     *     (page_free == page_tot): no live block's bytes are
+     *     discarded.  Blocks outside central (in some thread's
+     *     local list) are invisible to the census, which only ever
+     *     makes this count too small -- the safe direction.
+     *   - every block STARTING in the page is free in central
+     *     (page_sfree == page_stot): a free block's link word lives
+     *     in its first bytes, so a block that starts in a purged
+     *     page must be one the census itself holds and withholds;
+     *     a same-class block sitting in another thread's local
+     *     list would otherwise be handed out later with its link
+     *     word zeroed.  This count is what makes the purge safe
+     *     under concurrency, not just in a quiescent process.
+     *
+     * Blocks merely straddling INTO a purged page from a kept one
+     * are harmless: their link words stay readable, and the tail
+     * bytes discarded are a free block's, which mean nothing.
+     * Resident pages only (an untouched page has no RSS to give
+     * back), page 0 excluded (it holds the header), and the span
+     * must yield at least FM_PURGE_MIN_PAGES new pages in total --
+     * no contiguity is required.  The withheld set is then exactly
+     * "blocks starting in purged pages", recomputable from the
+     * mask at any later census (that is what makes reclaim safe).
+     * In auto mode the decision is aged like dead-span release:
+     * the first census that finds a span purge-worthy only
+     * marks it. */
+    if (any_candidate) {
+        for (size_t i = 0; i < cen.cap; i++) {
+            FM_CensusEnt *e = &cen.ents[i];
+            if (!e->span || !(e->pg_flags & FM_PG_CANDIDATE))
+                continue;
+            FM_Span *sp = (FM_Span *)e->span;
+            uint32_t nb = sp->nblocks;
+            unsigned char vec[16];
+            int have_vec = mincore((void *)e->span, SPAN_SIZE, vec) == 0;
+            uint16_t new_mask = 0;
+            uint32_t new_pages = 0;
+            for (uint32_t pg = 1; pg < 16; pg++) {
+                if (sp->purged_mask & (uint16_t)(1u << pg))
+                    continue;
+                if (e->page_tot[pg] && e->page_free[pg] == e->page_tot[pg] &&
+                    e->page_sfree[pg] == e->page_stot[pg] &&
+                    (!have_vec || (vec[pg] & 1))) {
+                    new_mask |= (uint16_t)(1u << pg);
+                    new_pages++;
+                }
+            }
+            if (new_pages < cfg->purge_min_pages)
+                new_mask = 0, new_pages = 0;
+            uint16_t new_withheld = 0;
+            if (new_pages) {
+                for (uint32_t idx = 0; idx < nb; idx++) {
+                    uint32_t fp = (uint32_t)((HEADER_SIZE +
+                                              (size_t)idx * bs) /
+                                             FM_PAGE_SIZE);
+                    if (new_mask & (uint16_t)(1u << fp))
+                        new_withheld++;
+                }
+            }
+            if (!new_pages) {
+                if (!instant && !sp->purged_mask)
+                    sp->purge_mark = 0;
+                continue;
+            }
+            if (instant) {
+                e->pg_new_mask = new_mask;
+                e->pg_new_withheld = new_withheld;
+            } else if (!sp->purge_mark) {
+                sp->purge_mark = now ? now : 1;
+                fm_census_pg_waiting++;
+            } else if ((uint32_t)(now - sp->purge_mark) >=
+                       cfg->release_age_ms) {
+                e->pg_new_mask = new_mask;
+                e->pg_new_withheld = new_withheld;
+                sp->purge_mark = now;
+            } else {
+                fm_census_pg_waiting++;
+            }
+        }
+    }
+
+    fm_census_walked = walked_pre_coverage;
     /* Retention quota (ADR 0020): a census in its automatic form
      * keeps up to `keep` of the dead spans -- their blocks stay on
      * the central stack, immediately reusable -- and unmaps only
@@ -867,13 +1150,63 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
      * grow) keep their blocks in the residue chain: losing blocks
      * would leak them, grouping them wrongly would corrupt the
      * census's counts, so they stay mixed and merely ungrouped. */
+    /* ADR 0030 reclaim, ahead of the rebuild: re-carve each flagged
+     * span's withheld blocks (exactly the blocks starting in its
+     * purged pages -- recomputed from the mask) into its survivor
+     * chain, so they flow through the normal regroup publish below.
+     * Writing the links re-faults the pages: they are back in
+     * service, which is the point. */
+    for (size_t i = 0; i < cen.cap; i++) {
+        FM_CensusEnt *e = &cen.ents[i];
+        if (!e->span || !(e->pg_flags & FM_PG_RECLAIM))
+            continue;
+        FM_Span *sp = (FM_Span *)e->span;
+        uint32_t total = 0;
+        for (uint32_t idx = 0; idx < sp->nblocks; idx++) {
+            uint32_t fp = (uint32_t)((HEADER_SIZE + (size_t)idx * bs) /
+                                     FM_PAGE_SIZE);
+            if (!(sp->purged_mask & (uint16_t)(1u << fp)))
+                continue;
+            void *blk = (void *)(e->span + HEADER_SIZE + (size_t)idx * bs);
+            if (e->atail)
+                *(void **)e->atail = blk;
+            else
+                e->ahead = blk;
+            e->atail = blk;
+            e->acnt++;
+            total++;
+        }
+#ifdef FM_DEBUG
+        if (total != sp->withheld_cnt) {
+            fprintf(stderr, "[fm] RECLAIM COUNT cls=%u span=%p carved=%u "
+                            "withheld=%u\n",
+                    cls, (void *)e->span, total, sp->withheld_cnt);
+            abort();
+        }
+#endif
+        e->pg_reclaim_cnt = (uint16_t)total;
+        sp->purged_mask = 0;
+        sp->withheld_cnt = 0;
+        sp->purge_mark = 0;
+        fm_census_reclaimed++;
+    }
+
     void *res_head = NULL, *res_tail = NULL;
     uint32_t res_cnt = 0;
     for (FM_Batch *b = all; b;) {
         FM_Batch *nextb = b->next;
         uint32_t cnt = b->count & FM_COUNT_MASK;
+        FM_CensusEnt *be = NULL;
+        int splice = 0;
         if (cnt && (b->count & FM_COUNT_PURE)) {
-            FM_CensusEnt *e = fm_census_find(&cen, (uintptr_t)b->head & SPAN_MASK);
+            be = fm_census_find(&cen, (uintptr_t)b->head & SPAN_MASK);
+            /* A batch of a span being purged cannot be spliced
+             * wholesale: the blocks inside the purge run must be
+             * withheld, so the chain is walked block by block. */
+            splice = !(be && be->pg_new_mask);
+        }
+        if (splice) {
+            FM_CensusEnt *e = be;
             if (e && e->dead) {
                 /* the whole chain dies with its span */
             } else if (e) {
@@ -898,6 +1231,18 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
                 FM_CensusEnt *e = fm_census_find(&cen, (uintptr_t)p & SPAN_MASK);
                 if (e && e->dead) {
                     /* block dies with its span */
+                } else if (e && e->pg_new_mask &&
+                           (e->pg_new_mask &
+                            (uint16_t)(1u << (((uintptr_t)p - e->span) /
+                                              FM_PAGE_SIZE)))) {
+                    /* Block starting in one of this census's newly
+                     * purged pages: withhold it -- it joins no
+                     * chain, and its link word is about to be
+                     * discarded with its page.  Blocks merely
+                     * straddling into a purged page test negative
+                     * here (their first page is a kept one) and
+                     * circulate safely. */
+                    e->pg_skip_cnt++;
                 } else if (e) {
                     if (e->atail)
                         *(void **)e->atail = p;
@@ -918,6 +1263,42 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
         }
         fm_batch_release(b);
         b = nextb;
+    }
+
+    /* ADR 0030: apply this census's purges.  The withheld blocks
+     * were already dropped from the rebuilt chains; discarding the
+     * pages now cannot lose a link word anyone will read. */
+    for (size_t i = 0; i < cen.cap; i++) {
+        FM_CensusEnt *e = &cen.ents[i];
+        if (!e->span || !e->pg_new_mask)
+            continue;
+        FM_Span *sp = (FM_Span *)e->span;
+#ifdef FM_DEBUG
+        if (!fm_census_dropped && e->pg_skip_cnt != e->pg_new_withheld) {
+            fprintf(stderr, "[fm] PURGE SKIP COUNT cls=%u span=%p "
+                            "skipped=%u expected=%u\n",
+                    cls, (void *)e->span, e->pg_skip_cnt,
+                    e->pg_new_withheld);
+            abort();
+        }
+#endif
+        for (uint32_t a = 1; a < 16;) {
+            if (!(e->pg_new_mask & (uint16_t)(1u << a))) {
+                a++;
+                continue;
+            }
+            uint32_t b = a + 1;
+            while (b < 16 && (e->pg_new_mask & (uint16_t)(1u << b)))
+                b++;
+            madvise((void *)(e->span + (size_t)a * FM_PAGE_SIZE),
+                    (size_t)(b - a) * FM_PAGE_SIZE, MADV_DONTNEED);
+            fm_census_purged += (size_t)(b - a) * FM_PAGE_SIZE;
+            a = b;
+        }
+        sp->purged_mask |= e->pg_new_mask;
+        sp->withheld_cnt = (uint16_t)(sp->withheld_cnt +
+                                      (fm_census_dropped ? e->pg_skip_cnt
+                                                         : e->pg_new_withheld));
     }
 
     /* Unmap the dead spans (once each, from the census). */
@@ -957,10 +1338,12 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             continue;
         *(void **)e->atail = NULL;
 #ifdef FM_DEBUG
-        if (!fm_census_dropped && !e->dead && e->acnt != e->cnt) {
+        if (!fm_census_dropped && !e->dead &&
+            e->acnt != e->cnt + e->pg_reclaim_cnt - e->pg_skip_cnt) {
             fprintf(stderr, "[fm] REGROUP COUNT cls=%u span=%p acnt=%u "
-                            "cnt=%u\n",
-                    cls, (void *)e->span, e->acnt, e->cnt);
+                            "cnt=%u reclaim=%u skip=%u\n",
+                    cls, (void *)e->span, e->acnt, e->cnt,
+                    e->pg_reclaim_cnt, e->pg_skip_cnt);
             abort();
         }
 #endif
@@ -1032,7 +1415,8 @@ static void fm_release_maybe(uint32_t cls, uint32_t now)
     uint32_t next = fm_census_walked / cfg->release_walk_div;
     if (next < cfg->release_interval_ms)
         next = cfg->release_interval_ms;
-    if (released == 0 && fm_census_marked == 0 && fm_census_waiting == 0)
+    if (released == 0 && fm_census_reclaimed == 0 &&
+        fm_census_marked == 0 && fm_census_waiting == 0)
         next *= 2;
     if (next > cfg->release_max_interval_ms)
         next = cfg->release_max_interval_ms;

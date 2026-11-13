@@ -88,6 +88,7 @@ fi
 cd "$WORK/.."
 gcc -O2 -pthread -o wrk wrk.c
 gcc -O2 -o bursty bursty.c
-echo "built wrk, bursty"
+gcc -O2 -o bursty2 bursty2.c
+echo "built wrk, bursty, bursty2"
 
 echo "prep done: $(du -sh $WORK | cut -f1) in $WORK"

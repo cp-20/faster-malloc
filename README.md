@@ -664,5 +664,8 @@ signals and is disabled in fork children until exec; the parent's timer
 continues. Ordinary `fork` quiesces census/central ownership. Calling fork
 from an allocator-interrupting signal handler is unsupported; malloc/free
 and census work are not async-signal-safe. Raw `_Fork`/syscall fork bypass
-the handlers. Allocator unload while its detached timer runs remains
-unsupported. Run `bash bench/round7.sh` for the correctness battery.
+the handlers. The v2/JIT shared libraries use ELF `NODELETE` (ADR 0040):
+`dlclose` succeeds but cannot unmap them or stop/reset the timer. Code, TLS
+callbacks and allocator state remain resident until process termination;
+normal exit does not join the worker, and the kernel reclaims all resources.
+Custom v2/JIT builds must also link with `-Wl,-z,nodelete`. Run `bash bench/round7.sh` for the correctness battery.

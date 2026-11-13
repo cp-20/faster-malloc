@@ -24,3 +24,4 @@ for lib in libfastmalloc2.so libjitmalloc.so; do
 done
 bash bench/earlyinit.sh
 bash bench/tlsexit.sh
+bash bench/idlelifecycle.sh

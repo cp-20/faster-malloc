@@ -1,0 +1,8 @@
+Initial guard harness stopped before recording the first Node row.
+Expected checksum was mistakenly set to: node-churn checksum 609988
+Observed stdout: node-churn checksum 671898
+Target return code: 0
+The prior round-10 matrix confirms 671898 for this exact fixture.
+Corrected only the harness expectation, then restarted the entire seven-pair pass.
+The four preceding Python rows are retained in guard-harness-initial.jsonl and
+excluded from all timing summaries. This was not an allocator failure.

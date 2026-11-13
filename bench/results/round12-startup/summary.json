@@ -1,0 +1,1794 @@
+{
+  "baseline-startup": [
+    {
+      "app": "python",
+      "variant": "glibc",
+      "method": "round10",
+      "rss_kb": {
+        "median": 8448,
+        "min": 8448,
+        "max": 8448
+      },
+      "seconds": {
+        "median": 0.015,
+        "min": 0.014,
+        "max": 0.02
+      }
+    },
+    {
+      "app": "python",
+      "variant": "glibc",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 8448,
+        "min": 8448,
+        "max": 8448
+      },
+      "seconds": {
+        "median": 0.018,
+        "min": 0.014,
+        "max": 0.019
+      }
+    },
+    {
+      "app": "python",
+      "variant": "base-v2",
+      "method": "round10",
+      "rss_kb": {
+        "median": 13312,
+        "min": 13312,
+        "max": 13312
+      },
+      "seconds": {
+        "median": 0.02,
+        "min": 0.017,
+        "max": 0.031
+      }
+    },
+    {
+      "app": "python",
+      "variant": "base-v2",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 10112,
+        "min": 10112,
+        "max": 10112
+      },
+      "seconds": {
+        "median": 0.02,
+        "min": 0.019,
+        "max": 0.025
+      }
+    },
+    {
+      "app": "python",
+      "variant": "base-jit",
+      "method": "round10",
+      "rss_kb": {
+        "median": 13312,
+        "min": 13312,
+        "max": 13312
+      },
+      "seconds": {
+        "median": 0.019,
+        "min": 0.016,
+        "max": 0.021
+      }
+    },
+    {
+      "app": "python",
+      "variant": "base-jit",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 10240,
+        "min": 10240,
+        "max": 10240
+      },
+      "seconds": {
+        "median": 0.022,
+        "min": 0.019,
+        "max": 0.024
+      }
+    },
+    {
+      "app": "python",
+      "variant": "jemalloc",
+      "method": "round10",
+      "rss_kb": {
+        "median": 10112,
+        "min": 10112,
+        "max": 10112
+      },
+      "seconds": {
+        "median": 0.016,
+        "min": 0.014,
+        "max": 0.019
+      }
+    },
+    {
+      "app": "python",
+      "variant": "jemalloc",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 8448,
+        "min": 8448,
+        "max": 8448
+      },
+      "seconds": {
+        "median": 0.019,
+        "min": 0.018,
+        "max": 0.023
+      }
+    },
+    {
+      "app": "node",
+      "variant": "glibc",
+      "method": "round10",
+      "rss_kb": {
+        "median": 25672,
+        "min": 25668,
+        "max": 25800
+      },
+      "seconds": {
+        "median": 0.038,
+        "min": 0.034,
+        "max": 0.076
+      }
+    },
+    {
+      "app": "node",
+      "variant": "glibc",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 25800,
+        "min": 25672,
+        "max": 25800
+      },
+      "seconds": {
+        "median": 0.043,
+        "min": 0.04,
+        "max": 0.047
+      }
+    },
+    {
+      "app": "node",
+      "variant": "base-v2",
+      "method": "round10",
+      "rss_kb": {
+        "median": 31104,
+        "min": 30592,
+        "max": 31104
+      },
+      "seconds": {
+        "median": 0.048,
+        "min": 0.038,
+        "max": 0.063
+      }
+    },
+    {
+      "app": "node",
+      "variant": "base-v2",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 31104,
+        "min": 30976,
+        "max": 31104
+      },
+      "seconds": {
+        "median": 0.044,
+        "min": 0.04,
+        "max": 0.064
+      }
+    },
+    {
+      "app": "node",
+      "variant": "base-jit",
+      "method": "round10",
+      "rss_kb": {
+        "median": 31104,
+        "min": 30592,
+        "max": 31104
+      },
+      "seconds": {
+        "median": 0.044,
+        "min": 0.037,
+        "max": 0.059
+      }
+    },
+    {
+      "app": "node",
+      "variant": "base-jit",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 30976,
+        "min": 29952,
+        "max": 31104
+      },
+      "seconds": {
+        "median": 0.044,
+        "min": 0.04,
+        "max": 0.05
+      }
+    },
+    {
+      "app": "node",
+      "variant": "jemalloc",
+      "method": "round10",
+      "rss_kb": {
+        "median": 27520,
+        "min": 27392,
+        "max": 27520
+      },
+      "seconds": {
+        "median": 0.038,
+        "min": 0.033,
+        "max": 0.122
+      }
+    },
+    {
+      "app": "node",
+      "variant": "jemalloc",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 27392,
+        "min": 27264,
+        "max": 27520
+      },
+      "seconds": {
+        "median": 0.044,
+        "min": 0.038,
+        "max": 0.054
+      }
+    }
+  ],
+  "first16-startup": [
+    {
+      "app": "python",
+      "variant": "glibc",
+      "method": "round10",
+      "rss_kb": {
+        "median": 8448,
+        "min": 8448,
+        "max": 8448
+      },
+      "seconds": {
+        "median": 0.014,
+        "min": 0.014,
+        "max": 0.02
+      }
+    },
+    {
+      "app": "python",
+      "variant": "glibc",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 8448,
+        "min": 8448,
+        "max": 8448
+      },
+      "seconds": {
+        "median": 0.016,
+        "min": 0.014,
+        "max": 0.023
+      }
+    },
+    {
+      "app": "python",
+      "variant": "base-v2",
+      "method": "round10",
+      "rss_kb": {
+        "median": 13312,
+        "min": 13312,
+        "max": 13312
+      },
+      "seconds": {
+        "median": 0.017,
+        "min": 0.016,
+        "max": 0.023
+      }
+    },
+    {
+      "app": "python",
+      "variant": "base-v2",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 10112,
+        "min": 10112,
+        "max": 10112
+      },
+      "seconds": {
+        "median": 0.018,
+        "min": 0.016,
+        "max": 0.022
+      }
+    },
+    {
+      "app": "python",
+      "variant": "base-jit",
+      "method": "round10",
+      "rss_kb": {
+        "median": 13312,
+        "min": 13312,
+        "max": 13312
+      },
+      "seconds": {
+        "median": 0.019,
+        "min": 0.017,
+        "max": 0.021
+      }
+    },
+    {
+      "app": "python",
+      "variant": "base-jit",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 10240,
+        "min": 10240,
+        "max": 10240
+      },
+      "seconds": {
+        "median": 0.018,
+        "min": 0.017,
+        "max": 0.023
+      }
+    },
+    {
+      "app": "python",
+      "variant": "jemalloc",
+      "method": "round10",
+      "rss_kb": {
+        "median": 10112,
+        "min": 10112,
+        "max": 10112
+      },
+      "seconds": {
+        "median": 0.016,
+        "min": 0.014,
+        "max": 0.019
+      }
+    },
+    {
+      "app": "python",
+      "variant": "jemalloc",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 8448,
+        "min": 8448,
+        "max": 8448
+      },
+      "seconds": {
+        "median": 0.018,
+        "min": 0.016,
+        "max": 0.021
+      }
+    },
+    {
+      "app": "python",
+      "variant": "v2",
+      "method": "round10",
+      "rss_kb": {
+        "median": 10240,
+        "min": 10240,
+        "max": 10240
+      },
+      "seconds": {
+        "median": 0.018,
+        "min": 0.014,
+        "max": 0.019
+      }
+    },
+    {
+      "app": "python",
+      "variant": "v2",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 8448,
+        "min": 8448,
+        "max": 8448
+      },
+      "seconds": {
+        "median": 0.017,
+        "min": 0.016,
+        "max": 0.037
+      }
+    },
+    {
+      "app": "python",
+      "variant": "jit",
+      "method": "round10",
+      "rss_kb": {
+        "median": 10240,
+        "min": 10240,
+        "max": 10240
+      },
+      "seconds": {
+        "median": 0.016,
+        "min": 0.015,
+        "max": 0.019
+      }
+    },
+    {
+      "app": "python",
+      "variant": "jit",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 8448,
+        "min": 8448,
+        "max": 8448
+      },
+      "seconds": {
+        "median": 0.018,
+        "min": 0.016,
+        "max": 0.02
+      }
+    },
+    {
+      "app": "node",
+      "variant": "glibc",
+      "method": "round10",
+      "rss_kb": {
+        "median": 25796,
+        "min": 25672,
+        "max": 25800
+      },
+      "seconds": {
+        "median": 0.038,
+        "min": 0.029,
+        "max": 0.046
+      }
+    },
+    {
+      "app": "node",
+      "variant": "glibc",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 25800,
+        "min": 25672,
+        "max": 25800
+      },
+      "seconds": {
+        "median": 0.037,
+        "min": 0.031,
+        "max": 0.042
+      }
+    },
+    {
+      "app": "node",
+      "variant": "base-v2",
+      "method": "round10",
+      "rss_kb": {
+        "median": 31104,
+        "min": 30592,
+        "max": 31104
+      },
+      "seconds": {
+        "median": 0.045,
+        "min": 0.039,
+        "max": 0.056
+      }
+    },
+    {
+      "app": "node",
+      "variant": "base-v2",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 30976,
+        "min": 30592,
+        "max": 31104
+      },
+      "seconds": {
+        "median": 0.04,
+        "min": 0.032,
+        "max": 0.055
+      }
+    },
+    {
+      "app": "node",
+      "variant": "base-jit",
+      "method": "round10",
+      "rss_kb": {
+        "median": 31104,
+        "min": 30592,
+        "max": 31104
+      },
+      "seconds": {
+        "median": 0.039,
+        "min": 0.033,
+        "max": 0.058
+      }
+    },
+    {
+      "app": "node",
+      "variant": "base-jit",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 30976,
+        "min": 30976,
+        "max": 31104
+      },
+      "seconds": {
+        "median": 0.042,
+        "min": 0.036,
+        "max": 0.051
+      }
+    },
+    {
+      "app": "node",
+      "variant": "jemalloc",
+      "method": "round10",
+      "rss_kb": {
+        "median": 27392,
+        "min": 27136,
+        "max": 27520
+      },
+      "seconds": {
+        "median": 0.038,
+        "min": 0.03,
+        "max": 0.043
+      }
+    },
+    {
+      "app": "node",
+      "variant": "jemalloc",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 27520,
+        "min": 27392,
+        "max": 27520
+      },
+      "seconds": {
+        "median": 0.038,
+        "min": 0.035,
+        "max": 0.045
+      }
+    },
+    {
+      "app": "node",
+      "variant": "v2",
+      "method": "round10",
+      "rss_kb": {
+        "median": 28672,
+        "min": 27392,
+        "max": 28672
+      },
+      "seconds": {
+        "median": 0.038,
+        "min": 0.033,
+        "max": 0.04
+      }
+    },
+    {
+      "app": "node",
+      "variant": "v2",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 28672,
+        "min": 28416,
+        "max": 28672
+      },
+      "seconds": {
+        "median": 0.04,
+        "min": 0.034,
+        "max": 0.045
+      }
+    },
+    {
+      "app": "node",
+      "variant": "jit",
+      "method": "round10",
+      "rss_kb": {
+        "median": 28416,
+        "min": 28160,
+        "max": 28672
+      },
+      "seconds": {
+        "median": 0.037,
+        "min": 0.033,
+        "max": 0.053
+      }
+    },
+    {
+      "app": "node",
+      "variant": "jit",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 28544,
+        "min": 28416,
+        "max": 28672
+      },
+      "seconds": {
+        "median": 0.038,
+        "min": 0.034,
+        "max": 0.047
+      }
+    }
+  ],
+  "final-startup": [
+    {
+      "app": "python",
+      "variant": "glibc",
+      "method": "round10",
+      "rss_kb": {
+        "median": 8448,
+        "min": 8448,
+        "max": 8448
+      },
+      "seconds": {
+        "median": 0.017,
+        "min": 0.013,
+        "max": 0.02
+      }
+    },
+    {
+      "app": "python",
+      "variant": "glibc",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 8448,
+        "min": 8448,
+        "max": 8448
+      },
+      "seconds": {
+        "median": 0.017,
+        "min": 0.014,
+        "max": 0.02
+      }
+    },
+    {
+      "app": "python",
+      "variant": "base-v2",
+      "method": "round10",
+      "rss_kb": {
+        "median": 13312,
+        "min": 13312,
+        "max": 13312
+      },
+      "seconds": {
+        "median": 0.019,
+        "min": 0.016,
+        "max": 0.021
+      }
+    },
+    {
+      "app": "python",
+      "variant": "base-v2",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 10112,
+        "min": 10112,
+        "max": 10112
+      },
+      "seconds": {
+        "median": 0.019,
+        "min": 0.017,
+        "max": 0.023
+      }
+    },
+    {
+      "app": "python",
+      "variant": "base-jit",
+      "method": "round10",
+      "rss_kb": {
+        "median": 13312,
+        "min": 13312,
+        "max": 13312
+      },
+      "seconds": {
+        "median": 0.019,
+        "min": 0.016,
+        "max": 0.021
+      }
+    },
+    {
+      "app": "python",
+      "variant": "base-jit",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 10240,
+        "min": 10240,
+        "max": 10240
+      },
+      "seconds": {
+        "median": 0.018,
+        "min": 0.017,
+        "max": 0.02
+      }
+    },
+    {
+      "app": "python",
+      "variant": "jemalloc",
+      "method": "round10",
+      "rss_kb": {
+        "median": 10112,
+        "min": 10112,
+        "max": 10112
+      },
+      "seconds": {
+        "median": 0.017,
+        "min": 0.014,
+        "max": 0.02
+      }
+    },
+    {
+      "app": "python",
+      "variant": "jemalloc",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 8448,
+        "min": 8448,
+        "max": 8448
+      },
+      "seconds": {
+        "median": 0.017,
+        "min": 0.017,
+        "max": 0.02
+      }
+    },
+    {
+      "app": "python",
+      "variant": "v2",
+      "method": "round10",
+      "rss_kb": {
+        "median": 10240,
+        "min": 10240,
+        "max": 10240
+      },
+      "seconds": {
+        "median": 0.018,
+        "min": 0.015,
+        "max": 0.022
+      }
+    },
+    {
+      "app": "python",
+      "variant": "v2",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 8448,
+        "min": 8448,
+        "max": 8448
+      },
+      "seconds": {
+        "median": 0.017,
+        "min": 0.016,
+        "max": 0.021
+      }
+    },
+    {
+      "app": "python",
+      "variant": "jit",
+      "method": "round10",
+      "rss_kb": {
+        "median": 13312,
+        "min": 13312,
+        "max": 13312
+      },
+      "seconds": {
+        "median": 0.019,
+        "min": 0.017,
+        "max": 0.023
+      }
+    },
+    {
+      "app": "python",
+      "variant": "jit",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 10240,
+        "min": 10240,
+        "max": 10240
+      },
+      "seconds": {
+        "median": 0.018,
+        "min": 0.017,
+        "max": 0.02
+      }
+    },
+    {
+      "app": "node",
+      "variant": "glibc",
+      "method": "round10",
+      "rss_kb": {
+        "median": 25800,
+        "min": 25672,
+        "max": 25800
+      },
+      "seconds": {
+        "median": 0.039,
+        "min": 0.034,
+        "max": 0.043
+      }
+    },
+    {
+      "app": "node",
+      "variant": "glibc",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 25796,
+        "min": 25672,
+        "max": 25800
+      },
+      "seconds": {
+        "median": 0.035,
+        "min": 0.033,
+        "max": 0.043
+      }
+    },
+    {
+      "app": "node",
+      "variant": "base-v2",
+      "method": "round10",
+      "rss_kb": {
+        "median": 30976,
+        "min": 30592,
+        "max": 31104
+      },
+      "seconds": {
+        "median": 0.04,
+        "min": 0.038,
+        "max": 0.042
+      }
+    },
+    {
+      "app": "node",
+      "variant": "base-v2",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 31104,
+        "min": 30592,
+        "max": 31104
+      },
+      "seconds": {
+        "median": 0.04,
+        "min": 0.038,
+        "max": 0.051
+      }
+    },
+    {
+      "app": "node",
+      "variant": "base-jit",
+      "method": "round10",
+      "rss_kb": {
+        "median": 31104,
+        "min": 30720,
+        "max": 31104
+      },
+      "seconds": {
+        "median": 0.039,
+        "min": 0.035,
+        "max": 0.047
+      }
+    },
+    {
+      "app": "node",
+      "variant": "base-jit",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 30976,
+        "min": 30720,
+        "max": 31104
+      },
+      "seconds": {
+        "median": 0.041,
+        "min": 0.037,
+        "max": 0.056
+      }
+    },
+    {
+      "app": "node",
+      "variant": "jemalloc",
+      "method": "round10",
+      "rss_kb": {
+        "median": 27520,
+        "min": 27392,
+        "max": 27520
+      },
+      "seconds": {
+        "median": 0.037,
+        "min": 0.034,
+        "max": 0.043
+      }
+    },
+    {
+      "app": "node",
+      "variant": "jemalloc",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 27520,
+        "min": 27264,
+        "max": 27520
+      },
+      "seconds": {
+        "median": 0.038,
+        "min": 0.036,
+        "max": 0.058
+      }
+    },
+    {
+      "app": "node",
+      "variant": "v2",
+      "method": "round10",
+      "rss_kb": {
+        "median": 28672,
+        "min": 28160,
+        "max": 28672
+      },
+      "seconds": {
+        "median": 0.04,
+        "min": 0.034,
+        "max": 0.046
+      }
+    },
+    {
+      "app": "node",
+      "variant": "v2",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 28672,
+        "min": 28416,
+        "max": 28672
+      },
+      "seconds": {
+        "median": 0.039,
+        "min": 0.036,
+        "max": 0.051
+      }
+    },
+    {
+      "app": "node",
+      "variant": "jit",
+      "method": "round10",
+      "rss_kb": {
+        "median": 31104,
+        "min": 30592,
+        "max": 31104
+      },
+      "seconds": {
+        "median": 0.038,
+        "min": 0.037,
+        "max": 0.043
+      }
+    },
+    {
+      "app": "node",
+      "variant": "jit",
+      "method": "target-only",
+      "rss_kb": {
+        "median": 31104,
+        "min": 30976,
+        "max": 31104
+      },
+      "seconds": {
+        "median": 0.039,
+        "min": 0.037,
+        "max": 0.045
+      }
+    }
+  ],
+  "first16-guard": [
+    {
+      "app": "python",
+      "variant": "base-v2",
+      "seconds": {
+        "median": 3.569,
+        "min": 3.255,
+        "max": 5.002
+      },
+      "rss_kb": {
+        "median": 502884,
+        "min": 502644,
+        "max": 502888
+      }
+    },
+    {
+      "app": "python",
+      "variant": "v2",
+      "seconds": {
+        "median": 3.811,
+        "min": 3.387,
+        "max": 4.397
+      },
+      "rss_kb": {
+        "median": 499664,
+        "min": 499508,
+        "max": 499668
+      }
+    },
+    {
+      "app": "python",
+      "variant": "base-jit",
+      "seconds": {
+        "median": 3.805,
+        "min": 3.066,
+        "max": 4.381
+      },
+      "rss_kb": {
+        "median": 502900,
+        "min": 502772,
+        "max": 502904
+      }
+    },
+    {
+      "app": "python",
+      "variant": "jit",
+      "seconds": {
+        "median": 3.718,
+        "min": 3.276,
+        "max": 6.017
+      },
+      "rss_kb": {
+        "median": 499588,
+        "min": 499436,
+        "max": 499680
+      }
+    },
+    {
+      "app": "node",
+      "variant": "base-v2",
+      "seconds": {
+        "median": 1.601,
+        "min": 1.524,
+        "max": 1.92
+      },
+      "rss_kb": {
+        "median": 498668,
+        "min": 497856,
+        "max": 501168
+      }
+    },
+    {
+      "app": "node",
+      "variant": "v2",
+      "seconds": {
+        "median": 1.96,
+        "min": 1.397,
+        "max": 2.821
+      },
+      "rss_kb": {
+        "median": 495572,
+        "min": 495260,
+        "max": 510964
+      }
+    },
+    {
+      "app": "node",
+      "variant": "base-jit",
+      "seconds": {
+        "median": 1.679,
+        "min": 1.405,
+        "max": 2.521
+      },
+      "rss_kb": {
+        "median": 497824,
+        "min": 497216,
+        "max": 502520
+      }
+    },
+    {
+      "app": "node",
+      "variant": "jit",
+      "seconds": {
+        "median": 1.68,
+        "min": 1.445,
+        "max": 1.833
+      },
+      "rss_kb": {
+        "median": 495704,
+        "min": 495132,
+        "max": 515604
+      }
+    },
+    {
+      "app": "kvstore",
+      "variant": "base-v2",
+      "seconds": {
+        "median": 1.052,
+        "min": 0.974,
+        "max": 1.851
+      },
+      "rss_kb": {
+        "median": 8448,
+        "min": 8448,
+        "max": 8448
+      }
+    },
+    {
+      "app": "kvstore",
+      "variant": "v2",
+      "seconds": {
+        "median": 1.236,
+        "min": 1.019,
+        "max": 1.531
+      },
+      "rss_kb": {
+        "median": 8448,
+        "min": 8448,
+        "max": 8448
+      }
+    },
+    {
+      "app": "kvstore",
+      "variant": "base-jit",
+      "seconds": {
+        "median": 1.243,
+        "min": 0.984,
+        "max": 1.842
+      },
+      "rss_kb": {
+        "median": 8448,
+        "min": 8448,
+        "max": 8448
+      }
+    },
+    {
+      "app": "kvstore",
+      "variant": "jit",
+      "seconds": {
+        "median": 1.362,
+        "min": 0.983,
+        "max": 1.856
+      },
+      "rss_kb": {
+        "median": 8448,
+        "min": 8448,
+        "max": 8448
+      }
+    }
+  ],
+  "first16-guard-cpu": [
+    {
+      "app": "python",
+      "variant": "base-v2",
+      "seconds": {
+        "median": 3.7151655139999775,
+        "min": 3.2491634110000405,
+        "max": 4.368136007999965
+      },
+      "cpu_seconds": {
+        "median": 3.711439,
+        "min": 3.238831,
+        "max": 4.360042
+      },
+      "rss_kb": {
+        "median": 502880,
+        "min": 502640,
+        "max": 502888
+      }
+    },
+    {
+      "app": "python",
+      "variant": "v2",
+      "seconds": {
+        "median": 3.5403825180000013,
+        "min": 2.971904954000024,
+        "max": 4.244799130000047
+      },
+      "cpu_seconds": {
+        "median": 3.534396,
+        "min": 2.969564,
+        "max": 4.2342569999999995
+      },
+      "rss_kb": {
+        "median": 499664,
+        "min": 499584,
+        "max": 499668
+      }
+    },
+    {
+      "app": "python",
+      "variant": "base-jit",
+      "seconds": {
+        "median": 3.4962733570000637,
+        "min": 3.0696634729999914,
+        "max": 3.9060062489998018
+      },
+      "cpu_seconds": {
+        "median": 3.493376,
+        "min": 3.066791,
+        "max": 3.899362
+      },
+      "rss_kb": {
+        "median": 502904,
+        "min": 502820,
+        "max": 502908
+      }
+    },
+    {
+      "app": "python",
+      "variant": "jit",
+      "seconds": {
+        "median": 3.280815170999972,
+        "min": 3.1500768550000657,
+        "max": 3.905989053999974
+      },
+      "cpu_seconds": {
+        "median": 3.2797919999999996,
+        "min": 3.143567,
+        "max": 3.900993
+      },
+      "rss_kb": {
+        "median": 499684,
+        "min": 499608,
+        "max": 499688
+      }
+    },
+    {
+      "app": "node",
+      "variant": "base-v2",
+      "seconds": {
+        "median": 1.5996243839999806,
+        "min": 1.4294734420000168,
+        "max": 2.1872076930001185
+      },
+      "cpu_seconds": {
+        "median": 1.8803479999999997,
+        "min": 1.7420779999999998,
+        "max": 2.628517
+      },
+      "rss_kb": {
+        "median": 498784,
+        "min": 497328,
+        "max": 505532
+      }
+    },
+    {
+      "app": "node",
+      "variant": "v2",
+      "seconds": {
+        "median": 1.5913109910000003,
+        "min": 1.416185103000089,
+        "max": 2.3888015859999996
+      },
+      "cpu_seconds": {
+        "median": 1.8923859999999997,
+        "min": 1.717773,
+        "max": 2.882896
+      },
+      "rss_kb": {
+        "median": 495760,
+        "min": 494948,
+        "max": 497536
+      }
+    },
+    {
+      "app": "node",
+      "variant": "base-jit",
+      "seconds": {
+        "median": 1.5567785289999847,
+        "min": 1.4416515450000134,
+        "max": 2.008590421000008
+      },
+      "cpu_seconds": {
+        "median": 1.864276,
+        "min": 1.71327,
+        "max": 2.338856
+      },
+      "rss_kb": {
+        "median": 498864,
+        "min": 496900,
+        "max": 504644
+      }
+    },
+    {
+      "app": "node",
+      "variant": "jit",
+      "seconds": {
+        "median": 1.7266470209999625,
+        "min": 1.4399107310000545,
+        "max": 2.4791597349999392
+      },
+      "cpu_seconds": {
+        "median": 2.011485,
+        "min": 1.752024,
+        "max": 2.9573869999999998
+      },
+      "rss_kb": {
+        "median": 496704,
+        "min": 495232,
+        "max": 505000
+      }
+    },
+    {
+      "app": "kvstore",
+      "variant": "base-v2",
+      "seconds": {
+        "median": 1.1086614140000393,
+        "min": 0.9670982560000994,
+        "max": 1.2018288750000465
+      },
+      "cpu_seconds": {
+        "median": 1.107776,
+        "min": 0.965486,
+        "max": 1.195075
+      },
+      "rss_kb": {
+        "median": 10624,
+        "min": 10624,
+        "max": 10624
+      }
+    },
+    {
+      "app": "kvstore",
+      "variant": "v2",
+      "seconds": {
+        "median": 1.0313341089999994,
+        "min": 0.9527309699999478,
+        "max": 1.3987534320001487
+      },
+      "cpu_seconds": {
+        "median": 1.02389,
+        "min": 0.952048,
+        "max": 1.393659
+      },
+      "rss_kb": {
+        "median": 10624,
+        "min": 10624,
+        "max": 10624
+      }
+    },
+    {
+      "app": "kvstore",
+      "variant": "base-jit",
+      "seconds": {
+        "median": 1.1420282510000561,
+        "min": 0.9680655150000348,
+        "max": 1.386450977999857
+      },
+      "cpu_seconds": {
+        "median": 1.1368749999999999,
+        "min": 0.9662719999999999,
+        "max": 1.38535
+      },
+      "rss_kb": {
+        "median": 10624,
+        "min": 10624,
+        "max": 10624
+      }
+    },
+    {
+      "app": "kvstore",
+      "variant": "jit",
+      "seconds": {
+        "median": 1.196058733999962,
+        "min": 0.983987936999938,
+        "max": 1.629040218
+      },
+      "cpu_seconds": {
+        "median": 1.186971,
+        "min": 0.983398,
+        "max": 1.620499
+      },
+      "rss_kb": {
+        "median": 10624,
+        "min": 10624,
+        "max": 10624
+      }
+    }
+  ],
+  "paired-cpu-guard": [
+    {
+      "app": "python",
+      "build": "v2",
+      "metric": "seconds",
+      "paired_median_pct": -7.155189026647868,
+      "bootstrap95_pct": [
+        -16.962006204712075,
+        1.2008745033327495
+      ],
+      "range_overlap": true
+    },
+    {
+      "app": "python",
+      "build": "v2",
+      "metric": "cpu_seconds",
+      "paired_median_pct": -7.0747567883295615,
+      "bootstrap95_pct": [
+        -16.96487534888759,
+        1.0169552178985075
+      ],
+      "range_overlap": true
+    },
+    {
+      "app": "python",
+      "build": "jit",
+      "metric": "seconds",
+      "paired_median_pct": -3.856122254574801,
+      "bootstrap95_pct": [
+        -12.767469124643426,
+        16.407786240006516
+      ],
+      "range_overlap": true
+    },
+    {
+      "app": "python",
+      "build": "jit",
+      "metric": "cpu_seconds",
+      "paired_median_pct": -3.9204482998680956,
+      "bootstrap95_pct": [
+        -12.89942182629964,
+        16.400726476849336
+      ],
+      "range_overlap": true
+    },
+    {
+      "app": "node",
+      "build": "v2",
+      "metric": "seconds",
+      "paired_median_pct": -1.4900515110719437,
+      "bootstrap95_pct": [
+        -10.997331608571715,
+        9.21695244786569
+      ],
+      "range_overlap": true
+    },
+    {
+      "app": "node",
+      "build": "v2",
+      "metric": "cpu_seconds",
+      "paired_median_pct": -0.17787080418494305,
+      "bootstrap95_pct": [
+        -8.895300689575492,
+        9.677662347247518
+      ],
+      "range_overlap": true
+    },
+    {
+      "app": "node",
+      "build": "jit",
+      "metric": "seconds",
+      "paired_median_pct": 15.440787722601446,
+      "bootstrap95_pct": [
+        -5.988499808720493,
+        24.84014561045975
+      ],
+      "range_overlap": true
+    },
+    {
+      "app": "node",
+      "build": "jit",
+      "metric": "cpu_seconds",
+      "paired_median_pct": 12.481873326945504,
+      "bootstrap95_pct": [
+        -6.030902479670042,
+        21.419038811849745
+      ],
+      "range_overlap": true
+    },
+    {
+      "app": "kvstore",
+      "build": "v2",
+      "metric": "seconds",
+      "paired_median_pct": -5.690880896111716,
+      "bootstrap95_pct": [
+        -18.518423265540186,
+        22.41218083634713
+      ],
+      "range_overlap": true
+    },
+    {
+      "app": "kvstore",
+      "build": "v2",
+      "metric": "cpu_seconds",
+      "paired_median_pct": -6.393079467329132,
+      "bootstrap95_pct": [
+        -18.156935757170057,
+        21.999801136422505
+      ],
+      "range_overlap": true
+    },
+    {
+      "app": "kvstore",
+      "build": "jit",
+      "metric": "seconds",
+      "paired_median_pct": 5.911276501360274,
+      "bootstrap95_pct": [
+        -12.596616578802012,
+        21.882722489282337
+      ],
+      "range_overlap": true
+    },
+    {
+      "app": "kvstore",
+      "build": "jit",
+      "metric": "cpu_seconds",
+      "paired_median_pct": 4.994545168497977,
+      "bootstrap95_pct": [
+        -12.280769653655843,
+        21.130861264526878
+      ],
+      "range_overlap": true
+    }
+  ],
+  "final-guard": [
+    {
+      "app": "python",
+      "variant": "base-v2",
+      "seconds": {
+        "median": 3.5920124520000627,
+        "min": 3.200722365000047,
+        "max": 4.725961025999823
+      },
+      "cpu_seconds": {
+        "median": 3.5863430000000003,
+        "min": 3.1978400000000002,
+        "max": 4.723486
+      },
+      "rss_kb": {
+        "median": 502884,
+        "min": 502880,
+        "max": 502884
+      }
+    },
+    {
+      "app": "python",
+      "variant": "v2",
+      "seconds": {
+        "median": 3.350470191000113,
+        "min": 3.2105922089999694,
+        "max": 3.704550575999974
+      },
+      "cpu_seconds": {
+        "median": 3.347684,
+        "min": 3.208961,
+        "max": 3.7027229999999998
+      },
+      "rss_kb": {
+        "median": 499668,
+        "min": 499480,
+        "max": 499668
+      }
+    },
+    {
+      "app": "python",
+      "variant": "base-jit",
+      "seconds": {
+        "median": 3.26014803399994,
+        "min": 3.01081420599985,
+        "max": 4.267469606000077
+      },
+      "cpu_seconds": {
+        "median": 3.2533119999999998,
+        "min": 3.006646,
+        "max": 4.258255
+      },
+      "rss_kb": {
+        "median": 502904,
+        "min": 502756,
+        "max": 502908
+      }
+    },
+    {
+      "app": "python",
+      "variant": "jit",
+      "seconds": {
+        "median": 3.3756070139997973,
+        "min": 3.148222277000059,
+        "max": 3.7340443279999818
+      },
+      "cpu_seconds": {
+        "median": 3.369495,
+        "min": 3.144833,
+        "max": 3.731201
+      },
+      "rss_kb": {
+        "median": 502780,
+        "min": 502772,
+        "max": 502908
+      }
+    },
+    {
+      "app": "node",
+      "variant": "base-v2",
+      "seconds": {
+        "median": 1.6405374010000742,
+        "min": 1.4345513079999819,
+        "max": 1.8499688140000217
+      },
+      "cpu_seconds": {
+        "median": 1.947073,
+        "min": 1.752341,
+        "max": 2.173651
+      },
+      "rss_kb": {
+        "median": 498420,
+        "min": 497092,
+        "max": 501080
+      }
+    },
+    {
+      "app": "node",
+      "variant": "v2",
+      "seconds": {
+        "median": 1.4773964329999671,
+        "min": 1.3864456530000098,
+        "max": 1.5306840240000383
+      },
+      "cpu_seconds": {
+        "median": 1.809927,
+        "min": 1.6534049999999998,
+        "max": 1.8277169999999998
+      },
+      "rss_kb": {
+        "median": 495808,
+        "min": 495500,
+        "max": 498340
+      }
+    },
+    {
+      "app": "node",
+      "variant": "base-jit",
+      "seconds": {
+        "median": 1.503994614000021,
+        "min": 1.4832847249999759,
+        "max": 1.568040296000163
+      },
+      "cpu_seconds": {
+        "median": 1.8302809999999998,
+        "min": 1.77908,
+        "max": 1.868749
+      },
+      "rss_kb": {
+        "median": 498952,
+        "min": 497300,
+        "max": 504028
+      }
+    },
+    {
+      "app": "node",
+      "variant": "jit",
+      "seconds": {
+        "median": 1.7423306020000382,
+        "min": 1.388498428000048,
+        "max": 2.073707936000119
+      },
+      "cpu_seconds": {
+        "median": 2.1101229999999997,
+        "min": 1.676796,
+        "max": 2.432044
+      },
+      "rss_kb": {
+        "median": 498040,
+        "min": 497248,
+        "max": 498472
+      }
+    },
+    {
+      "app": "kvstore",
+      "variant": "base-v2",
+      "seconds": {
+        "median": 1.046915024999862,
+        "min": 0.9710128930000792,
+        "max": 1.1632973040000252
+      },
+      "cpu_seconds": {
+        "median": 1.0442360000000002,
+        "min": 0.9704769999999999,
+        "max": 1.162112
+      },
+      "rss_kb": {
+        "median": 10624,
+        "min": 10624,
+        "max": 10624
+      }
+    },
+    {
+      "app": "kvstore",
+      "variant": "v2",
+      "seconds": {
+        "median": 1.131704291999995,
+        "min": 0.9880256930000542,
+        "max": 1.1939743169998565
+      },
+      "cpu_seconds": {
+        "median": 1.130358,
+        "min": 0.9869469999999999,
+        "max": 1.187147
+      },
+      "rss_kb": {
+        "median": 10624,
+        "min": 10624,
+        "max": 10624
+      }
+    },
+    {
+      "app": "kvstore",
+      "variant": "base-jit",
+      "seconds": {
+        "median": 0.9940984039999421,
+        "min": 0.9801600340001642,
+        "max": 1.2868635600000289
+      },
+      "cpu_seconds": {
+        "median": 0.9936729999999999,
+        "min": 0.9793839999999999,
+        "max": 1.2785819999999999
+      },
+      "rss_kb": {
+        "median": 10624,
+        "min": 10624,
+        "max": 10624
+      }
+    },
+    {
+      "app": "kvstore",
+      "variant": "jit",
+      "seconds": {
+        "median": 1.0421544600001198,
+        "min": 0.9669655150000835,
+        "max": 1.2790337649998946
+      },
+      "cpu_seconds": {
+        "median": 1.0363399999999998,
+        "min": 0.96601,
+        "max": 1.272895
+      },
+      "rss_kb": {
+        "median": 10624,
+        "min": 10624,
+        "max": 10624
+      }
+    }
+  ],
+  "pooled-wall-guard": [
+    {
+      "app": "python",
+      "build": "v2",
+      "pairs": 21,
+      "paired_median_pct": -6.361006078818421,
+      "bootstrap95_pct": [
+        -13.988195069375442,
+        3.300803673938013
+      ]
+    },
+    {
+      "app": "python",
+      "build": "jit",
+      "pairs": 16,
+      "paired_median_pct": -2.5044322541114497,
+      "bootstrap95_pct": [
+        -12.767469124643426,
+        16.407786240006516
+      ]
+    },
+    {
+      "app": "node",
+      "build": "v2",
+      "pairs": 21,
+      "paired_median_pct": -0.3937007874015741,
+      "bootstrap95_pct": [
+        -8.962136112970565,
+        9.21695244786569
+      ]
+    },
+    {
+      "app": "node",
+      "build": "jit",
+      "pairs": 16,
+      "paired_median_pct": 2.645550478365266,
+      "bootstrap95_pct": [
+        -7.5070278670275385,
+        16.233337403312298
+      ]
+    },
+    {
+      "app": "kvstore",
+      "build": "v2",
+      "pairs": 21,
+      "paired_median_pct": 3.6972531960907773,
+      "bootstrap95_pct": [
+        -5.984938698333087,
+        11.120196238757153
+      ]
+    },
+    {
+      "app": "kvstore",
+      "build": "jit",
+      "pairs": 16,
+      "paired_median_pct": 3.930538323696009,
+      "bootstrap95_pct": [
+        0.23417021269240834,
+        12.172113231937587
+      ]
+    }
+  ]
+}

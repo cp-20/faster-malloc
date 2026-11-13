@@ -1,0 +1,12 @@
+fastmalloc2 1
+stress ok
+fastmalloc2 2
+stress ok
+fastmalloc2 3
+stress ok
+jitmalloc 1
+stress ok
+jitmalloc 2
+stress ok
+jitmalloc 3
+stress ok

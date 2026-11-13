@@ -1,0 +1,12 @@
+Base: 3d1e114; branch round12/startup-footprint
+One continuous managed cloud session, 2026-11-13
+No concurrent benchmark/build jobs launched by this task during timing runs.
+mimalloc unavailable (no installed library or work/libmimalloc.so); jemalloc available.
+Linux eeb71cd25927 6.18.57 #1 SMP Tue Oct 20 21:56:04 UTC 2026 x86_64 GNU/Linux
+gcc (Debian 14.2.0-19) 14.2.0
+Python 3.12.14
+v24.22.1
+cpu.max: 200000 100000
+memory.max: 8589934592
+big.json SHA256: bc56bf7bc7e0ffa916e4f36c11755d2a8d88bee278a26a65a5f98a8530371a84
+All production builds: Makefile defaults; debug adds -DFM_DEBUG. Both use -Wl,-z,nodelete.

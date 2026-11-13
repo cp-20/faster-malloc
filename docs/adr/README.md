@@ -42,3 +42,10 @@ mark were recorded when the work was done.
 | [0027](0027-runtime-configuration-profiles.md) | Runtime configuration: FM_PROFILE and per-knob FM_* overrides | Accepted |
 | [0028](0028-size-class-audit.md) | Size-class audit: the table is already well-placed; waste lives elsewhere | Accepted (no change) |
 | [0029](0029-idle-process-release.md) | Idle-process release: design pass, implementation deferred | Deferred |
+| [0030](0030-page-granular-purge.md) | Page-granular purge in partially-free spans | Accepted |
+| [0031](0031-lua-peak-decomposition.md) | Lua peak decomposition | Accepted (measurement) |
+| [0032](0032-zero-trickle-and-idle-release.md) | Zero-trickle retention and idle-release prototype | Accepted, opt-in; hardened by 0036 |
+| [0033](0033-realloc-mapping-extension.md) | Realloc mapping extension | Rejected |
+| [0034](0034-realloc-cache-search.md) | Realloc large-cache bucket search | Opt-in prototype; default promotion rejected |
+| [0035](0035-purge-contention-ownership.md) | Purge contention: census and batch ownership | Accepted correctness fix; performance provisional |
+| [0036](0036-idle-timer-fork-signals.md) | Idle timer fork and signal ownership | Accepted hardening; default-off |

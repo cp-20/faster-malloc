@@ -6,7 +6,7 @@ jemalloc and mimalloc:
 | build | what it is |
 |---|---|
 | `libfastmalloc.so` | **v1** — the first working version: table-lookup dispatch, per-thread free lists, spinlock-protected central list. Kept as the baseline that v2 improves on. |
-| `libfastmalloc2.so` | **v2** — the static allocator. Arithmetic size→class dispatch, lock-free batched central list, O(1) flush, frameless hot paths. **This is the fastest allocator here.** |
+| `libfastmalloc2.so` | **v2** — the static allocator. Arithmetic size→class dispatch, batched central list with serialized slow-path ownership, O(1) flush, frameless hot paths. **This is the fastest allocator here.** |
 | `libjitmalloc.so` | **JIT** — v2 plus a runtime code generator that specialises the allocation entry point to the program's observed size distribution. |
 
 All three are drop-in `LD_PRELOAD` replacements.
@@ -191,16 +191,18 @@ free:
     ...
 ```
 
-### 2.5 Lock-free central list of batches
+### 2.5 Central list of batches
 
-The central list of each class is a **Treiber stack of batches**. A batch is
+The central list of each class is a **stack of batches**. Round 7 serializes
+slow-path stack ownership to protect recycled batch headers (ADR 0035). A batch is
 a whole free list, not a fragment of one, which makes both directions O(1):
 
-* a refill takes a whole batch with one CAS;
-* a flush publishes a whole batch with one CAS.
+* a refill takes a whole batch;
+* a flush publishes a whole batch.
 
-No lock is ever taken on the allocation path. Keeping the tail pointer per
-class matters: publishing a list means *three stores*, whereas walking the
+Thread-local allocation/free fast paths take no locks; refill, flush and
+census ownership use slow-path mutexes. Keeping the tail pointer per
+class matters: publishing a list takes O(1) work, whereas walking the
 list to find its tail would touch every block — and the blocks of a free
 list are scattered across the heap, so each step is a likely cache miss.
 
@@ -437,8 +439,8 @@ is the whole reason the instruction counts are the primary evidence.
 | **v2** | **0.021** | 0.049 |
 | jit | 0.026 | 0.054 |
 
-v2 scales best because the fast path touches **no shared state at all** and
-the central list is lock-free: it is 1.7× faster than glibc when threads
+In the historical measurements above, v2’s fast path touches **no shared
+state at all** and the central list was lock-free: it is 1.7× faster than glibc when threads
 allocate and free locally, and 2.5× faster than glibc and 2.7× faster than
 tcmalloc when a block allocated by one thread is freed by another.
 
@@ -651,3 +653,16 @@ numbers on different hardware.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Round 7 prototypes and hardening
+
+See [round 7](docs/round7-2026-11-13.md) and ADRs 0034–0036.
+`FM_REALLOC_CACHE_SEARCH=1` widens cache search only for plain large realloc
+growth; default 0 in every profile. Container results do not justify default
+promotion. `FM_IDLE_RELEASE=1` remains opt-in. Its timer blocks application
+signals and is disabled in fork children until exec; the parent's timer
+continues. Ordinary `fork` quiesces census/central ownership. Calling fork
+from an allocator-interrupting signal handler is unsupported; malloc/free
+and census work are not async-signal-safe. Raw `_Fork`/syscall fork bypass
+the handlers. Allocator unload while its detached timer runs remains
+unsupported. Run `bash bench/round7.sh` for the correctness battery.

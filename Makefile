@@ -6,7 +6,7 @@ LIBS = libfastmalloc.so libfastmalloc2.so libjitmalloc.so
 
 all: $(LIBS) bench
 
-bench: bench/micro bench/macro bench/mt bench/stress bench/instr bench/check bench/rgrow bench/consprobe bench/decayprobe bench/usableprobe test_basic
+bench: bench/micro bench/macro bench/mt bench/stress bench/instr bench/check bench/rgrow bench/consprobe bench/decayprobe bench/usableprobe bench/purgeprobe test_basic
 
 src/size_classes.h: src/gen_classes.py
 	python3 src/gen_classes.py src/size_classes.h
@@ -53,12 +53,15 @@ bench/decayprobe: bench/decayprobe.c
 bench/usableprobe: bench/usableprobe.c
 	$(CC) -O2 -g -o $@ bench/usableprobe.c
 
+bench/purgeprobe: bench/purgeprobe.c
+	$(CC) -O2 -g -o $@ bench/purgeprobe.c
+
 test_basic: test_basic.c
 	$(CC) -O2 -g -o $@ test_basic.c
 
 clean:
 	rm -f $(LIBS) src/size_classes.h src/size_classes2.h \
       bench/micro bench/macro bench/mt bench/stress bench/instr bench/check bench/rgrow \
-      bench/consprobe bench/decayprobe bench/usableprobe test_basic
+      bench/consprobe bench/decayprobe bench/usableprobe bench/purgeprobe test_basic
 
 .PHONY: all clean

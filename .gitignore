@@ -27,3 +27,5 @@ bench/apps/work/
 /bench/consprobe
 /bench/decayprobe
 /bench/usableprobe
+/bench/purgeprobe
+/bench/apps/bursty2

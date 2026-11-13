@@ -1,4 +1,4 @@
-# Real-application matrix (round 3)
+# Real-application matrix (rounds 3–5)
 
 `apps.sh` runs real programs under each allocator via
 `LD_PRELOAD` and reports wall time (min of REPS, allocators
@@ -33,6 +33,35 @@ tcmalloc when their shared libraries are installed (found via
 Every language workload prints a checksum; a corrupted heap
 changes the answer, not just the timing.
 
+## Round-5 cells
+
+Four more use-case shapes, each a standalone script on the
+shared `cellib.sh` conventions (same seven allocators, min-of-N,
+peak RSS, correctness gate). They are not part of `apps.sh`;
+run them individually:
+
+```sh
+REPS=3 bench/apps/nginx.sh     # web server under HTTP load
+REPS=3 bench/apps/ruby.sh      # Ruby workload (bench.rb)
+REPS=3 bench/apps/bursty.sh    # bursty long-running server heap
+PGREPS=2 bench/apps/pgbench.sh # PostgreSQL OLTP
+```
+
+| cell    | what runs | what it adds |
+|---------|-----------|--------------|
+| nginx   | nginx (2 workers) serving static files under `wrk.c` keep-alive load (20 conns, 10 s); reports rps + p50/p99 latency + summed peak RSS; fetched body diffed, wrk must report 0 errors | a real network server: per-request small allocations across processes, latency percentiles, not just throughput |
+| ruby    | `bench.rb`: string/array/hash churn with a checksum | a third managed runtime, with a different GC/allocator interaction than CPython (pymalloc) and V8 |
+| pgbench | PostgreSQL 16, pgbench scale 5, 4 clients / 2 jobs, 15 s; server runs as `nobody`, `LD_PRELOAD` crosses via the environment; 0 failed transactions required | a multi-process OLTP database — a second DB shape next to redis (single-threaded) and sqlite (embedded) |
+| bursty  | `bursty.c`: a server-shaped heap that ramps to ~60 MB, idles, ramps to ~90 MB, cohort-drains to ~10 MB and idles again; op-counted phases, so the work — and the checksum — is identical for every allocator | the long-running daemon shape: whether memory freed at drain time actually leaves during the idle that follows (ADR 0020/0024 in a realistic pattern). The columns that matter are the idle-phase RSS values |
+
+nginx harness note: nginx closes a keep-alive connection after
+1000 requests by default (`keepalive_requests`), and `wrk.c`
+drives ~3500 requests per connection — the generated config
+raises the cap so the cell measures the allocator, not nginx's
+connection policy. The script also kills stale `fm-nginx`
+masters from aborted runs before starting (a leftover master
+holds the port and serves a deleted docroot).
+
 ## Provisioning on this host
 
 Fixtures (sqlite amalgamation + speedtest1, `big.json`, the git
@@ -42,7 +71,10 @@ Binaries not on a stock system were installed as distro
 packages: `redis-server`/`redis-tools` 7.0.15, `lua5.4` 5.4.6,
 and the comparison allocators `libjemalloc2` 5.3.0,
 `libmimalloc2.0` 2.1.2, `libtcmalloc-minimal4t64` 2.15
-(Ubuntu 24.04 packages). `apps.sh` also honours `REDIS_BIN`,
+(Ubuntu 24.04 packages). Round 5 added `nginx` 1.24,
+`postgresql-16` (+ `pgbench`) and `ruby` (distro packages);
+`wrk` and `bursty` are built from the `.c` sources here by
+`prep.sh`. `apps.sh` also honours `REDIS_BIN`,
 `REDIS_BENCH`, `REDIS_CLI` and `LUA_BIN` overrides pointing at
 source builds (`/tmp/r3tools/...` by default as a fallback).
 

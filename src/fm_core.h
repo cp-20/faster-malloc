@@ -253,6 +253,7 @@ typedef struct FM_Config {
     uint64_t lcache_max_bytes;
     uint32_t page_purge;
     uint32_t purge_min_pages;
+    uint32_t idle_release;
 } FM_Config;
 
 extern FM_Config fm_cfg;
@@ -271,6 +272,7 @@ static void fm_config_init(void)
     c.lcache_max_bytes = FM_LCACHE_MAX_BYTES;
     c.page_purge = 1;
     c.purge_min_pages = 4;
+    c.idle_release = 0;
 
     const char *prof = getenv("FM_PROFILE");
     if (prof) {
@@ -310,6 +312,7 @@ static void fm_config_init(void)
         { "FM_REGROUP_MIN", &c.regroup_min, 1, 4096 },
         { "FM_PAGE_PURGE", &c.page_purge, 0, 1 },
         { "FM_PURGE_MIN_PAGES", &c.purge_min_pages, 1, 15 },
+        { "FM_IDLE_RELEASE", &c.idle_release, 0, 1 },
     };
     for (size_t i = 0; i < sizeof(num) / sizeof(num[0]); i++) {
         const char *v = getenv(num[i].name);
@@ -1423,10 +1426,14 @@ static void fm_release_maybe(uint32_t cls, uint32_t now)
     atomic_store_explicit(&c->interval_ms, next, memory_order_relaxed);
 }
 
+static void fm_idle_kick(uint32_t now);
+
 static void fm_auto_release_tick(uint32_t flushed_cls)
 {
     (void)flushed_cls;
     uint32_t now = fm_now_ms();
+    if (FM_CFG()->idle_release && !fm_in_census)
+        fm_idle_kick(now);
     /* Consider every class, not just the one whose flush ticked: a
      * class that stops being flushed would otherwise never be
      * visited again, and its dead spans are exactly the ones worth
@@ -1435,6 +1442,77 @@ static void fm_auto_release_tick(uint32_t flushed_cls)
      * the gates protect. */
     for (uint32_t cls = 0; cls < CLASS_COUNT; cls++)
         fm_release_maybe(cls, now);
+}
+
+/* ------------------------------------------------------------------ */
+/* Idle release (ADR 0029 design 1; round-6 prototype, opt-in)         */
+/*                                                                     */
+/* The census machinery only runs on allocator activity, so a        */
+/* process that goes completely silent keeps whatever its last       */
+/* burst left behind (measured in ADR 0032: every allocator in the   */
+/* field is flat while silent).  With FM_IDLE_RELEASE=1 a detached   */
+/* timer thread watches the flush-tick timestamp; after a full       */
+/* second without one it runs the same ageing censuses the free      */
+/* path would have run, so dead-span marks age out and purge         */
+/* decisions land while the process is silent.  The thread holds     */
+/* no locks (the census is lock-free by design), is spawned lazily   */
+/* on the first tick, and is re-armable after fork via atfork: the   */
+/* child of a fork has no timer thread, so the child handler just    */
+/* resets the state and the next tick in the child respawns it.      */
+/* ------------------------------------------------------------------ */
+
+static _Atomic uint32_t fm_last_activity_ms;
+static _Atomic int fm_idle_thread_state; /* 0 none, 1 running */
+
+static void fm_idle_after_fork_child(void)
+{
+    atomic_store_explicit(&fm_idle_thread_state, 0, memory_order_relaxed);
+    atomic_store_explicit(&fm_last_activity_ms, 0, memory_order_relaxed);
+}
+
+static void *fm_idle_thread_main(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        struct timespec ts = { 0, 200 * 1000 * 1000 };
+        nanosleep(&ts, NULL);
+        uint32_t now = fm_now_ms();
+        uint32_t last = atomic_load_explicit(&fm_last_activity_ms,
+                                              memory_order_relaxed);
+        if (!last || (uint32_t)(now - last) < 1000)
+            continue;
+        const FM_Config *cfg = FM_CFG();
+        for (uint32_t cls = 0; cls < CLASS_COUNT; cls++) {
+            FM_Central *c = &fm_central[cls];
+            if (atomic_load_explicit(&c->depth, memory_order_relaxed) >=
+                cfg->release_min_depth)
+                fm_trim_class(cls, cfg->release_keep, 0);
+        }
+        /* Sweep at most once a second while silence lasts; each
+         * sweep's censuses are a full ageing step apart, which is
+         * what the mark-age-release pipeline needs. */
+        atomic_store_explicit(&fm_last_activity_ms, now,
+                              memory_order_relaxed);
+    }
+    return NULL;
+}
+
+static void fm_idle_kick(uint32_t now)
+{
+    atomic_store_explicit(&fm_last_activity_ms, now, memory_order_relaxed);
+    int expected = 0;
+    if (!atomic_compare_exchange_strong_explicit(
+            &fm_idle_thread_state, &expected, 1, memory_order_acq_rel,
+            memory_order_relaxed))
+        return;
+    pthread_atfork(NULL, NULL, fm_idle_after_fork_child);
+    pthread_t th;
+    if (pthread_create(&th, NULL, fm_idle_thread_main, NULL) != 0) {
+        atomic_store_explicit(&fm_idle_thread_state, 0,
+                              memory_order_relaxed);
+        return;
+    }
+    pthread_detach(th);
 }
 
 static inline size_t fm_trim_spans(void)

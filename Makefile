@@ -18,10 +18,10 @@ libfastmalloc.so: src/alloc_v1.c src/size_classes.h
 	$(CC) $(CFLAGS) -shared -o $@ src/alloc_v1.c $(LDFLAGS)
 
 libfastmalloc2.so: src/fm_static.c src/fm_core.h src/size_classes2.h
-	$(CC) $(CFLAGS) -shared -o $@ src/fm_static.c $(LDFLAGS)
+	$(CC) $(CFLAGS) -shared -Wl,-z,nodelete -o $@ src/fm_static.c $(LDFLAGS)
 
 libjitmalloc.so: src/fm_jit.c src/jit_stubs.S src/fm_core.h src/size_classes2.h
-	$(CC) $(CFLAGS) -shared -o $@ src/fm_jit.c src/jit_stubs.S $(LDFLAGS)
+	$(CC) $(CFLAGS) -shared -Wl,-z,nodelete -o $@ src/fm_jit.c src/jit_stubs.S $(LDFLAGS)
 
 bench/micro: bench/micro.c
 	$(CC) -O2 -g -o $@ bench/micro.c -lpthread -ldl

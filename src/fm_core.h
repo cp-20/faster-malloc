@@ -1479,6 +1479,8 @@ static void fm_auto_release_tick(uint32_t flushed_cls)
 static _Atomic uint32_t fm_last_activity_ms;
 static _Atomic int fm_idle_thread_state; /* -1 disabled in fork child, 0 none, 1 starting/running */
 
+/* ADR 0040: shipped v2/JIT DSOs require ELF NODELETE, including custom builds.
+ * dlclose retains worker code, TLS callbacks and allocator state until exit. */
 static _Atomic int fm_atfork_ready;
 
 static void fm_fork_prepare(void)
@@ -1555,7 +1557,15 @@ static void fm_idle_kick(uint32_t now)
         err = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
         if (!err) {
             pthread_t th;
-            err = pthread_create(&th, &attr, fm_idle_thread_main, NULL);
+            /* Compile-time faults affect only this timer, never application threads. */
+#ifdef FM_TEST_IDLE_CREATE_FAILURES
+            static int failures = FM_TEST_IDLE_CREATE_FAILURES;
+            if (failures != 0) {
+                if (failures > 0) failures--;
+                err = EAGAIN;
+            } else
+#endif
+                err = pthread_create(&th, &attr, fm_idle_thread_main, NULL);
         }
         pthread_attr_destroy(&attr);
     }
@@ -1822,6 +1832,10 @@ static void fm_exit_make_key(void)
 {
     pthread_key_create(&fm_exit_key, fm_exit_key_dtor);
     /* Register once, before any timer can start (including create retries). */
+#ifdef FM_TEST_IDLE_ATFORK_FAIL
+    /* Model registration failure without leaving callbacks registered. */
+    return;
+#endif
     if (pthread_atfork(fm_fork_prepare, fm_fork_parent,
                        fm_idle_after_fork_child) == 0)
         atomic_store_explicit(&fm_atfork_ready, 1, memory_order_release);

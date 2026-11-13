@@ -1,0 +1,360 @@
+
+=== address-static-build-normal (exit 0) ===
+
+=== address-static-compile-tlsexit (exit 0) ===
+
+=== address-static-compile-idlefork (exit 0) ===
+
+=== address-static-compile-lifecycle (exit 0) ===
+
+=== address-static-compile-early-lib (exit 0) ===
+
+=== address-static-compile-early-main (exit 0) ===
+
+=== address-static-earlyinit (exit 0) ===
+earlyinit ok
+
+=== address-static-tlsexit (exit 0) ===
+tlsexit rss_kb=5756 peak_kb=6664
+
+=== address-static-lifecycle-0 (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== address-static-lifecycle-1 (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== address-static-build-atfork (exit 0) ===
+
+=== address-static-lifecycle-atfork (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== address-static-build-create (exit 0) ===
+
+=== address-static-idlefork-create (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== address-static-lifecycle-create (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== address-static-build-retry (exit 0) ===
+
+=== address-static-idlefork-retry (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== address-static-lifecycle-retry (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== address-jit-build-normal (exit 0) ===
+
+=== address-jit-compile-tlsexit (exit 0) ===
+
+=== address-jit-compile-idlefork (exit 0) ===
+
+=== address-jit-compile-lifecycle (exit 0) ===
+
+=== address-jit-compile-early-lib (exit 0) ===
+
+=== address-jit-compile-early-main (exit 0) ===
+
+=== address-jit-earlyinit (exit 0) ===
+earlyinit ok
+
+=== address-jit-tlsexit (exit 0) ===
+tlsexit rss_kb=5800 peak_kb=6688
+
+=== address-jit-lifecycle-0 (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== address-jit-lifecycle-1 (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== address-jit-build-atfork (exit 0) ===
+
+=== address-jit-lifecycle-atfork (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== address-jit-build-create (exit 0) ===
+
+=== address-jit-idlefork-create (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== address-jit-lifecycle-create (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== address-jit-build-retry (exit 0) ===
+
+=== address-jit-idlefork-retry (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== address-jit-lifecycle-retry (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== thread-static-build-normal (exit 0) ===
+
+=== thread-static-compile-tlsexit (exit 0) ===
+
+=== thread-static-compile-idlefork (exit 0) ===
+
+=== thread-static-compile-lifecycle (exit 0) ===
+
+=== thread-static-compile-early-lib (exit 0) ===
+
+=== thread-static-compile-early-main (exit 0) ===
+
+=== thread-static-earlyinit (exit 0) ===
+earlyinit ok
+
+=== thread-static-tlsexit (exit 0) ===
+tlsexit rss_kb=22896 peak_kb=25172
+
+=== thread-static-lifecycle-0 (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== thread-static-lifecycle-1 (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== thread-static-build-atfork (exit 0) ===
+
+=== thread-static-lifecycle-atfork (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== thread-static-build-create (exit 0) ===
+
+=== thread-static-idlefork-create (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== thread-static-lifecycle-create (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== thread-static-build-retry (exit 0) ===
+
+=== thread-static-idlefork-retry (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== thread-static-lifecycle-retry (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== thread-jit-build-normal (exit 0) ===
+
+=== thread-jit-compile-tlsexit (exit 0) ===
+
+=== thread-jit-compile-idlefork (exit 0) ===
+
+=== thread-jit-compile-lifecycle (exit 0) ===
+
+=== thread-jit-compile-early-lib (exit 0) ===
+
+=== thread-jit-compile-early-main (exit 0) ===
+
+=== thread-jit-earlyinit (exit 0) ===
+earlyinit ok
+
+=== thread-jit-tlsexit (exit 0) ===
+tlsexit rss_kb=22732 peak_kb=24976
+
+=== thread-jit-lifecycle-0 (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== thread-jit-lifecycle-1 (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== thread-jit-build-atfork (exit 0) ===
+
+=== thread-jit-lifecycle-atfork (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== thread-jit-build-create (exit 0) ===
+
+=== thread-jit-idlefork-create (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== thread-jit-lifecycle-create (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== thread-jit-build-retry (exit 0) ===
+
+=== thread-jit-idlefork-retry (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== thread-jit-lifecycle-retry (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== address-undefined-static-build-normal (exit 0) ===
+
+=== address-undefined-static-compile-tlsexit (exit 0) ===
+
+=== address-undefined-static-compile-idlefork (exit 0) ===
+
+=== address-undefined-static-compile-lifecycle (exit 0) ===
+
+=== address-undefined-static-compile-early-lib (exit 0) ===
+
+=== address-undefined-static-compile-early-main (exit 0) ===
+
+=== address-undefined-static-earlyinit (exit 0) ===
+earlyinit ok
+
+=== address-undefined-static-tlsexit (exit 0) ===
+tlsexit rss_kb=6840 peak_kb=7836
+
+=== address-undefined-static-lifecycle-0 (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== address-undefined-static-lifecycle-1 (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== address-undefined-static-build-atfork (exit 0) ===
+
+=== address-undefined-static-lifecycle-atfork (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== address-undefined-static-build-create (exit 0) ===
+
+=== address-undefined-static-idlefork-create (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== address-undefined-static-lifecycle-create (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== address-undefined-static-build-retry (exit 0) ===
+
+=== address-undefined-static-idlefork-retry (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== address-undefined-static-lifecycle-retry (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== address-undefined-jit-build-normal (exit 0) ===
+
+=== address-undefined-jit-compile-tlsexit (exit 0) ===
+
+=== address-undefined-jit-compile-idlefork (exit 0) ===
+
+=== address-undefined-jit-compile-lifecycle (exit 0) ===
+
+=== address-undefined-jit-compile-early-lib (exit 0) ===
+
+=== address-undefined-jit-compile-early-main (exit 0) ===
+
+=== address-undefined-jit-earlyinit (exit 0) ===
+earlyinit ok
+
+=== address-undefined-jit-tlsexit (exit 0) ===
+tlsexit rss_kb=6976 peak_kb=7980
+
+=== address-undefined-jit-lifecycle-0 (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== address-undefined-jit-lifecycle-1 (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== address-undefined-jit-build-atfork (exit 0) ===
+
+=== address-undefined-jit-lifecycle-atfork (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== address-undefined-jit-build-create (exit 0) ===
+
+=== address-undefined-jit-idlefork-create (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== address-undefined-jit-lifecycle-create (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== address-undefined-jit-build-retry (exit 0) ===
+
+=== address-undefined-jit-idlefork-retry (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== address-undefined-jit-lifecycle-retry (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== thread-undefined-static-build-normal (exit 0) ===
+
+=== thread-undefined-static-compile-tlsexit (exit 0) ===
+
+=== thread-undefined-static-compile-idlefork (exit 0) ===
+
+=== thread-undefined-static-compile-lifecycle (exit 0) ===
+
+=== thread-undefined-static-compile-early-lib (exit 0) ===
+
+=== thread-undefined-static-compile-early-main (exit 0) ===
+
+=== thread-undefined-static-earlyinit (exit 0) ===
+earlyinit ok
+
+=== thread-undefined-static-tlsexit (exit 0) ===
+tlsexit rss_kb=24656 peak_kb=26924
+
+=== thread-undefined-static-lifecycle-0 (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== thread-undefined-static-lifecycle-1 (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== thread-undefined-static-build-atfork (exit 0) ===
+
+=== thread-undefined-static-lifecycle-atfork (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== thread-undefined-static-build-create (exit 0) ===
+
+=== thread-undefined-static-idlefork-create (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== thread-undefined-static-lifecycle-create (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== thread-undefined-static-build-retry (exit 0) ===
+
+=== thread-undefined-static-idlefork-retry (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== thread-undefined-static-lifecycle-retry (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== thread-undefined-jit-build-normal (exit 0) ===
+
+=== thread-undefined-jit-compile-tlsexit (exit 0) ===
+
+=== thread-undefined-jit-compile-idlefork (exit 0) ===
+
+=== thread-undefined-jit-compile-lifecycle (exit 0) ===
+
+=== thread-undefined-jit-compile-early-lib (exit 0) ===
+
+=== thread-undefined-jit-compile-early-main (exit 0) ===
+
+=== thread-undefined-jit-earlyinit (exit 0) ===
+earlyinit ok
+
+=== thread-undefined-jit-tlsexit (exit 0) ===
+tlsexit rss_kb=24888 peak_kb=26872
+
+=== thread-undefined-jit-lifecycle-0 (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== thread-undefined-jit-lifecycle-1 (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== thread-undefined-jit-build-atfork (exit 0) ===
+
+=== thread-undefined-jit-lifecycle-atfork (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== thread-undefined-jit-build-create (exit 0) ===
+
+=== thread-undefined-jit-idlefork-create (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== thread-undefined-jit-lifecycle-create (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== thread-undefined-jit-build-retry (exit 0) ===
+
+=== thread-undefined-jit-idlefork-retry (exit 0) ===
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+
+=== thread-undefined-jit-lifecycle-retry (exit 0) ===
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)

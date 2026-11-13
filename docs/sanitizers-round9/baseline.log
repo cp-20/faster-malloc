@@ -1,0 +1,54 @@
+make: Nothing to be done for 'all'.
+=== libfastmalloc2.so ===
+ok
+ok
+ok
+ok
+stress ok
+stress ok
+stress ok
+ok
+realloccache ok
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+realloccache ok
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+ok
+stress ok
+=== libjitmalloc.so ===
+ok
+ok
+ok
+ok
+stress ok
+stress ok
+stress ok
+ok
+realloccache ok
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+realloccache ok
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+ok
+stress ok
+jitprofile ok (8 threads, 800000 allocations)
+earlyinit glibc  ok
+earlyinit v1     ok
+earlyinit v2     ok
+earlyinit jit    ok
+glibc  informational (exit 0): tlsexit rss_kb=920 peak_kb=1732
+v1     informational (exit 0): tlsexit rss_kb=5524 peak_kb=6392
+v2     ok: tlsexit rss_kb=1640 peak_kb=2584
+jit    ok: tlsexit rss_kb=1656 peak_kb=2584
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)

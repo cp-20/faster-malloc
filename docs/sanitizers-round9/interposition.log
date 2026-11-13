@@ -1,0 +1,714 @@
+
+=== undefined-build (exit 0) ===
+python3 src/gen_classes.py src/size_classes.h
+python3 src/gen_classes2.py src/size_classes2.h
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/micro bench/micro.c -lpthread -ldl
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/macro bench/macro.c -lpthread
+classes=129 arith_classes=32 big_table=2049 limit_cap=256
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/mt bench/mt.c -lpthread
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/stress bench/stress.c -lpthread
+classes=128 table=2016
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/instr bench/instr.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/check bench/check.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/rgrow bench/rgrow.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/consprobe bench/consprobe.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/decayprobe bench/decayprobe.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/usableprobe bench/usableprobe.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/purgeprobe bench/purgeprobe.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -Wall -Wextra -o bench/realloccache bench/realloccache.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -Wall -Wextra -o bench/idlefork bench/idlefork.c -pthread
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -Wall -Wextra -o bench/jitprofile bench/jitprofile.c -pthread
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o test_basic test_basic.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -shared -o libfastmalloc.so src/alloc_v1.c 
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -shared -Wl,-z,nodelete -o libfastmalloc2.so src/fm_static.c 
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -shared -Wl,-z,nodelete -o libjitmalloc.so src/fm_jit.c src/jit_stubs.S 
+test_basic.c: In function ‘main’:
+test_basic.c:282:13: warning: product ‘9223372036854775807 * 3’ of arguments 1 and 2 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+  282 |         if (calloc(SIZE_MAX / 2, 3) != NULL) { printf("calloc overflow\n"); return 1; }
+      |             ^~~~~~~~~~~~~~~~~~~~~~~
+In file included from test_basic.c:14:
+/usr/include/malloc.h:43:14: note: in a call to allocation function ‘calloc’ declared here
+   43 | extern void *calloc (size_t __nmemb, size_t __size)
+      |              ^~~~~~
+test_basic.c:285:13: warning: product ‘9223372036854775807 * 3’ of arguments 2 and 3 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+  285 |         if (reallocarray(p, SIZE_MAX / 2, 3) != NULL) { printf("reallocarray overflow\n"); return 1; }
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/malloc.h:59:14: note: in a call to allocation function ‘reallocarray’ declared here
+   59 | extern void *reallocarray (void *__ptr, size_t __nmemb, size_t __size)
+      |              ^~~~~~~~~~~~
+
+=== undefined-round7 (exit 0) ===
+make: Nothing to be done for 'all'.
+=== libfastmalloc2.so ===
+ok
+ok
+ok
+ok
+stress ok
+stress ok
+stress ok
+ok
+realloccache ok
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+realloccache ok
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+ok
+stress ok
+=== libjitmalloc.so ===
+ok
+ok
+ok
+ok
+stress ok
+stress ok
+stress ok
+ok
+realloccache ok
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+realloccache ok
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+ok
+stress ok
+jitprofile ok (8 threads, 800000 allocations)
+earlyinit glibc  ok
+earlyinit v1     ok
+earlyinit v2     ok
+earlyinit jit    ok
+glibc  informational (exit 0): tlsexit rss_kb=1976 peak_kb=2884
+v1     informational (exit 0): tlsexit rss_kb=6600 peak_kb=7536
+v2     ok: tlsexit rss_kb=2740 peak_kb=3704
+jit    ok: tlsexit rss_kb=2780 peak_kb=3756
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+idlefork ok (4 forks, no child timer, parent spawn-once, signals on caller)
+idlelifecycle ok (retained after dlclose, bounded threads, normal exit)
+
+=== undefined-debug-build (exit 0) ===
+python3 src/gen_classes2.py src/size_classes2.h
+classes=129 arith_classes=32 big_table=2049 limit_cap=256
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -DFM_DEBUG -shared -Wl,-z,nodelete -o libfastmalloc2.so src/fm_static.c 
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -DFM_DEBUG -shared -Wl,-z,nodelete -o libjitmalloc.so src/fm_jit.c src/jit_stubs.S 
+
+=== undefined-libfastmalloc2.so-debug-stress (exit 0) ===
+stress ok
+
+=== undefined-libjitmalloc.so-debug-stress (exit 0) ===
+stress ok
+
+=== address-build (exit 0) ===
+python3 src/gen_classes.py src/size_classes.h
+python3 src/gen_classes2.py src/size_classes2.h
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/micro bench/micro.c -lpthread -ldl
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/macro bench/macro.c -lpthread
+classes=129 arith_classes=32 big_table=2049 limit_cap=256
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/mt bench/mt.c -lpthread
+classes=128 table=2016
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/stress bench/stress.c -lpthread
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/instr bench/instr.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/check bench/check.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/rgrow bench/rgrow.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/consprobe bench/consprobe.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/decayprobe bench/decayprobe.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/usableprobe bench/usableprobe.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/purgeprobe bench/purgeprobe.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -Wall -Wextra -o bench/realloccache bench/realloccache.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -Wall -Wextra -o bench/idlefork bench/idlefork.c -pthread
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -Wall -Wextra -o bench/jitprofile bench/jitprofile.c -pthread
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o test_basic test_basic.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -shared -o libfastmalloc.so src/alloc_v1.c 
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -shared -Wl,-z,nodelete -o libfastmalloc2.so src/fm_static.c 
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -shared -Wl,-z,nodelete -o libjitmalloc.so src/fm_jit.c src/jit_stubs.S 
+test_basic.c: In function ‘main’:
+test_basic.c:282:13: warning: product ‘9223372036854775807 * 3’ of arguments 1 and 2 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+  282 |         if (calloc(SIZE_MAX / 2, 3) != NULL) { printf("calloc overflow\n"); return 1; }
+      |             ^~~~~~~~~~~~~~~~~~~~~~~
+In file included from test_basic.c:14:
+/usr/include/malloc.h:43:14: note: in a call to allocation function ‘calloc’ declared here
+   43 | extern void *calloc (size_t __nmemb, size_t __size)
+      |              ^~~~~~
+test_basic.c:285:13: warning: product ‘9223372036854775807 * 3’ of arguments 2 and 3 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+  285 |         if (reallocarray(p, SIZE_MAX / 2, 3) != NULL) { printf("reallocarray overflow\n"); return 1; }
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/malloc.h:59:14: note: in a call to allocation function ‘reallocarray’ declared here
+   59 | extern void *reallocarray (void *__ptr, size_t __nmemb, size_t __size)
+      |              ^~~~~~~~~~~~
+
+=== address-round7 (exit 1) ===
+make: Nothing to be done for 'all'.
+=== libfastmalloc2.so ===
+==10446==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-v2-basic (exit 1) ===
+==10447==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-v2-basic-balanced (exit 1) ===
+==10448==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-v2-basic-throughput (exit 1) ===
+==10449==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-v2-basic-footprint (exit 1) ===
+==10450==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-v2-stress-1 (exit 1) ===
+==10451==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-v2-stress-2 (exit 1) ===
+==10452==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-v2-stress-3 (exit 1) ===
+==10453==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-v2-check (exit 1) ===
+==10454==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-v2-mt-local (exit 1) ===
+==10455==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-v2-mt-cross (exit 1) ===
+==10456==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-v2-realloccache-0 (exit 1) ===
+==10457==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-v2-idlefork-0 (exit 1) ===
+==10458==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-v2-realloccache-1 (exit 1) ===
+==10459==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-v2-idlefork-1 (exit 1) ===
+==10460==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-v2-both-basic (exit 1) ===
+==10461==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-v2-both-stress (exit 1) ===
+==10462==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-jit-basic (exit 1) ===
+==10463==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-jit-basic-balanced (exit 1) ===
+==10464==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-jit-basic-throughput (exit 1) ===
+==10465==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-jit-basic-footprint (exit 1) ===
+==10466==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-jit-stress-1 (exit 1) ===
+==10467==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-jit-stress-2 (exit 1) ===
+==10468==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-jit-stress-3 (exit 1) ===
+==10469==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-jit-check (exit 1) ===
+==10470==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-jit-mt-local (exit 1) ===
+==10471==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-jit-mt-cross (exit 1) ===
+==10472==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-jit-realloccache-0 (exit 1) ===
+==10473==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-jit-idlefork-0 (exit 1) ===
+==10474==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-jit-realloccache-1 (exit 1) ===
+==10475==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-jit-idlefork-1 (exit 1) ===
+==10476==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-jit-both-basic (exit 1) ===
+==10477==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-jit-both-stress (exit 1) ===
+==10478==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-earlyinit (exit 1) ===
+earlyinit glibc  ok
+earlyinit v1     FAIL (==10496==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.)
+earlyinit v2     FAIL (==10498==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.)
+earlyinit jit    FAIL (==10500==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.)
+
+=== address-tlsexit (exit 1) ===
+glibc  informational (exit 1): tlsexit RSS exceeds baseline 3916 kB + 32 MiB
+tlsexit rss_kb=161296 peak_kb=161296
+v1     informational (exit 1): ==10601==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+v2     FAIL (exit 1): ==10603==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+jit    FAIL (exit 1): ==10605==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-idlelifecycle (exit 1) ===
+==10617==You are trying to dlopen a /workspace/faster-malloc/libfastmalloc2.so shared library with RTLD_DEEPBIND flag which is incompatible with sanitizer runtime (see https://github.com/google/sanitizers/issues/611 for details). If you want to run /workspace/faster-malloc/libfastmalloc2.so library under sanitizers please remove RTLD_DEEPBIND from dlopen flags.
+
+=== address-jitprofile (exit 1) ===
+==10619==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-debug-build (exit 0) ===
+python3 src/gen_classes2.py src/size_classes2.h
+classes=129 arith_classes=32 big_table=2049 limit_cap=256
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -DFM_DEBUG -shared -Wl,-z,nodelete -o libfastmalloc2.so src/fm_static.c 
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -DFM_DEBUG -shared -Wl,-z,nodelete -o libjitmalloc.so src/fm_jit.c src/jit_stubs.S 
+
+=== address-libfastmalloc2.so-debug-stress (exit 1) ===
+==10649==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-libjitmalloc.so-debug-stress (exit 1) ===
+==10650==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== thread-build (exit 0) ===
+python3 src/gen_classes.py src/size_classes.h
+python3 src/gen_classes2.py src/size_classes2.h
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/micro bench/micro.c -lpthread -ldl
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/macro bench/macro.c -lpthread
+classes=129 arith_classes=32 big_table=2049 limit_cap=256
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/mt bench/mt.c -lpthread
+classes=128 table=2016
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/stress bench/stress.c -lpthread
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/instr bench/instr.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/check bench/check.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/rgrow bench/rgrow.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/consprobe bench/consprobe.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/decayprobe bench/decayprobe.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/usableprobe bench/usableprobe.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/purgeprobe bench/purgeprobe.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -Wall -Wextra -o bench/realloccache bench/realloccache.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -Wall -Wextra -o bench/idlefork bench/idlefork.c -pthread
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -Wall -Wextra -o bench/jitprofile bench/jitprofile.c -pthread
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o test_basic test_basic.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -shared -o libfastmalloc.so src/alloc_v1.c 
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -shared -Wl,-z,nodelete -o libfastmalloc2.so src/fm_static.c 
+test_basic.c: In function ‘main’:
+test_basic.c:282:13: warning: product ‘9223372036854775807 * 3’ of arguments 1 and 2 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+  282 |         if (calloc(SIZE_MAX / 2, 3) != NULL) { printf("calloc overflow\n"); return 1; }
+      |             ^~~~~~~~~~~~~~~~~~~~~~~
+In file included from test_basic.c:14:
+/usr/include/malloc.h:43:14: note: in a call to allocation function ‘calloc’ declared here
+   43 | extern void *calloc (size_t __nmemb, size_t __size)
+      |              ^~~~~~
+test_basic.c:285:13: warning: product ‘9223372036854775807 * 3’ of arguments 2 and 3 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+  285 |         if (reallocarray(p, SIZE_MAX / 2, 3) != NULL) { printf("reallocarray overflow\n"); return 1; }
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/malloc.h:59:14: note: in a call to allocation function ‘reallocarray’ declared here
+   59 | extern void *reallocarray (void *__ptr, size_t __nmemb, size_t __size)
+      |              ^~~~~~~~~~~~
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -shared -Wl,-z,nodelete -o libjitmalloc.so src/fm_jit.c src/jit_stubs.S 
+
+=== thread-round7 (exit 139) ===
+make: Nothing to be done for 'all'.
+=== libfastmalloc2.so ===
+bench/round7.sh: line 6: 10855 Segmentation fault      ./test_basic
+
+=== thread-v2-basic (exit -11) ===
+
+=== thread-v2-basic-balanced (exit -11) ===
+
+=== thread-v2-basic-throughput (exit -11) ===
+
+=== thread-v2-basic-footprint (exit -11) ===
+
+=== thread-v2-stress-1 (exit -11) ===
+
+=== thread-v2-stress-2 (exit -11) ===
+
+=== thread-v2-stress-3 (exit -11) ===
+
+=== thread-v2-check (exit -11) ===
+
+=== thread-v2-mt-local (exit -11) ===
+
+=== thread-v2-mt-cross (exit -11) ===
+
+=== thread-v2-realloccache-0 (exit -11) ===
+
+=== thread-v2-idlefork-0 (exit -11) ===
+
+=== thread-v2-realloccache-1 (exit -11) ===
+
+=== thread-v2-idlefork-1 (exit -11) ===
+
+=== thread-v2-both-basic (exit -11) ===
+
+=== thread-v2-both-stress (exit -11) ===
+
+=== thread-jit-basic (exit -11) ===
+
+=== thread-jit-basic-balanced (exit -11) ===
+
+=== thread-jit-basic-throughput (exit -11) ===
+
+=== thread-jit-basic-footprint (exit -11) ===
+
+=== thread-jit-stress-1 (exit -11) ===
+
+=== thread-jit-stress-2 (exit -11) ===
+
+=== thread-jit-stress-3 (exit -11) ===
+
+=== thread-jit-check (exit -11) ===
+
+=== thread-jit-mt-local (exit -11) ===
+
+=== thread-jit-mt-cross (exit -11) ===
+
+=== thread-jit-realloccache-0 (exit -11) ===
+
+=== thread-jit-idlefork-0 (exit -11) ===
+
+=== thread-jit-realloccache-1 (exit -11) ===
+
+=== thread-jit-idlefork-1 (exit -11) ===
+
+=== thread-jit-both-basic (exit -11) ===
+
+=== thread-jit-both-stress (exit -11) ===
+
+=== thread-earlyinit (exit 1) ===
+earlyinit glibc  ok
+earlyinit v1     FAIL ()
+earlyinit v2     FAIL ()
+earlyinit jit    FAIL ()
+
+=== thread-tlsexit (exit 1) ===
+glibc  informational (exit 0): tlsexit rss_kb=24416 peak_kb=24468
+v1     informational (exit 139): 
+v2     FAIL (exit 139): 
+jit    FAIL (exit 139): 
+
+=== thread-idlelifecycle (exit 66) ===
+==11017==You are trying to dlopen a /workspace/faster-malloc/libfastmalloc2.so shared library with RTLD_DEEPBIND flag which is incompatible with sanitizer runtime (see https://github.com/google/sanitizers/issues/611 for details). If you want to run /workspace/faster-malloc/libfastmalloc2.so library under sanitizers please remove RTLD_DEEPBIND from dlopen flags.
+
+=== thread-jitprofile (exit -11) ===
+
+=== thread-debug-build (exit 0) ===
+python3 src/gen_classes2.py src/size_classes2.h
+classes=129 arith_classes=32 big_table=2049 limit_cap=256
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -DFM_DEBUG -shared -Wl,-z,nodelete -o libfastmalloc2.so src/fm_static.c 
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -DFM_DEBUG -shared -Wl,-z,nodelete -o libjitmalloc.so src/fm_jit.c src/jit_stubs.S 
+
+=== thread-libfastmalloc2.so-debug-stress (exit -11) ===
+
+=== thread-libjitmalloc.so-debug-stress (exit -11) ===
+
+=== address-undefined-build (exit 0) ===
+python3 src/gen_classes.py src/size_classes.h
+python3 src/gen_classes2.py src/size_classes2.h
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/micro bench/micro.c -lpthread -ldl
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/macro bench/macro.c -lpthread
+classes=129 arith_classes=32 big_table=2049 limit_cap=256
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/mt bench/mt.c -lpthread
+classes=128 table=2016
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/stress bench/stress.c -lpthread
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/instr bench/instr.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/check bench/check.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/rgrow bench/rgrow.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/consprobe bench/consprobe.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/decayprobe bench/decayprobe.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/usableprobe bench/usableprobe.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/purgeprobe bench/purgeprobe.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -Wall -Wextra -o bench/realloccache bench/realloccache.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -Wall -Wextra -o bench/idlefork bench/idlefork.c -pthread
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -Wall -Wextra -o bench/jitprofile bench/jitprofile.c -pthread
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o test_basic test_basic.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -shared -o libfastmalloc.so src/alloc_v1.c 
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -shared -Wl,-z,nodelete -o libfastmalloc2.so src/fm_static.c 
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -shared -Wl,-z,nodelete -o libjitmalloc.so src/fm_jit.c src/jit_stubs.S 
+test_basic.c: In function ‘main’:
+test_basic.c:282:13: warning: product ‘9223372036854775807 * 3’ of arguments 1 and 2 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+  282 |         if (calloc(SIZE_MAX / 2, 3) != NULL) { printf("calloc overflow\n"); return 1; }
+      |             ^~~~~~~~~~~~~~~~~~~~~~~
+In file included from test_basic.c:14:
+/usr/include/malloc.h:43:14: note: in a call to allocation function ‘calloc’ declared here
+   43 | extern void *calloc (size_t __nmemb, size_t __size)
+      |              ^~~~~~
+test_basic.c:285:13: warning: product ‘9223372036854775807 * 3’ of arguments 2 and 3 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+  285 |         if (reallocarray(p, SIZE_MAX / 2, 3) != NULL) { printf("reallocarray overflow\n"); return 1; }
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/malloc.h:59:14: note: in a call to allocation function ‘reallocarray’ declared here
+   59 | extern void *reallocarray (void *__ptr, size_t __nmemb, size_t __size)
+      |              ^~~~~~~~~~~~
+
+=== address-undefined-round7 (exit 1) ===
+make: Nothing to be done for 'all'.
+=== libfastmalloc2.so ===
+==11158==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-v2-basic (exit 1) ===
+==11159==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-v2-basic-balanced (exit 1) ===
+==11161==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-v2-basic-throughput (exit 1) ===
+==11162==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-v2-basic-footprint (exit 1) ===
+==11163==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-v2-stress-1 (exit 1) ===
+==11164==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-v2-stress-2 (exit 1) ===
+==11165==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-v2-stress-3 (exit 1) ===
+==11166==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-v2-check (exit 1) ===
+==11167==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-v2-mt-local (exit 1) ===
+==11169==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-v2-mt-cross (exit 1) ===
+==11170==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-v2-realloccache-0 (exit 1) ===
+==11171==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-v2-idlefork-0 (exit 1) ===
+==11172==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-v2-realloccache-1 (exit 1) ===
+==11173==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-v2-idlefork-1 (exit 1) ===
+==11175==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-v2-both-basic (exit 1) ===
+==11176==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-v2-both-stress (exit 1) ===
+==11177==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-jit-basic (exit 1) ===
+==11178==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-jit-basic-balanced (exit 1) ===
+==11179==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-jit-basic-throughput (exit 1) ===
+==11180==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-jit-basic-footprint (exit 1) ===
+==11182==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-jit-stress-1 (exit 1) ===
+==11183==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-jit-stress-2 (exit 1) ===
+==11184==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-jit-stress-3 (exit 1) ===
+==11185==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-jit-check (exit 1) ===
+==11187==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-jit-mt-local (exit 1) ===
+==11188==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-jit-mt-cross (exit 1) ===
+==11189==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-jit-realloccache-0 (exit 1) ===
+==11190==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-jit-idlefork-0 (exit 1) ===
+==11191==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-jit-realloccache-1 (exit 1) ===
+==11192==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-jit-idlefork-1 (exit 1) ===
+==11194==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-jit-both-basic (exit 1) ===
+==11195==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-jit-both-stress (exit 1) ===
+==11196==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-earlyinit (exit 1) ===
+earlyinit glibc  ok
+earlyinit v1     FAIL (==11215==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.)
+earlyinit v2     FAIL (==11217==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.)
+earlyinit jit    FAIL (==11219==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.)
+
+=== address-undefined-tlsexit (exit 1) ===
+glibc  informational (exit 1): tlsexit RSS exceeds baseline 4860 kB + 32 MiB
+tlsexit rss_kb=162220 peak_kb=162220
+v1     informational (exit 1): ==11307==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+v2     FAIL (exit 1): ==11309==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+jit    FAIL (exit 1): ==11311==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-idlelifecycle (exit 1) ===
+==11323==You are trying to dlopen a /workspace/faster-malloc/libfastmalloc2.so shared library with RTLD_DEEPBIND flag which is incompatible with sanitizer runtime (see https://github.com/google/sanitizers/issues/611 for details). If you want to run /workspace/faster-malloc/libfastmalloc2.so library under sanitizers please remove RTLD_DEEPBIND from dlopen flags.
+
+=== address-undefined-jitprofile (exit 1) ===
+==11325==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-debug-build (exit 0) ===
+python3 src/gen_classes2.py src/size_classes2.h
+classes=129 arith_classes=32 big_table=2049 limit_cap=256
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -DFM_DEBUG -shared -Wl,-z,nodelete -o libfastmalloc2.so src/fm_static.c 
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -DFM_DEBUG -shared -Wl,-z,nodelete -o libjitmalloc.so src/fm_jit.c src/jit_stubs.S 
+
+=== address-undefined-libfastmalloc2.so-debug-stress (exit 1) ===
+==11360==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-undefined-libjitmalloc.so-debug-stress (exit 1) ===
+==11361==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== thread-undefined-build (exit 0) ===
+python3 src/gen_classes.py src/size_classes.h
+python3 src/gen_classes2.py src/size_classes2.h
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/micro bench/micro.c -lpthread -ldl
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/macro bench/macro.c -lpthread
+classes=129 arith_classes=32 big_table=2049 limit_cap=256
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/mt bench/mt.c -lpthread
+classes=128 table=2016
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/stress bench/stress.c -lpthread
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/instr bench/instr.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/check bench/check.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/rgrow bench/rgrow.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/consprobe bench/consprobe.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/decayprobe bench/decayprobe.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/usableprobe bench/usableprobe.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o bench/purgeprobe bench/purgeprobe.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -Wall -Wextra -o bench/realloccache bench/realloccache.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -Wall -Wextra -o bench/idlefork bench/idlefork.c -pthread
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -Wall -Wextra -o bench/jitprofile bench/jitprofile.c -pthread
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -g -o test_basic test_basic.c
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -shared -o libfastmalloc.so src/alloc_v1.c 
+test_basic.c: In function ‘main’:
+test_basic.c:282:13: warning: product ‘9223372036854775807 * 3’ of arguments 1 and 2 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+  282 |         if (calloc(SIZE_MAX / 2, 3) != NULL) { printf("calloc overflow\n"); return 1; }
+      |             ^~~~~~~~~~~~~~~~~~~~~~~
+In file included from test_basic.c:14:
+/usr/include/malloc.h:43:14: note: in a call to allocation function ‘calloc’ declared here
+   43 | extern void *calloc (size_t __nmemb, size_t __size)
+      |              ^~~~~~
+test_basic.c:285:13: warning: product ‘9223372036854775807 * 3’ of arguments 2 and 3 exceeds ‘SIZE_MAX’ [-Walloc-size-larger-than=]
+  285 |         if (reallocarray(p, SIZE_MAX / 2, 3) != NULL) { printf("reallocarray overflow\n"); return 1; }
+      |             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/usr/include/malloc.h:59:14: note: in a call to allocation function ‘reallocarray’ declared here
+   59 | extern void *reallocarray (void *__ptr, size_t __nmemb, size_t __size)
+      |              ^~~~~~~~~~~~
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -shared -Wl,-z,nodelete -o libfastmalloc2.so src/fm_static.c 
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -shared -Wl,-z,nodelete -o libjitmalloc.so src/fm_jit.c src/jit_stubs.S 
+
+=== thread-undefined-round7 (exit 139) ===
+make: Nothing to be done for 'all'.
+=== libfastmalloc2.so ===
+bench/round7.sh: line 6: 11483 Segmentation fault      ./test_basic
+
+=== thread-undefined-v2-basic (exit -11) ===
+
+=== thread-undefined-v2-basic-balanced (exit -11) ===
+
+=== thread-undefined-v2-basic-throughput (exit -11) ===
+
+=== thread-undefined-v2-basic-footprint (exit -11) ===
+
+=== thread-undefined-v2-stress-1 (exit -11) ===
+
+=== thread-undefined-v2-stress-2 (exit -11) ===
+
+=== thread-undefined-v2-stress-3 (exit -11) ===
+
+=== thread-undefined-v2-check (exit -11) ===
+
+=== thread-undefined-v2-mt-local (exit -11) ===
+
+=== thread-undefined-v2-mt-cross (exit -11) ===
+
+=== thread-undefined-v2-realloccache-0 (exit -11) ===
+
+=== thread-undefined-v2-idlefork-0 (exit -11) ===
+
+=== thread-undefined-v2-realloccache-1 (exit -11) ===
+
+=== thread-undefined-v2-idlefork-1 (exit -11) ===
+
+=== thread-undefined-v2-both-basic (exit -11) ===
+
+=== thread-undefined-v2-both-stress (exit -11) ===
+
+=== thread-undefined-jit-basic (exit -11) ===
+
+=== thread-undefined-jit-basic-balanced (exit -11) ===
+
+=== thread-undefined-jit-basic-throughput (exit -11) ===
+
+=== thread-undefined-jit-basic-footprint (exit -11) ===
+
+=== thread-undefined-jit-stress-1 (exit -11) ===
+
+=== thread-undefined-jit-stress-2 (exit -11) ===
+
+=== thread-undefined-jit-stress-3 (exit -11) ===
+
+=== thread-undefined-jit-check (exit -11) ===
+
+=== thread-undefined-jit-mt-local (exit -11) ===
+
+=== thread-undefined-jit-mt-cross (exit -11) ===
+
+=== thread-undefined-jit-realloccache-0 (exit -11) ===
+
+=== thread-undefined-jit-idlefork-0 (exit -11) ===
+
+=== thread-undefined-jit-realloccache-1 (exit -11) ===
+
+=== thread-undefined-jit-idlefork-1 (exit -11) ===
+
+=== thread-undefined-jit-both-basic (exit -11) ===
+
+=== thread-undefined-jit-both-stress (exit -11) ===
+
+=== thread-undefined-earlyinit (exit 1) ===
+earlyinit glibc  ok
+earlyinit v1     FAIL ()
+earlyinit v2     FAIL ()
+earlyinit jit    FAIL ()
+
+=== thread-undefined-tlsexit (exit 1) ===
+glibc  informational (exit 0): tlsexit rss_kb=25472 peak_kb=25472
+v1     informational (exit 139): 
+v2     FAIL (exit 139): 
+jit    FAIL (exit 139): 
+
+=== thread-undefined-idlelifecycle (exit 66) ===
+==11645==You are trying to dlopen a /workspace/faster-malloc/libfastmalloc2.so shared library with RTLD_DEEPBIND flag which is incompatible with sanitizer runtime (see https://github.com/google/sanitizers/issues/611 for details). If you want to run /workspace/faster-malloc/libfastmalloc2.so library under sanitizers please remove RTLD_DEEPBIND from dlopen flags.
+
+=== thread-undefined-jitprofile (exit -11) ===
+
+=== thread-undefined-debug-build (exit 0) ===
+python3 src/gen_classes2.py src/size_classes2.h
+classes=129 arith_classes=32 big_table=2049 limit_cap=256
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -DFM_DEBUG -shared -Wl,-z,nodelete -o libfastmalloc2.so src/fm_static.c 
+/workspace/faster-malloc/work/sanitizers/bin/cc -O2 -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc -DFM_DEBUG -shared -Wl,-z,nodelete -o libjitmalloc.so src/fm_jit.c src/jit_stubs.S 
+
+=== thread-undefined-libfastmalloc2.so-debug-stress (exit -11) ===
+
+=== thread-undefined-libjitmalloc.so-debug-stress (exit -11) ===

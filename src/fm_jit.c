@@ -111,21 +111,14 @@ __thread int fm_in_census __attribute__((tls_model("initial-exec")));
 static uint64_t g_exact[EXACT_MAX];
 static _Atomic uint64_t g_samples;
 
-/*
- * The trigger counter is deliberately *not* atomic: it only decides when to
- * recompile, and a lost update merely delays the next recompile by a few
- * samples.  Making it atomic would put a LOCK XADD on the hot path.
- */
-static uint64_t g_profile_events;
-
 static __thread uint32_t t_sample_ctr __attribute__((tls_model("initial-exec")))
     = SAMPLE_PERIOD;
 
-static inline void fm_profile(size_t n)
+static inline uint64_t fm_profile(size_t n)
 {
     if (__builtin_expect(n < EXACT_MAX, 1))
         __atomic_fetch_add(&g_exact[n], 1, __ATOMIC_RELAXED);
-    __atomic_fetch_add(&g_samples, 1, __ATOMIC_RELAXED);
+    return atomic_fetch_add_explicit(&g_samples, 1, memory_order_relaxed) + 1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -170,7 +163,7 @@ static uint32_t g_min_share = 50; /* percent */
  * entry point is then replaced by the plain generic implementation and the
  * profiling stops, so the JIT costs nothing at all from that point on.
  */
-static int g_give_up;
+static _Atomic int g_give_up;
 
 /* Patch points, relocated into the copy of the template. */
 static const char *p_sub[JIT_SLOTS], *p_cmp[JIT_SLOTS], *p_disp[JIT_SLOTS];
@@ -288,7 +281,7 @@ static void jit_compile(void)
          * every allocation.  Step aside and let the static dispatch --
          * which computes the class with arithmetic -- handle everything.
          */
-        g_give_up = 1;
+        atomic_store_explicit(&g_give_up, 1, memory_order_relaxed);
         atomic_store_explicit(&g_entry, (entry_fn)fm_generic_malloc,
                               memory_order_release);
         if (getenv("FM_JIT_DEBUG"))
@@ -481,10 +474,10 @@ void *fm_generic_malloc(size_t n)
  */
 __attribute__((noinline)) static size_t fm_sample(size_t n)
 {
-    if (__builtin_expect(g_give_up, 0))
+    if (__builtin_expect(atomic_load_explicit(&g_give_up, memory_order_relaxed), 0))
         return n; /* the JIT has stepped aside; stop profiling */
-    fm_profile(n);
-    if (__builtin_expect((++g_profile_events & (JIT_TRIGGER - 1)) == 0, 0) &&
+    uint64_t samples = fm_profile(n);
+    if (__builtin_expect((samples & (JIT_TRIGGER - 1)) == 0, 0) &&
         __builtin_expect(atomic_load_explicit(&g_initialised,
                                               memory_order_relaxed), 1))
         jit_compile();
@@ -607,10 +600,8 @@ void *reallocarray(void *p, size_t n, size_t sz)
 
 int posix_memalign(void **out, size_t align, size_t n)
 {
-    if (align % sizeof(void *) != 0 || (align & (align - 1)) != 0) {
-        *out = NULL;
+    if (align == 0 || align % sizeof(void *) != 0 || (align & (align - 1)) != 0)
         return EINVAL;
-    }
     void *p = fm_aligned_alloc_impl(align, n);
     if (!p)
         return ENOMEM;

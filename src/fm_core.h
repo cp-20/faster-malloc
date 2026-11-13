@@ -1559,9 +1559,11 @@ static void fm_idle_kick(uint32_t now)
             pthread_t th;
             /* Compile-time faults affect only this timer, never application threads. */
 #ifdef FM_TEST_IDLE_CREATE_FAILURES
-            static int failures = FM_TEST_IDLE_CREATE_FAILURES;
-            if (failures != 0) {
-                if (failures > 0) failures--;
+            static _Atomic int failures = FM_TEST_IDLE_CREATE_FAILURES;
+            int remaining = atomic_load_explicit(&failures, memory_order_relaxed);
+            if (remaining != 0) {
+                if (remaining > 0)
+                    atomic_fetch_sub_explicit(&failures, 1, memory_order_relaxed);
                 err = EAGAIN;
             } else
 #endif

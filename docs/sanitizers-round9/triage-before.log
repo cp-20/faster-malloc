@@ -1,0 +1,224 @@
+
+=== work/sanitizers/before-final-triage/thread-jit-idlefork-retry.log ===
+==================
+WARNING: ThreadSanitizer: data race (pid=9907)
+  Read of size 4 at 0x7f43582e01b0 by thread T5:
+    #0 fm_idle_kick src/fm_core.h:1563 (thread-jit.so+0x3037) (BuildId: 694cbd702e29d80e5e30634deb14a01a63917d1b)
+    #1 fm_auto_release_tick src/fm_core.h:1453 (thread-jit.so+0x7458) (BuildId: 694cbd702e29d80e5e30634deb14a01a63917d1b)
+    #2 fm_flush_bin src/fm_core.h:650 (thread-jit.so+0x7458)
+    #3 fm_san_free /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-source.c:563 (thread-jit.so+0x8d37) (BuildId: 694cbd702e29d80e5e30634deb14a01a63917d1b)
+    #4 burst /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-idlefork.c:43 (thread-jit-idlefork+0x1b3c) (BuildId: 3f9b30a378f9bbed4c70b4272bfc29a462dff136)
+    #5 once /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-idlefork.c:50 (thread-jit-idlefork+0x1bed) (BuildId: 3f9b30a378f9bbed4c70b4272bfc29a462dff136)
+
+  Previous write of size 4 at 0x7f43582e01b0 by thread T1:
+    #0 fm_idle_kick src/fm_core.h:1564 (thread-jit.so+0x3051) (BuildId: 694cbd702e29d80e5e30634deb14a01a63917d1b)
+    #1 fm_auto_release_tick src/fm_core.h:1453 (thread-jit.so+0x7458) (BuildId: 694cbd702e29d80e5e30634deb14a01a63917d1b)
+    #2 fm_flush_bin src/fm_core.h:650 (thread-jit.so+0x7458)
+    #3 fm_san_free /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-source.c:563 (thread-jit.so+0x8d37) (BuildId: 694cbd702e29d80e5e30634deb14a01a63917d1b)
+    #4 burst /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-idlefork.c:43 (thread-jit-idlefork+0x1b3c) (BuildId: 3f9b30a378f9bbed4c70b4272bfc29a462dff136)
+    #5 once /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-idlefork.c:50 (thread-jit-idlefork+0x1bed) (BuildId: 3f9b30a378f9bbed4c70b4272bfc29a462dff136)
+
+  Location is global 'failures.0' of size 4 at 0x7f43582e01b0 (thread-jit.so+0xd1b0)
+
+  Thread T5 (tid=9913, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-idlefork.c:73 (thread-jit-idlefork+0x162e) (BuildId: 3f9b30a378f9bbed4c70b4272bfc29a462dff136)
+
+  Thread T1 (tid=9909, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-idlefork.c:73 (thread-jit-idlefork+0x162e) (BuildId: 3f9b30a378f9bbed4c70b4272bfc29a462dff136)
+
+SUMMARY: ThreadSanitizer: data race src/fm_core.h:1563 in fm_idle_kick
+==================
+
+=== work/sanitizers/before-final-triage/thread-jit-mt-1.log ===
+==================
+WARNING: ThreadSanitizer: data race (pid=12057)
+  Read of size 4 at 0x7fb868320000 by thread T2:
+    #0 fm_san_free /workspace/faster-malloc/work/sanitizers/namespaced/thread-jit-source.c:551 (thread-jit.so+0x8c2e) (BuildId: 83972ef04303a5e96577050ae1b783714a5cfe41)
+    #1 consumer bench/mt.c:104 (thread-jit-mt+0x136f) (BuildId: 036dad78ca4731dd72af865e2efdac36950eaf21)
+
+  Previous write of size 4 at 0x7fb868320000 by thread T1:
+    #0 fm_span_new src/fm_core.h:485 (thread-jit.so+0x76e9) (BuildId: 83972ef04303a5e96577050ae1b783714a5cfe41)
+    #1 fm_refill_class src/fm_core.h:574 (thread-jit.so+0x76e9)
+    #2 fm_malloc src/fm_core.h:1906 (thread-jit.so+0x7e96) (BuildId: 83972ef04303a5e96577050ae1b783714a5cfe41)
+    #3 fm_jit_generic /workspace/faster-malloc/work/sanitizers/namespaced/thread-jit-source.c:493 (thread-jit.so+0x7e96)
+    #4 producer bench/mt.c:74 (thread-jit-mt+0x13a9) (BuildId: 036dad78ca4731dd72af865e2efdac36950eaf21)
+
+  Thread T2 (tid=12060, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main bench/mt.c:126 (thread-jit-mt+0x11ec) (BuildId: 036dad78ca4731dd72af865e2efdac36950eaf21)
+
+  Thread T1 (tid=12059, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main bench/mt.c:125 (thread-jit-mt+0x11d5) (BuildId: 036dad78ca4731dd72af865e2efdac36950eaf21)
+
+SUMMARY: ThreadSanitizer: data race /workspace/faster-malloc/work/sanitizers/namespaced/thread-jit-source.c:551 in fm_san_free
+==================
+
+=== work/sanitizers/before-final-triage/thread-static-mt-1.log ===
+==================
+WARNING: ThreadSanitizer: data race (pid=10280)
+  Read of size 4 at 0x7f47a5560000 by thread T2:
+    #0 fm_free src/fm_core.h:1923 (thread-static.so+0x7b5e) (BuildId: 4be264e0f90a0c7a2da377710ace35b9289d15ef)
+    #1 fm_san_free src/fm_static.c:31 (thread-static.so+0x7b5e)
+    #2 consumer bench/mt.c:104 (thread-static-mt+0x136f) (BuildId: bd8c58de039f25c3ad7da46e25bd7704be53ca72)
+
+  Previous write of size 4 at 0x7f47a5560000 by thread T1:
+    #0 fm_span_new src/fm_core.h:485 (thread-static.so+0x6669) (BuildId: 4be264e0f90a0c7a2da377710ace35b9289d15ef)
+    #1 fm_refill_class src/fm_core.h:574 (thread-static.so+0x6669)
+    #2 fm_malloc src/fm_core.h:1906 (thread-static.so+0x7b16) (BuildId: 4be264e0f90a0c7a2da377710ace35b9289d15ef)
+    #3 fm_san_malloc src/fm_static.c:30 (thread-static.so+0x7b16)
+    #4 producer bench/mt.c:74 (thread-static-mt+0x13a9) (BuildId: bd8c58de039f25c3ad7da46e25bd7704be53ca72)
+
+  Thread T2 (tid=10283, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main bench/mt.c:126 (thread-static-mt+0x11ec) (BuildId: bd8c58de039f25c3ad7da46e25bd7704be53ca72)
+
+  Thread T1 (tid=10282, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main bench/mt.c:125 (thread-static-mt+0x11d5) (BuildId: bd8c58de039f25c3ad7da46e25bd7704be53ca72)
+
+SUMMARY: ThreadSanitizer: data race src/fm_core.h:1923 in fm_free
+==================
+
+=== work/sanitizers/before-final-triage/thread-undefined-jit-mt-1.log ===
+==================
+WARNING: ThreadSanitizer: data race (pid=13049)
+  Read of size 4 at 0x7f9162510000 by thread T2:
+    #0 fm_san_free /workspace/faster-malloc/work/sanitizers/namespaced/thread-undefined-jit-source.c:551 (thread-undefined-jit.so+0x162a6) (BuildId: aa5e01ce4d74880c05b29357da151d8c905a7b46)
+    #1 consumer bench/mt.c:104 (thread-undefined-jit-mt+0x136f) (BuildId: a8233070452782e5b27f9902a3e970aa32e4ed69)
+
+  Previous write of size 4 at 0x7f9162510000 by thread T1:
+    #0 fm_span_new src/fm_core.h:485 (thread-undefined-jit.so+0x14153) (BuildId: aa5e01ce4d74880c05b29357da151d8c905a7b46)
+    #1 fm_refill_class src/fm_core.h:574 (thread-undefined-jit.so+0x14153)
+    #2 fm_malloc src/fm_core.h:1906 (thread-undefined-jit.so+0x150b6) (BuildId: aa5e01ce4d74880c05b29357da151d8c905a7b46)
+    #3 fm_jit_generic /workspace/faster-malloc/work/sanitizers/namespaced/thread-undefined-jit-source.c:493 (thread-undefined-jit.so+0x150b6)
+    #4 producer bench/mt.c:74 (thread-undefined-jit-mt+0x13a9) (BuildId: a8233070452782e5b27f9902a3e970aa32e4ed69)
+
+  Thread T2 (tid=13052, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main bench/mt.c:126 (thread-undefined-jit-mt+0x11ec) (BuildId: a8233070452782e5b27f9902a3e970aa32e4ed69)
+
+  Thread T1 (tid=13051, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main bench/mt.c:125 (thread-undefined-jit-mt+0x11d5) (BuildId: a8233070452782e5b27f9902a3e970aa32e4ed69)
+
+SUMMARY: ThreadSanitizer: data race /workspace/faster-malloc/work/sanitizers/namespaced/thread-undefined-jit-source.c:551 in fm_san_free
+==================
+
+=== work/sanitizers/before-final-triage/thread-undefined-static-mt-1.log ===
+==================
+WARNING: ThreadSanitizer: data race (pid=12858)
+  Read of size 4 at 0x7fb0b61e0000 by thread T2:
+    #0 fm_free src/fm_core.h:1923 (thread-undefined-static.so+0xd6b6) (BuildId: 4629eab60892f79c9732c085c44e46f42cae4a85)
+    #1 fm_san_free src/fm_static.c:31 (thread-undefined-static.so+0x1008c) (BuildId: 4629eab60892f79c9732c085c44e46f42cae4a85)
+    #2 consumer bench/mt.c:104 (thread-undefined-static-mt+0x136f) (BuildId: e9f5564f73d116530ddee6b0a237f47b3c263de1)
+
+  Previous write of size 4 at 0x7fb0b61e0000 by thread T1:
+    #0 fm_span_new src/fm_core.h:485 (thread-undefined-static.so+0xdfd3) (BuildId: 4629eab60892f79c9732c085c44e46f42cae4a85)
+    #1 fm_refill_class src/fm_core.h:574 (thread-undefined-static.so+0xdfd3)
+    #2 fm_malloc src/fm_core.h:1906 (thread-undefined-static.so+0xffb6) (BuildId: 4629eab60892f79c9732c085c44e46f42cae4a85)
+    #3 fm_san_malloc src/fm_static.c:30 (thread-undefined-static.so+0xffb6)
+    #4 producer bench/mt.c:74 (thread-undefined-static-mt+0x13a9) (BuildId: e9f5564f73d116530ddee6b0a237f47b3c263de1)
+
+  Thread T2 (tid=12861, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main bench/mt.c:126 (thread-undefined-static-mt+0x11ec) (BuildId: e9f5564f73d116530ddee6b0a237f47b3c263de1)
+
+  Thread T1 (tid=12860, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main bench/mt.c:125 (thread-undefined-static-mt+0x11d5) (BuildId: e9f5564f73d116530ddee6b0a237f47b3c263de1)
+
+SUMMARY: ThreadSanitizer: data race src/fm_core.h:1923 in fm_free
+==================
+
+=== work/sanitizers/pre-race-fix/lifecycle/thread-static-lifecycle-0.log ===
+thread-static-lifecycle: /workspace/faster-malloc/work/sanitizers/lifecycle/idlelifecycle.c:64: main: Assertion `threads() == 1 + enabled' failed.
+
+=== work/sanitizers/pre-race-fix/namespaced/thread-static-stress-1.log ===
+stress ok
+
+=== work/sanitizers/probes/jit-fixed-thread.log ===
+[jit] distribution too diverse -- stepping aside
+jitprofile ok (8 threads, 800000 allocations)
+
+=== work/sanitizers/probes/jit-fixed-thread-undefined.log ===
+[jit] distribution too diverse -- stepping aside
+jitprofile ok (8 threads, 800000 allocations)
+
+=== Initial JIT reproduction: three warnings ===
+==================
+WARNING: ThreadSanitizer: data race (pid=6476)
+  Read of size 8 at 0x7fd7edeca3b0 by thread T2:
+    #0 fm_sample /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-source.c:487 (thread-jit.so+0x3ee0) (BuildId: b3228c2a6dd0e500bd1abf25a73b897d149fba90)
+    #1 fm_jit_generic /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-source.c:498 (thread-jit.so+0x7eb8) (BuildId: b3228c2a6dd0e500bd1abf25a73b897d149fba90)
+    #2 worker work/sanitizers/probes/jit-profile.c:9 (jit-profile+0x12e1) (BuildId: 8390383021fd757736f1d903723ed169e4b69bc4)
+
+  Previous write of size 8 at 0x7fd7edeca3b0 by thread T3:
+    #0 fm_sample /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-source.c:487 (thread-jit.so+0x3ef3) (BuildId: b3228c2a6dd0e500bd1abf25a73b897d149fba90)
+    #1 fm_jit_generic /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-source.c:498 (thread-jit.so+0x7eb8) (BuildId: b3228c2a6dd0e500bd1abf25a73b897d149fba90)
+    #2 worker work/sanitizers/probes/jit-profile.c:9 (jit-profile+0x12e1) (BuildId: 8390383021fd757736f1d903723ed169e4b69bc4)
+
+  Location is global 'g_profile_events' of size 8 at 0x7fd7edeca3b0 (thread-jit.so+0xf3b0)
+
+  Thread T2 (tid=6479, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main work/sanitizers/probes/jit-profile.c:12 (jit-profile+0x115e) (BuildId: 8390383021fd757736f1d903723ed169e4b69bc4)
+
+  Thread T3 (tid=6480, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main work/sanitizers/probes/jit-profile.c:12 (jit-profile+0x115e) (BuildId: 8390383021fd757736f1d903723ed169e4b69bc4)
+
+SUMMARY: ThreadSanitizer: data race /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-source.c:487 in fm_sample
+==================
+==================
+WARNING: ThreadSanitizer: data race (pid=6476)
+  Write of size 8 at 0x7fd7edeca3b0 by thread T2:
+    #0 fm_sample /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-source.c:487 (thread-jit.so+0x3ef3) (BuildId: b3228c2a6dd0e500bd1abf25a73b897d149fba90)
+    #1 fm_jit_generic /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-source.c:498 (thread-jit.so+0x7eb8) (BuildId: b3228c2a6dd0e500bd1abf25a73b897d149fba90)
+    #2 worker work/sanitizers/probes/jit-profile.c:9 (jit-profile+0x12e1) (BuildId: 8390383021fd757736f1d903723ed169e4b69bc4)
+
+  Previous write of size 8 at 0x7fd7edeca3b0 by thread T8:
+    #0 fm_sample /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-source.c:487 (thread-jit.so+0x3ef3) (BuildId: b3228c2a6dd0e500bd1abf25a73b897d149fba90)
+    #1 fm_jit_generic /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-source.c:498 (thread-jit.so+0x7eb8) (BuildId: b3228c2a6dd0e500bd1abf25a73b897d149fba90)
+    #2 worker work/sanitizers/probes/jit-profile.c:9 (jit-profile+0x12e1) (BuildId: 8390383021fd757736f1d903723ed169e4b69bc4)
+
+  Location is global 'g_profile_events' of size 8 at 0x7fd7edeca3b0 (thread-jit.so+0xf3b0)
+
+  Thread T2 (tid=6479, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main work/sanitizers/probes/jit-profile.c:12 (jit-profile+0x115e) (BuildId: 8390383021fd757736f1d903723ed169e4b69bc4)
+
+  Thread T8 (tid=6485, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main work/sanitizers/probes/jit-profile.c:12 (jit-profile+0x115e) (BuildId: 8390383021fd757736f1d903723ed169e4b69bc4)
+
+SUMMARY: ThreadSanitizer: data race /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-source.c:487 in fm_sample
+==================
+==================
+WARNING: ThreadSanitizer: data race (pid=6476)
+  Write of size 4 at 0x7fd7edeca3a0 by thread T8:
+    #0 jit_compile /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-source.c:291 (thread-jit.so+0x3a3a) (BuildId: b3228c2a6dd0e500bd1abf25a73b897d149fba90)
+    #1 fm_sample /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-source.c:490 (thread-jit.so+0x3f2e) (BuildId: b3228c2a6dd0e500bd1abf25a73b897d149fba90)
+    #2 fm_jit_generic /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-source.c:498 (thread-jit.so+0x7eb8) (BuildId: b3228c2a6dd0e500bd1abf25a73b897d149fba90)
+    #3 worker work/sanitizers/probes/jit-profile.c:9 (jit-profile+0x12e1) (BuildId: 8390383021fd757736f1d903723ed169e4b69bc4)
+
+  Previous read of size 4 at 0x7fd7edeca3a0 by thread T6:
+    #0 fm_sample /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-source.c:484 (thread-jit.so+0x3e94) (BuildId: b3228c2a6dd0e500bd1abf25a73b897d149fba90)
+    #1 fm_jit_generic /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-source.c:498 (thread-jit.so+0x7eb8) (BuildId: b3228c2a6dd0e500bd1abf25a73b897d149fba90)
+    #2 worker work/sanitizers/probes/jit-profile.c:9 (jit-profile+0x12e1) (BuildId: 8390383021fd757736f1d903723ed169e4b69bc4)
+
+  Location is global 'g_give_up' of size 4 at 0x7fd7edeca3a0 (thread-jit.so+0xf3a0)
+
+  Thread T8 (tid=6485, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main work/sanitizers/probes/jit-profile.c:12 (jit-profile+0x115e) (BuildId: 8390383021fd757736f1d903723ed169e4b69bc4)
+
+  Thread T6 (tid=6483, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main work/sanitizers/probes/jit-profile.c:12 (jit-profile+0x115e) (BuildId: 8390383021fd757736f1d903723ed169e4b69bc4)
+
+SUMMARY: ThreadSanitizer: data race /workspace/faster-malloc/work/sanitizers/lifecycle/thread-jit-source.c:291 in jit_compile
+==================
+ThreadSanitizer: reported 3 warnings

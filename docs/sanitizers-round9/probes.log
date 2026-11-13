@@ -1,0 +1,125 @@
+
+=== owner-build (exit 0) ===
+
+=== address-plain-build (exit 0) ===
+
+=== address-plain (exit 0) ===
+/lib/x86_64-linux-gnu/libasan.so.8
+
+=== address-allocator-build (exit 0) ===
+
+=== address-allocator-first (exit 1) ===
+==16269==ASan runtime does not come first in initial library list; you should either link runtime to your application or manually preload it with LD_PRELOAD.
+
+=== address-runtime-first (exit 0) ===
+/usr/lib/gcc/x86_64-linux-gnu/14/libasan.so
+
+=== address-order-disabled (exit -11) ===
+
+=== thread-plain-build (exit 0) ===
+
+=== thread-plain (exit 0) ===
+/lib/x86_64-linux-gnu/libtsan.so.2
+
+=== thread-allocator-build (exit 0) ===
+
+=== thread-allocator-first (exit -11) ===
+
+=== thread-runtime-first (exit 0) ===
+/usr/lib/gcc/x86_64-linux-gnu/14/libtsan.so
+
+=== incompatible (exit 1) ===
+cc1: error: ‘-fsanitize=thread’ is incompatible with ‘-fsanitize=address’
+
+=== posix-build (exit 0) ===
+
+=== before-static-build (exit 0) ===
+
+=== before-static-posix (exit 1) ===
+alignment=3 errno=22 output=(nil) expected=0x1
+
+=== after-static-build (exit 0) ===
+
+=== after-static-posix (exit 0) ===
+alignment=3 errno=22 output=0x1 expected=0x1
+
+=== before-jit-build (exit 0) ===
+
+=== before-jit-posix (exit 1) ===
+alignment=3 errno=22 output=(nil) expected=0x1
+
+=== after-jit-build (exit 0) ===
+
+=== after-jit-posix (exit 0) ===
+alignment=3 errno=22 output=0x1 expected=0x1
+
+=== threads-build (exit 0) ===
+
+=== threads (exit 0) ===
+before=1
+after_join=2
+
+=== before-jit-tsan-build (exit 0) ===
+
+=== before-jitprofile-build (exit 0) ===
+
+=== before-jitprofile (exit 66) ===
+==================
+WARNING: ThreadSanitizer: data race (pid=16367)
+  Read of size 8 at 0x7f59b88813b0 by thread T7:
+    #0 fm_sample /workspace/faster-malloc/work/sanitizers/probes/before-jit-namespaced.c:487 (before-jit-tsan.so+0x3ea0) (BuildId: 8eca7c638d0841591f45a4b47463a2e364a01950)
+    #1 fm_jit_generic /workspace/faster-malloc/work/sanitizers/probes/before-jit-namespaced.c:498 (before-jit-tsan.so+0x7e78) (BuildId: 8eca7c638d0841591f45a4b47463a2e364a01950)
+    #2 worker bench/jitprofile.c:15 (before-jitprofile+0x13c2) (BuildId: 3901475d69bca40bda720700ea6e34679623f6d2)
+
+  Previous write of size 8 at 0x7f59b88813b0 by thread T6:
+    #0 fm_sample /workspace/faster-malloc/work/sanitizers/probes/before-jit-namespaced.c:487 (before-jit-tsan.so+0x3eb3) (BuildId: 8eca7c638d0841591f45a4b47463a2e364a01950)
+    #1 fm_jit_generic /workspace/faster-malloc/work/sanitizers/probes/before-jit-namespaced.c:498 (before-jit-tsan.so+0x7e78) (BuildId: 8eca7c638d0841591f45a4b47463a2e364a01950)
+    #2 worker bench/jitprofile.c:15 (before-jitprofile+0x13c2) (BuildId: 3901475d69bca40bda720700ea6e34679623f6d2)
+
+  Location is global 'g_profile_events' of size 8 at 0x7f59b88813b0 (before-jit-tsan.so+0xf3b0)
+
+  Thread T7 (tid=16375, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main bench/jitprofile.c:25 (before-jitprofile+0x11ee) (BuildId: 3901475d69bca40bda720700ea6e34679623f6d2)
+
+  Thread T6 (tid=16374, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main bench/jitprofile.c:25 (before-jitprofile+0x11ee) (BuildId: 3901475d69bca40bda720700ea6e34679623f6d2)
+
+SUMMARY: ThreadSanitizer: data race /workspace/faster-malloc/work/sanitizers/probes/before-jit-namespaced.c:487 in fm_sample
+==================
+==================
+WARNING: ThreadSanitizer: data race (pid=16367)
+  Write of size 8 at 0x7f59b88813b0 by thread T3:
+    #0 fm_sample /workspace/faster-malloc/work/sanitizers/probes/before-jit-namespaced.c:487 (before-jit-tsan.so+0x3eb3) (BuildId: 8eca7c638d0841591f45a4b47463a2e364a01950)
+    #1 fm_jit_generic /workspace/faster-malloc/work/sanitizers/probes/before-jit-namespaced.c:498 (before-jit-tsan.so+0x7e78) (BuildId: 8eca7c638d0841591f45a4b47463a2e364a01950)
+    #2 worker bench/jitprofile.c:15 (before-jitprofile+0x13c2) (BuildId: 3901475d69bca40bda720700ea6e34679623f6d2)
+
+  Previous write of size 8 at 0x7f59b88813b0 by thread T6:
+    #0 fm_sample /workspace/faster-malloc/work/sanitizers/probes/before-jit-namespaced.c:487 (before-jit-tsan.so+0x3eb3) (BuildId: 8eca7c638d0841591f45a4b47463a2e364a01950)
+    #1 fm_jit_generic /workspace/faster-malloc/work/sanitizers/probes/before-jit-namespaced.c:498 (before-jit-tsan.so+0x7e78) (BuildId: 8eca7c638d0841591f45a4b47463a2e364a01950)
+    #2 worker bench/jitprofile.c:15 (before-jitprofile+0x13c2) (BuildId: 3901475d69bca40bda720700ea6e34679623f6d2)
+
+  Location is global 'g_profile_events' of size 8 at 0x7f59b88813b0 (before-jit-tsan.so+0xf3b0)
+
+  Thread T3 (tid=16371, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main bench/jitprofile.c:25 (before-jitprofile+0x11ee) (BuildId: 3901475d69bca40bda720700ea6e34679623f6d2)
+
+  Thread T6 (tid=16374, running) created by main thread at:
+    #0 pthread_create ../../../../src/libsanitizer/tsan/tsan_interceptors_posix.cpp:1022 (libtsan.so.2+0x568a6) (BuildId: 99ef88596cb10a8ccf307fe1a9070f66a44b1624)
+    #1 main bench/jitprofile.c:25 (before-jitprofile+0x11ee) (BuildId: 3901475d69bca40bda720700ea6e34679623f6d2)
+
+SUMMARY: ThreadSanitizer: data race /workspace/faster-malloc/work/sanitizers/probes/before-jit-namespaced.c:487 in fm_sample
+==================
+[jit] distribution too diverse -- stepping aside
+ThreadSanitizer: reported 2 warnings
+jitprofile ok (8 threads, 800000 allocations)
+
+=== after-jit-tsan-build (exit 0) ===
+
+=== after-jitprofile-build (exit 0) ===
+
+=== after-jitprofile (exit 0) ===
+[jit] distribution too diverse -- stepping aside
+jitprofile ok (8 threads, 800000 allocations)

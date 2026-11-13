@@ -1,0 +1,134 @@
+[
+  {
+    "mode": "address-static",
+    "test": "build",
+    "status": 0,
+    "seconds": 1.7
+  },
+  {
+    "mode": "address-static",
+    "test": "compile-test_basic",
+    "status": 0,
+    "seconds": 0.25
+  },
+  {
+    "mode": "address-static",
+    "test": "compile-stress",
+    "status": 0,
+    "seconds": 0.24
+  },
+  {
+    "mode": "address-static",
+    "test": "compile-check",
+    "status": 0,
+    "seconds": 0.1
+  },
+  {
+    "mode": "address-static",
+    "test": "compile-mt",
+    "status": 0,
+    "seconds": 0.11
+  },
+  {
+    "mode": "address-static",
+    "test": "compile-realloccache",
+    "status": 0,
+    "seconds": 0.08
+  },
+  {
+    "mode": "address-static",
+    "test": "compile-idlefork",
+    "status": 0,
+    "seconds": 0.15
+  },
+  {
+    "mode": "address-static",
+    "test": "basic",
+    "status": 1,
+    "seconds": 1.26
+  },
+  {
+    "mode": "address-static",
+    "test": "basic-balanced",
+    "status": 1,
+    "seconds": 0.54
+  },
+  {
+    "mode": "address-static",
+    "test": "basic-throughput",
+    "status": 1,
+    "seconds": 1.54
+  },
+  {
+    "mode": "address-static",
+    "test": "basic-footprint",
+    "status": 1,
+    "seconds": 0.52
+  },
+  {
+    "mode": "address-static",
+    "test": "stress-1",
+    "status": 0,
+    "seconds": 5.49
+  },
+  {
+    "mode": "address-static",
+    "test": "stress-2",
+    "status": 0,
+    "seconds": 8.57
+  },
+  {
+    "mode": "address-static",
+    "test": "stress-3",
+    "status": 0,
+    "seconds": 5.03
+  },
+  {
+    "mode": "address-static",
+    "test": "check",
+    "status": 0,
+    "seconds": 0.26
+  },
+  {
+    "mode": "address-static",
+    "test": "mt-0",
+    "status": 0,
+    "seconds": 0.04
+  },
+  {
+    "mode": "address-static",
+    "test": "realloccache-0",
+    "status": 0,
+    "seconds": 0.02
+  },
+  {
+    "mode": "address-static",
+    "test": "idlefork-0",
+    "status": 0,
+    "seconds": 9.54
+  },
+  {
+    "mode": "address-static",
+    "test": "mt-1",
+    "status": 0,
+    "seconds": 0.02
+  },
+  {
+    "mode": "address-static",
+    "test": "realloccache-1",
+    "status": 0,
+    "seconds": 0.01
+  },
+  {
+    "mode": "address-static",
+    "test": "idlefork-1",
+    "status": 0,
+    "seconds": 9.38
+  },
+  {
+    "mode": "address-static",
+    "test": "both-basic",
+    "status": 1,
+    "seconds": 2.23
+  }
+]

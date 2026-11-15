@@ -235,6 +235,24 @@ static _Atomic(FM_Batch *) fm_batch_global_head;
 extern __thread void *fm_lcache_head[FM_LCACHE_BUCKETS]
     __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));
+/* Large-block cache hotness (ADR 0011 follow-up): the cache pays off
+ * only for sizes the workload allocates again soon; a bucket that
+ * keeps receiving frees with no allocation in between (a one-shot
+ * teardown, like the large half of a free-everything benchmark) is
+ * pure resident retention.  fm_ltick counts this thread's large
+ * FREES; fm_lbucket_seen[b] is the tick of the last allocation search
+ * that touched bucket b.  A free caches only while fewer than
+ * FM_LCACHE_HOT_WINDOW large frees have passed since that bucket was
+ * last allocated from -- cycling workloads re-stamp it on every
+ * allocation and never leave the window, teardowns fall out of it
+ * after FM_LCACHE_HOT_WINDOW frees and unmapping resumes.  Buckets
+ * start seen-at-0 with the tick at 0: the very first free of a fresh
+ * bucket is always cached, so seeding a cycle still works.  All state
+ * is per-thread, so this is race-free. */
+#define FM_LCACHE_HOT_WINDOW 8u
+extern __thread uint32_t fm_ltick __attribute__((tls_model("initial-exec")));
+extern __thread uint32_t fm_lbucket_seen[FM_LCACHE_BUCKETS]
+    __attribute__((tls_model("initial-exec")));
 
 /* Batch count field: block count in the low bits; the top bit marks a
  * span-pure batch (every block from one span).  A count of 0 means
@@ -1847,11 +1865,13 @@ static inline size_t fm_large_usable(const FM_Span *sp)
 
 static inline void fm_large_free(FM_Span *sp, void *p)
 {
+    fm_ltick++;
     if (sp->align == 0 && (uintptr_t)p == (uintptr_t)sp + HEADER_SIZE) {
         size_t ms = sp->map_size;
         int b = 63 - __builtin_clzll(fm_large_usable(sp));
         if (b < FM_LCACHE_BUCKETS &&
-            fm_lcache_bytes + ms <= FM_CFG()->lcache_max_bytes) {
+            fm_lcache_bytes + ms <= FM_CFG()->lcache_max_bytes &&
+            fm_ltick - fm_lbucket_seen[b] <= FM_LCACHE_HOT_WINDOW) {
             sp->lnext = (uintptr_t)fm_lcache_head[b];
             fm_lcache_head[b] = sp;
             fm_lcache_bytes += ms;
@@ -1889,6 +1909,10 @@ __attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *z
     fm_arm_thread_exit();
     size_t need_map = FM_ALIGN_UP(size + HEADER_SIZE, FM_PAGE_SIZE);
     int nb = 63 - __builtin_clzll(need_map);
+    if (nb < FM_LCACHE_BUCKETS)
+        fm_lbucket_seen[nb] = fm_ltick;
+    if (nb + 1 < FM_LCACHE_BUCKETS)
+        fm_lbucket_seen[nb + 1] = fm_ltick;
     /* Search the need's own bucket, then the next one up: a block's
      * usable length can spill one bucket above its request size
      * because of the untrimmed head slack. Opt-in realloc growth

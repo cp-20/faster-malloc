@@ -71,3 +71,16 @@ mark were recorded when the work was done.
 | [0058](0058-cold-large-cache-payload-purge.md) | Cold large-cache payload purge | Rejected: guard regression |
 | [0060](0060-smaller-first-span.md) | Smaller first span per class | Accepted for static v2 |
 | [0061](0061-smaller-first-span-jit-rejected.md) | Smaller first span in JIT | Rejected: pooled KV churn signal |
+| [0062](0062-flush-time-span-pure-splitting.md) | Flush-time span-pure splitting of mixed TLS lists | Rejected: Ir/op regression on retain/cross/mixed |
+| [0063](0063-census-known-count-mixed-batches.md) | Census handling of known-count mixed batches | Rejected: weakens death proof or unsafe |
+| [0064](0064-census-walk-cost-reductions.md) | Census walk-cost reductions: histogram, qsort skip | Rejected: overflow double-walk; spill order load-bearing |
+| [0065](0065-free-refill-side-purity-probes.md) | Free/refill-side span-purity and ordering probes | Rejected: no all-metric win, Ir cost in churn modes |
+| [0066](0066-per-span-in-central-count.md) | Per-span in-central count with header union overlay | Abandoned: proof needs detached-stack scope; cost unremoved |
+| [0067](0067-regroup-prompt-depth-gate.md) | Regroup prompt depth gate | Rejected: pages collapse; no interleaved win |
+| [0068](0068-chain-free-bump-handout.md) | Chain-free bump hand-out | Rejected pending ADR 0069: trades locality for Ir/RSS |
+| [0069](0069-fused-census-pass.md) | Fused census pass (count + chain + cover) | Unresolved: block-accounting identity bug; design notes kept |
+| [0070](0070-rejected-microprobes-and-diagnostics.md) | Rejected micro-probes and diagnostics | Rejected/diagnostic: prefetch hints, config probes, corruption-classified attempts |
+| [0071](0071-depth-adaptive-regroup-census.md) | Depth-adaptive regroup-only census for shallow stacks | Accepted (667cf2e) |
+| [0072](0072-batch-pool-leak-and-fragmentation-prompt.md) | Batch-pool leak fix and fragmentation regroup prompt | Accepted (ebc8593) |
+| [0073](0073-census-slot-prefetch.md) | Prefetch census slots in census/rebuild walks | Accepted (51936cf) |
+| [0074](0074-large-cache-hot-window.md) | Large-block cache hot window (teardown detection) | Accepted (cb178ee) |

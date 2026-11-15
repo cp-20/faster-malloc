@@ -309,6 +309,7 @@ typedef struct FM_Config {
     uint32_t release_max_interval_ms;
     uint32_t release_walk_div;
     uint32_t regroup_min;
+    uint32_t regroup_only_depth;
     uint64_t lcache_max_bytes;
     uint32_t page_purge;
     uint32_t purge_min_pages;
@@ -329,6 +330,7 @@ static void fm_config_init(void)
     c.release_max_interval_ms = FM_RELEASE_MAX_INTERVAL_MS;
     c.release_walk_div = 100;
     c.regroup_min = FM_REGROUP_MIN;
+    c.regroup_only_depth = 32;
     c.lcache_max_bytes = FM_LCACHE_MAX_BYTES;
     c.page_purge = 1;
     c.purge_min_pages = 4;
@@ -374,6 +376,7 @@ static void fm_config_init(void)
         { "FM_RELEASE_MAX_INTERVAL_MS", &c.release_max_interval_ms, 1, 3600000 },
         { "FM_RELEASE_WALK_DIV", &c.release_walk_div, 1, 1000000 },
         { "FM_REGROUP_MIN", &c.regroup_min, 1, 4096 },
+        { "FM_REGROUP_ONLY_DEPTH", &c.regroup_only_depth, 0, 65536 },
         { "FM_PAGE_PURGE", &c.page_purge, 0, 1 },
         { "FM_PURGE_MIN_PAGES", &c.purge_min_pages, 1, 15 },
         { "FM_IDLE_RELEASE", &c.idle_release, 0, 1 },
@@ -1593,7 +1596,11 @@ static void fm_release_maybe(uint32_t cls, uint32_t now)
             return;
     }
     atomic_store_explicit(&c->last_census_ms, now, memory_order_relaxed);
-    size_t released = fm_trim_class(cls, cfg->release_keep, 0);
+    /* Depth-adaptive: shallow stacks regroup cheaply; deep stacks run
+     * the full release census (mark/purge/unmap) as before. */
+    uint32_t depth = atomic_load_explicit(&c->depth, memory_order_relaxed);
+    int mode = depth <= cfg->regroup_only_depth ? 2 : 0;
+    size_t released = fm_trim_class(cls, cfg->release_keep, mode);
     uint32_t next = fm_census_walked / cfg->release_walk_div;
     if (next < cfg->release_interval_ms)
         next = cfg->release_interval_ms;

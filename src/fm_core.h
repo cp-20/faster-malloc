@@ -1084,9 +1084,22 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
         if (cnt && (b->count & FM_COUNT_PURE)) {
             fm_census_add(&cen, (uintptr_t)b->head & SPAN_MASK, cnt);
         } else {
-            for (void *p = b->head; p; p = *(void **)p) {
-                fm_census_walked++;
-                fm_census_add(&cen, (uintptr_t)p & SPAN_MASK, 1);
+            /* Serial pointer chase: overlap the census slot's first
+             * touch with the chain hop by prefetching the NEXT block's
+             * slot one step ahead (the slot index is computable from
+             * the link word without loading the span header). */
+            void *p = b->head;
+            if (p) {
+                __builtin_prefetch(&cen.ents[(((uintptr_t)p >> 16)) &
+                                             (cen.cap - 1)], 1, 1);
+                for (; p; p = *(void **)p) {
+                    void *nx = *(void **)p;
+                    if (nx)
+                        __builtin_prefetch(&cen.ents[(((uintptr_t)nx >> 16)) &
+                                                     (cen.cap - 1)], 1, 1);
+                    fm_census_walked++;
+                    fm_census_add(&cen, (uintptr_t)p & SPAN_MASK, 1);
+                }
             }
         }
     }
@@ -1404,8 +1417,14 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             }
         } else {
             void *p = b->head;
+            if (p)
+                __builtin_prefetch(&cen.ents[(((uintptr_t)p >> 16)) &
+                                             (cen.cap - 1)], 1, 1);
             while (p) {
                 void *nx = *(void **)p;
+                if (nx)
+                    __builtin_prefetch(&cen.ents[(((uintptr_t)nx >> 16)) &
+                                                 (cen.cap - 1)], 1, 1);
                 FM_CensusEnt *e = fm_census_find(&cen, (uintptr_t)p & SPAN_MASK);
                 if (e && e->dead) {
                     /* block dies with its span */

@@ -460,11 +460,16 @@ static inline FM_Batch *fm_batch_alloc(void)
                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (page == MAP_FAILED)
         return NULL;
+
     FM_Batch *first = (FM_Batch *)page;
     for (int i = 0; i < 127; i++)
         first[i].next = &first[i + 1];
     first[127].next = NULL;
-    fm_batch_pool = &first[127];
+    /* fm_batch_pool must chain ALL spare headers: pointing it at
+     * first[127] (next == NULL) orphaned first[1..126] -- 126 headers
+     * leaked per page the moment recycling was exhausted, which flush
+     * splitting does in pure-free churn. */
+    fm_batch_pool = &first[1];
     return &first[0];
 }
 
@@ -1587,10 +1592,24 @@ static void fm_release_maybe(uint32_t cls, uint32_t now)
     int time_ok = (!last || (uint32_t)(now - last) >=
                                (interval ? interval : cfg->release_interval_ms));
     if (!time_ok) {
-        /* Regroup promptly when uncharacterised batches pile up.
-         * Rate-limit to bound cost in contention-heavy phases. */
+        /* Regroup promptly when uncharacterised batches pile up (the
+         * historical trigger) or when the stack fragments into many
+         * small span-pure batches: flush-time splitting (ADR 0024)
+         * publishes one chain per span per flush, so a churn loop can
+         * stack thousands of tiny same-set batches whose refill-time
+         * consumption sprays across every span.  Rate-limit both to
+         * bound cost in contention-heavy phases. */
         FM_Batch *h = atomic_load_explicit(&c->head, memory_order_relaxed);
-        if (!h || (h->count & FM_COUNT_MASK) != 0)
+        uint32_t hd = atomic_load_explicit(&c->depth, memory_order_relaxed);
+        uint32_t hc = h ? (h->count & FM_COUNT_MASK) : 0;
+        int unchar = h && hc == 0;
+        /* Fragmented stack: many small characterized batches piled up
+         * (flush-time churn) -- refills would pop tiny batches and
+         * spray.  A regrouped stack's head is its LARGEST chain, so a
+         * small head batch is the fragmentation signature; big-head
+         * stacks (deep regrouped or DOM-style churn) skip this. */
+        int frag = h && hc != 0 && hc < 32 && hd >= 64;
+        if (!unchar && !frag)
             return;
         if ((fm_flush_seq[cls] & (FM_RELEASE_EVERY * 8 - 1)) != 0)
             return;

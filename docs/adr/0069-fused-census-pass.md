@@ -1,10 +1,11 @@
 # 0069 — Fused census pass (count + chain + cover in one walk)
 
-Status: Unresolved, reverted (2026-11-16). The mode-0 census walks the
-central stack three times (count mixed blocks, cover candidate spans'
-pages, rebuild/regroup). This attempt fused them into one pass and failed
-on a block-accounting invariant; the work is reverted and the design notes
-preserved here for the next attempt.
+Status: Unresolved, reverted twice (2026-11-16). Second attempt isolated the
+earlier "identity bug" to broken instrumentation, passed every block-level
+invariant, measured the best D1/locality numbers of the session, and was
+reverted only because the `FM_DEBUG` canary checks still abort with all
+invariants green. Design notes and the verified instrumentation are kept
+here.
 
 ## Design
 
@@ -53,11 +54,49 @@ the same time, which points at an entry-identity bug in the fused walk
 (re-homing, hash slot aliasing, or a stale entry pointer surviving the
 grow check) rather than at chain construction. Unresolved; reverted.
 
+## 2026-11-16 second attempt: identity bug isolated to instrumentation; new blocker
+
+Rebuilt the full design on `cb178ee` (fused count+chain+cover walk, chain
+termination after the walk, grow copies entries whole with a `c->grew`
+re-home, pure batches spliced wholesale with dead spans dropped at assembly,
+a single withhold pass per purged span that re-chains the span's chain and
+removes `pg_new_mask` blocks, assemble-side dead-chain drop). Under
+`FM_DEBUG`, per-block verification now passes:
+
+- `fm_census_add` return always matches the block's span (ADD/CHAIN
+  MISMATCH never fires); chain lengths equal `acnt` at walk end, pre-withhold,
+  and assembly; the pre-withhold block accounting (`chained + residue +
+  dead_dropped == walked + pure`) balances on every census; a per-block
+  seen-set finds no duplicate blocks inside chains or residue; the
+  end-to-end conservation probe (`after + dead + newly-withheld − reclaimed
+  == TLS + detached-stack blocks at detach`) balances on every census.
+
+With all invariants green, the **production** build passes the full battery
+(v2/jit test_basic+stress 20/20) and posts the best census-related numbers
+measured so far: cachegrind D1 locality 2,217,438 → 1,871,606 (−16%),
+loc3 1,121,321 → 950,426 (−15%), locality 24–27 ns/op (from 32–74), Ir/op
+unchanged (retain 65.9 → 65.0, others identical), trim/macros/mt/jq parity.
+
+**New blocker:** the `FM_DEBUG` canary checks still abort (`CORRUPT HEAD`)
+with canaries holding either zero (a MADV_DONTNEED'd page) or the app's user
+data. Canary=0 fits re-carved withheld blocks whose canary slots were zeroed
+by madvise — rewriting canaries in the reclaim loop fixed only part of it.
+User-data canaries mean a block was handed out while still in another list,
+but the two membership checks that would catch it (block already in the TLS
+list at free; duplicate block across rebuilt chains and residue) never fire,
+and every structural invariant above passes. The remaining suspect is an
+interaction that survives all block-level invariants — e.g. a batch whose
+recorded count still exceeds its live membership after a withhold pass, or a
+stale batch published across censuses. Unresolved; reverted.
+
 ## Next attempt
 
-Debug the identity bug with per-block instrumentation (`fm_census_add`
-return vs chain write), and consider re-deriving `e` from `fm_census_find`
-unconditionally for every block (cost: one extra hash probe per block —
-still one walk total, strictly cheaper than today's three). The design
-remains attractive: it is what makes ADR 0068's hand-out viable, and it
-removes two of the census's three walks for mixed-heavy stacks.
+The instrumentation layer is now trustworthy (all invariants green), so the
+next session should: (1) record every batch publish (`fm_publish2`,
+regroup push, residue) with its chain length and verify count == length at
+pop time to catch a stale/inflated batch header; (2) verify `sp->withheld_cnt`
+against a recomputation from `purged_mask` at every census entry; (3) if both
+hold, add a global free-set membership check (hash of all blocks in all
+lists) to catch the double-hand outside the census. The measured upside
+(−16% D1, locality 24–27 ns) is the largest single lever left for the
+locality gap.

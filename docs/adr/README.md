@@ -78,7 +78,7 @@ mark were recorded when the work was done.
 | [0066](0066-per-span-in-central-count.md) | Per-span in-central count with header union overlay | Abandoned: proof needs detached-stack scope; cost unremoved |
 | [0067](0067-regroup-prompt-depth-gate.md) | Regroup prompt depth gate | Rejected: pages collapse; no interleaved win |
 | [0068](0068-chain-free-bump-handout.md) | Chain-free bump hand-out | Rejected pending ADR 0069: trades locality for Ir/RSS |
-| [0069](0069-fused-census-pass.md) | Fused census pass (count + chain + cover) | Unresolved: block-accounting identity bug; design notes kept |
+| [0069](0069-fused-census-pass.md) | Fused census pass (count + chain + cover) | Unresolved: invariants green, best D1 measured, FM_DEBUG canary aborts remain |
 | [0070](0070-rejected-microprobes-and-diagnostics.md) | Rejected micro-probes and diagnostics | Rejected/diagnostic: prefetch hints, config probes, corruption-classified attempts |
 | [0071](0071-depth-adaptive-regroup-census.md) | Depth-adaptive regroup-only census for shallow stacks | Accepted (667cf2e) |
 | [0072](0072-batch-pool-leak-and-fragmentation-prompt.md) | Batch-pool leak fix and fragmentation regroup prompt | Accepted (ebc8593) |

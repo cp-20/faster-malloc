@@ -1,5 +1,5 @@
 CC ?= gcc
-CFLAGS ?= -O3 -g -fPIC -fno-plt -Wall -Wextra -Wno-unused-parameter -Isrc
+CFLAGS ?= -O3 -g -fPIC -fno-plt -fcf-protection=none -Wall -Wextra -Wno-unused-parameter -Isrc
 LDFLAGS ?=
 
 LIBS = libfastmalloc.so libfastmalloc2.so libjitmalloc.so

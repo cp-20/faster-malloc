@@ -18,6 +18,9 @@ FM_Central fm_central[CLASS_COUNT];
 __thread void *fm_head[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 __thread void *fm_tail[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 __thread uint32_t fm_cnt[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
+__thread char *fm_bump_ptr[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
+__thread char *fm_bump_end[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
+__thread uintptr_t fm_list_span[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 __thread int fm_exit_armed __attribute__((tls_model("initial-exec")));
 __thread FM_Batch *fm_batch_pool __attribute__((tls_model("initial-exec")));
 __thread void *fm_lcache_head[FM_LCACHE_BUCKETS] __attribute__((tls_model("initial-exec")));
@@ -29,7 +32,47 @@ void *fm_generic_malloc(size_t n) { return fm_malloc(n); }
 void *(*fm_generic_malloc_ptr)(size_t) = fm_generic_malloc;
 
 void *malloc(size_t n) { return fm_malloc(n); }
-void free(void *p) { fm_free(p); }
+
+__attribute__((noinline, cold)) static void fm_free_slow_large(FM_Span *sp, void *p)
+{
+    fm_large_free(sp, p);
+}
+
+void free(void *p)
+{
+    if (!p)
+        return;
+    if (__builtin_expect(((uintptr_t)p & (SPAN_SIZE - 1)) == 0, 0)) {
+        if (fm_is_aligned_ptr(p)) {
+            const FM_Span *sp = (const FM_Span *)((const char *)p - HEADER_SIZE);
+            munmap((void *)sp->map_base, sp->map_size);
+            return;
+        }
+    }
+    FM_Span *sp = (FM_Span *)((uintptr_t)p & SPAN_MASK);
+    uint32_t cls32 = sp->cls;
+    if (__builtin_expect(cls32 == LARGE_CLASS, 0)) {
+        fm_free_slow_large(sp, p);
+        return;
+    }
+    size_t cls = cls32;
+    void *old_h = fm_head[cls];
+    *(void **)p = old_h;
+    fm_head[cls] = p;
+    if (__builtin_expect(!old_h, 0)) {
+        fm_tail[cls] = p;
+        fm_list_span[cls] = (uintptr_t)sp & SPAN_MASK;
+    } else if (fm_list_span[cls] && fm_list_span[cls] != ((uintptr_t)sp & SPAN_MASK)) {
+        fm_list_span[cls] = 0;
+    }
+    uint32_t cnt = fm_cnt[cls];
+    if (__builtin_expect(cnt == 0, 0))
+        cnt = kClassLimit[cls];
+    cnt--;
+    fm_cnt[cls] = cnt;
+    if (__builtin_expect(cnt == 0, 0))
+        fm_flush_bin(cls32);
+}
 
 void *calloc(size_t n, size_t sz)
 {

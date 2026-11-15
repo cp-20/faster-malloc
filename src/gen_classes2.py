@@ -6,24 +6,22 @@ Class numbering
 The class index is chosen so that the *common* dispatch needs no
 correction at all:
 
-    class = (size + 15) >> 4        for size <= 512
+    class = (size + 15) >> 4        for size <= 1024
 
 Class 0 exists only to serve a request for 0 bytes; class c >= 1 serves the
-sizes (16*(c-1), 16*c].  Above 512 the ladder coarsens and a byte lookup
+sizes (16*(c-1), 16*c].  Above 1024 the ladder coarsens and a byte lookup
 table is used.
 
 The ladder (all sizes are multiples of 16, so every returned pointer is
 16-byte aligned as the C standard requires):
 
-    16 .. 128    step 16    ->  8 classes   (idx  1..8)
-    144 .. 512   step 16    -> 24 classes   (idx  9..32)
-    544 .. 1024  step 32    -> 16 classes   (idx 33..48)
-    1088 .. 2048 step 64    -> 16 classes   (idx 49..64)
-    2176 .. 4096 step 128   -> 16 classes   (idx 65..80)
-    4352 .. 8192 step 256   -> 16 classes   (idx 81..96)
-    8704 .. 16384 step 512  -> 16 classes   (idx 97..112)
-    17408 .. 32768 step 1024-> 16 classes   (idx 113..128)
-    = 129 classes in total (index 0 is the size-0 class)
+    16 .. 1024   step 16    -> 64 classes   (idx  1..64)
+    1088 .. 2048 step 64    -> 16 classes   (idx 65..80)
+    2176 .. 4096 step 128   -> 16 classes   (idx 81..96)
+    4352 .. 8192 step 256   -> 16 classes   (idx 97..112)
+    8704 .. 16384 step 512  -> 16 classes   (idx 113..128)
+    17408 .. 32768 step 1024-> 16 classes   (idx 129..144)
+    = 145 classes in total (index 0 is the size-0 class)
 """
 import os
 import sys
@@ -31,12 +29,10 @@ import sys
 SMALL_MAX = 32768
 HEADER = 64
 SPAN = 65536
-ARITH_MAX = 512
+ARITH_MAX = 1024
 
 SEGMENTS = [
-    (16, 16, 128),
-    (16, 144, 512),
-    (32, 544, 1024),
+    (16, 16, 1024),
     (64, 1088, 2048),
     (128, 2176, 4096),
     (256, 4352, 8192),

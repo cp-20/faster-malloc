@@ -51,6 +51,10 @@
  *   FM_JIT_DEBUG=1      report the compiled specialisation
  */
 #define _GNU_SOURCE
+/* JIT specialises dispatch with baked-in TLS displacements; the load-time
+ * GOT->immediate patch is unnecessary and its .text scan can hit template
+ * bytes, so the static-v2-only optimisation is disabled here. */
+#define FM_NO_TLS_PATCH 1
 #include <errno.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -92,6 +96,9 @@ FM_Central fm_central[CLASS_COUNT];
 __thread void *fm_head[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 __thread void *fm_tail[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 __thread uint32_t fm_cnt[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
+__thread char *fm_bump_ptr[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
+__thread char *fm_bump_end[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
+__thread uintptr_t fm_list_span[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 __thread int fm_exit_armed __attribute__((tls_model("initial-exec")));
 __thread FM_Batch *fm_batch_pool __attribute__((tls_model("initial-exec")));
 __thread void *fm_lcache_head[FM_LCACHE_BUCKETS] __attribute__((tls_model("initial-exec")));
@@ -536,6 +543,11 @@ __asm__(
 /* exported API                                                        */
 /* ------------------------------------------------------------------ */
 
+__attribute__((noinline, cold)) static void fm_free_slow_large(FM_Span *sp, void *p)
+{
+    fm_large_free(sp, p);
+}
+
 void free(void *p)
 {
     if (!p)
@@ -548,22 +560,28 @@ void free(void *p)
         }
     }
     FM_Span *sp = (FM_Span *)((uintptr_t)p & SPAN_MASK);
-    uint32_t cls = sp->cls;
-    if (__builtin_expect(cls != LARGE_CLASS, 1)) {
-        void *old = fm_head[cls];
-        *(void **)p = old;
-#ifdef FM_DEBUG
-        /* The core's realloc path checks the same free-block canary. */
-        ((uint64_t *)p)[1] = 0xDEADDEADDEADDEADull;
-#endif
-        fm_head[cls] = p;
-        if (!old)
-            fm_tail[cls] = p;
-        if (++fm_cnt[cls] >= kClassLimit[cls])
-            fm_flush_bin(cls);
-    } else {
-        fm_large_free(sp, p);
+    uint32_t cls32 = sp->cls;
+    if (__builtin_expect(cls32 == LARGE_CLASS, 0)) {
+        fm_free_slow_large(sp, p);
+        return;
     }
+    size_t cls = cls32;
+    void *old_h = fm_head[cls];
+    *(void **)p = old_h;
+    fm_head[cls] = p;
+    if (__builtin_expect(!old_h, 0)) {
+        fm_tail[cls] = p;
+        fm_list_span[cls] = (uintptr_t)sp & SPAN_MASK;
+    } else if (fm_list_span[cls] && fm_list_span[cls] != ((uintptr_t)sp & SPAN_MASK)) {
+        fm_list_span[cls] = 0;
+    }
+    uint32_t cnt = fm_cnt[cls];
+    if (__builtin_expect(cnt == 0, 0))
+        cnt = kClassLimit[cls];
+    cnt--;
+    fm_cnt[cls] = cnt;
+    if (__builtin_expect(cnt == 0, 0))
+        fm_flush_bin(cls32);
 }
 
 void *calloc(size_t n, size_t sz)

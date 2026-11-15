@@ -39,12 +39,13 @@
  *
  * Counting
  * --------
- * fm_cnt[c] counts the frees performed on class c since the last refill or
- * flush.  It is *not* the length of the local list: mallocs pop from the
- * list without touching it, which keeps the allocation fast path down to a
- * single dependent load.  The count is used only to decide when to flush.
- * Because a flush publishes the whole list rather than "count" blocks, the
- * two never have to agree.
+ * fm_cnt[c] is the number of frees that may still be absorbed locally
+ * before the list must be flushed (it counts down from kClassLimit[c] on
+ * each free and is reset to kClassLimit[c] on refill/flush).  It is *not*
+ * the length of the local list: mallocs pop without touching it, so the
+ * allocation fast path stays a single dependent load and the free fast path
+ * avoids loading the class limit.  Because a flush publishes the whole list
+ * rather than "count" blocks, the counter never has to agree with length.
  *
  * Hot-path layout
  * ----------------
@@ -86,6 +87,9 @@ static inline void *fm_malloc(size_t size);
 extern __thread void *fm_head[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 extern __thread void *fm_tail[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 extern __thread uint32_t fm_cnt[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
+extern __thread char *fm_bump_ptr[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
+extern __thread char *fm_bump_end[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
+extern __thread uintptr_t fm_list_span[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 /* Exit hook state: 0 = not armed, 1 = armed, 2 = destructor running (disarmed). */
 extern __thread int fm_exit_armed __attribute__((tls_model("initial-exec")));
 
@@ -215,6 +219,7 @@ static void fm_stack_resume(void)
 extern __thread uint32_t fm_flush_seq[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 extern __thread int fm_in_census __attribute__((tls_model("initial-exec")));
 extern __thread FM_Batch *fm_batch_pool __attribute__((tls_model("initial-exec")));
+static _Atomic(FM_Batch *) fm_batch_global_head;
 
 /* Large-block cache (ADR 0011): per-thread cache of freed large blocks,
  * bucketed by the highest set bit of the mapping size, so a cached block
@@ -438,6 +443,16 @@ static inline FM_Batch *fm_batch_alloc(void)
         b->next = NULL;
         return b;
     }
+    /* Try global freelist (cross-thread recycling). */
+    b = atomic_load_explicit(&fm_batch_global_head, memory_order_acquire);
+    while (b) {
+        FM_Batch *next = b->next;
+        if (atomic_compare_exchange_weak_explicit(&fm_batch_global_head, &b, next,
+                    memory_order_acq_rel, memory_order_acquire)) {
+            b->next = NULL;
+            return b;
+        }
+    }
     char *page = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (page == MAP_FAILED)
@@ -452,8 +467,11 @@ static inline FM_Batch *fm_batch_alloc(void)
 
 static inline void fm_batch_release(FM_Batch *b)
 {
-    b->next = fm_batch_pool;
-    fm_batch_pool = b;
+    FM_Batch *old = atomic_load_explicit(&fm_batch_global_head, memory_order_relaxed);
+    do {
+        b->next = old;
+    } while (!atomic_compare_exchange_weak_explicit(&fm_batch_global_head, &old, b,
+                memory_order_release, memory_order_relaxed));
 }
 
 /* ------------------------------------------------------------------ */
@@ -531,15 +549,16 @@ static inline char *fm_map_aligned(size_t bytes)
     return (char *)base;
 }
 
-/* Carve a fresh span of the given class into a linked list of blocks, in
- * ascending address order. */
-static inline void *fm_span_new(uint32_t cls, void **tail_out, uint32_t *count_out)
+/* Map and initialise a fresh span for class cls.  Blocks are carved
+ * lazily from the span's bump range by the refill path, so creation
+ * does not touch every block's memory. */
+static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
 {
     size_t bs = kClassSize[cls];
     size_t bytes = SPAN_SIZE;
 #ifdef FM_SMALL_FIRST_SPAN
-    /* ADR 0060: sparsely used startup classes need no full-span free list.
-     * Grow subsequent spans normally; the atomic only runs on fresh spans. */
+    /* ADR 0060: sparsely used startup classes need no full span.
+     * Grow subsequent spans normally; the atomic only runs once. */
     static _Atomic unsigned char started[CLASS_COUNT];
     bytes = atomic_exchange_explicit(&started[cls], 1, memory_order_relaxed)
         ? SPAN_SIZE : FM_ALIGN_UP(HEADER_SIZE + (bs > 16320 ? bs : 16320), FM_PAGE_SIZE);
@@ -562,25 +581,8 @@ static inline void *fm_span_new(uint32_t cls, void **tail_out, uint32_t *count_o
     sp->purged_mask = 0;
     sp->withheld_cnt = 0;
 
-    char *p = base + HEADER_SIZE;
-    void *head = p;
-    void *tail = p;
-    for (size_t i = 1; i < n; i++) {
-        void *prev = tail;
-        tail = (char *)tail + bs;
-        *(void **)prev = tail;
-    }
-    *(void **)tail = NULL;
-#ifdef FM_DEBUG
-    for (size_t i = 0; i < n; i++)
-        ((uint64_t *)((char *)head + i * bs))[1] = 0xDEADDEADDEADDEADull;
-#endif
-
-    if (tail_out)
-        *tail_out = tail;
-    if (count_out)
-        *count_out = (uint32_t)n;
-    return head;
+    *count_out = (uint32_t)n;
+    return base;
 }
 
 /* ------------------------------------------------------------------ */
@@ -639,8 +641,12 @@ __attribute__((noinline)) void *fm_refill_class(uint32_t cls)
         if (b) {
             /* A span-pure batch going back into service witnesses
              * its span alive: cancel any dead mark (ADR 0020). */
-            if ((b->count & FM_COUNT_MASK) && (b->count & FM_COUNT_PURE))
+            if ((b->count & FM_COUNT_MASK) && (b->count & FM_COUNT_PURE)) {
                 ((FM_Span *)((uintptr_t)b->head & SPAN_MASK))->dead_mark = 0;
+                fm_list_span[cls] = (uintptr_t)b->head & SPAN_MASK;
+            } else {
+                fm_list_span[cls] = 0; /* unknown/mixed */
+            }
             fm_head[cls] = b->head;
             fm_tail[cls] = b->tail;
             fm_batch_release(b);
@@ -650,31 +656,84 @@ __attribute__((noinline)) void *fm_refill_class(uint32_t cls)
         }
     }
 
-    /* Central list is empty: cut a fresh span.  Keep a limit's worth here
-     * and publish the rest for other threads to use. */
-    void *tail = NULL;
-    uint32_t total = 0;
-    void *head = fm_span_new(cls, &tail, &total);
-    if (!head)
-        return NULL;
+    /* Central list is empty: carve from this class's bump range, or
+     * map a fresh span and bump-carve sequentially from it. */
+    size_t bs = kClassSize[cls];
+    char *cur = fm_bump_ptr[cls];
+    char *end = fm_bump_end[cls];
+    if (cur >= end) {
+        uint32_t total = 0;
+        char *base = fm_span_new(cls, &total);
+        if (!base)
+            return NULL;
+        cur = base + HEADER_SIZE;
+        end = cur + (size_t)total * bs;
+        uint32_t avail0 = (uint32_t)((end - cur) / bs);
+        uint32_t keep0 = limit < avail0 ? limit : avail0;
 
-    uint32_t keep = limit < total ? limit : total;
-    void *t = head;
-    for (uint32_t i = 1; i < keep; i++)
-        t = *(void **)t;
-    void *rest = *(void **)t;
+        void *head = cur;
+        void *t = cur;
+        for (uint32_t i = 1; i < keep0; i++) {
+            void *next = (char *)t + bs;
+            *(void **)t = next;
+            t = next;
+        }
+        *(void **)t = NULL;
+#ifdef FM_DEBUG
+        for (uint32_t i = 0; i < keep0; i++)
+            ((uint64_t *)(cur + (size_t)i * bs))[1] = 0xDEADDEADDEADDEADull;
+#endif
+        fm_head[cls] = head;
+        fm_tail[cls] = t;
+        fm_cnt[cls] = kClassLimit[cls];
+        fm_list_span[cls] = (uintptr_t)base & SPAN_MASK;
+
+        char *rest_cur = cur + (size_t)keep0 * bs;
+        if (avail0 > keep0) {
+            /* Publish remainder as span-pure batch for reuse. */
+            uint32_t rcount = avail0 - keep0;
+            void *rhead = rest_cur;
+            void *rt = rest_cur;
+            for (uint32_t i = 1; i < rcount; i++) {
+                void *next = (char *)rt + bs;
+                *(void **)rt = next;
+                rt = next;
+            }
+            *(void **)rt = NULL;
+#ifdef FM_DEBUG
+            for (uint32_t i = 0; i < rcount; i++)
+                ((uint64_t *)(rest_cur + (size_t)i * bs))[1] = 0xDEADDEADDEADDEADull;
+#endif
+            fm_publish2(rhead, rt, cls, rcount, 1);
+        }
+        fm_bump_ptr[cls] = end;
+        fm_bump_end[cls] = end;
+
+        void *p = fm_head[cls];
+        fm_head[cls] = *(void **)p;
+        return p;
+    }
+    uint32_t avail = (uint32_t)((end - cur) / bs);
+    uint32_t keep = limit < avail ? limit : avail;
+
+    void *head = cur;
+    void *t = cur;
+    for (uint32_t i = 1; i < keep; i++) {
+        void *next = (char *)t + bs;
+        *(void **)t = next;
+        t = next;
+    }
     *(void **)t = NULL;
+#ifdef FM_DEBUG
+    for (uint32_t i = 0; i < keep; i++)
+        ((uint64_t *)(cur + (size_t)i * bs))[1] = 0xDEADDEADDEADDEADull;
+#endif
+    fm_bump_ptr[cls] = cur + (size_t)keep * bs;
 
     fm_head[cls] = head;
     fm_tail[cls] = t;
-    fm_cnt[cls] = 0;
-
-    if (total > keep) {
-        /* The rest of the fresh span is one span-pure group with a
-         * known count -- recorded on the batch (ADR 0015), which is
-         * what lets the trim census account for it without walking. */
-        fm_publish2(rest, tail, cls, total - keep, 1);
-    }
+    fm_cnt[cls] = kClassLimit[cls];
+    fm_list_span[cls] = (uintptr_t)head & SPAN_MASK;
 
     void *p = fm_head[cls];
     fm_head[cls] = *(void **)p;
@@ -712,16 +771,18 @@ __attribute__((noinline)) static void fm_flush_bin(uint32_t cls)
     void *t = fm_tail[cls];
     fm_head[cls] = NULL;
     fm_tail[cls] = NULL;
-    fm_cnt[cls] = 0;
+    uintptr_t lspan = fm_list_span[cls];
+    fm_list_span[cls] = 0;
+    fm_cnt[cls] = kClassLimit[cls];
     if (!h)
         return;
-    /* Publish the whole list in free order, as before
-     * ADR 0014: grouping this list by span was implemented and
-     * measured, and the walk cost more than the locality it bought
-     * (see the ADR).  The count is not recorded -- computing it
-     * would need the walk -- so the trim census walks these batches,
-     * which is fine: trim is allowed to be slow. */
-    fm_publish2(h, t, cls, 0, 0);
+    if (lspan) {
+        uint32_t count = 1;
+        for (void *c = *(void **)h; c; c = *(void **)c) count++;
+        fm_publish2(h, t, cls, count, 1);
+    } else {
+        fm_publish2(h, t, cls, 0, 0);
+    }
 
     /* Automatic span release (ADR 0020): every FM_RELEASE_EVERY
      * flushes of this class, offer the release machinery a tick.
@@ -1480,15 +1541,18 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             res_cnt += e->acnt;
         }
     }
-    if (order) {
-        qsort(order, norder, sizeof(FM_Batch *), fm_batch_count_desc);
-        for (size_t i = 0; i < norder; i++)
-            fm_central_push(cls, order[i]);
-        munmap(order, cen.used * sizeof(FM_Batch *));
-    }
+    /* Locality-biased rebuild: place mixed residue deepest and the
+     * largest span-pure batches on top so refills consume long runs
+     * from one span before touching other spans. */
     if (res_head) {
         *(void **)res_tail = NULL;
         fm_publish2(res_head, res_tail, cls, res_cnt, 0);
+    }
+    if (order) {
+        qsort(order, norder, sizeof(FM_Batch *), fm_batch_count_desc);
+        for (size_t i = norder; i-- > 0;)
+            fm_central_push(cls, order[i]);
+        munmap(order, cen.used * sizeof(FM_Batch *));
     }
     fm_census_destroy(&cen);
     fm_in_census = was_in_census;
@@ -1517,9 +1581,17 @@ static void fm_release_maybe(uint32_t cls, uint32_t now)
     uint32_t interval = atomic_load_explicit(&c->interval_ms,
                                               memory_order_relaxed);
     uint32_t last = atomic_load_explicit(&c->last_census_ms, memory_order_relaxed);
-    if (last && (uint32_t)(now - last) <
-                    (interval ? interval : cfg->release_interval_ms))
-        return;
+    int time_ok = (!last || (uint32_t)(now - last) >=
+                               (interval ? interval : cfg->release_interval_ms));
+    if (!time_ok) {
+        /* Regroup promptly when uncharacterised batches pile up.
+         * Rate-limit to bound cost in contention-heavy phases. */
+        FM_Batch *h = atomic_load_explicit(&c->head, memory_order_relaxed);
+        if (!h || (h->count & FM_COUNT_MASK) != 0)
+            return;
+        if ((fm_flush_seq[cls] & (FM_RELEASE_EVERY * 8 - 1)) != 0)
+            return;
+    }
     atomic_store_explicit(&c->last_census_ms, now, memory_order_relaxed);
     size_t released = fm_trim_class(cls, cfg->release_keep, 0);
     uint32_t next = fm_census_walked / cfg->release_walk_div;
@@ -1678,10 +1750,10 @@ static inline size_t fm_trim_spans(void)
 /* class dispatch                                                      */
 /* ------------------------------------------------------------------ */
 
-static inline uint32_t fm_class_of(size_t size)
+static inline size_t fm_class_of(size_t size)
 {
     if (__builtin_expect(size <= ARITH_MAX, 1))
-        return (uint32_t)((size + 15) >> 4);
+        return (size_t)((size + 15) >> 4);
     if (__builtin_expect(size <= SMALL_MAX, 1))
         return kClassBig[(size + 15) >> 4];
     return LARGE_CLASS;
@@ -1948,7 +2020,7 @@ static void fm_arm_thread_exit(void)
 
 static inline void *fm_malloc(size_t size)
 {
-    uint32_t cls = fm_class_of(size);
+    size_t cls = fm_class_of(size);
     if (__builtin_expect(cls != LARGE_CLASS, 1)) {
         void *p = fm_head[cls];
         if (__builtin_expect(p != NULL, 1)) {
@@ -1992,7 +2064,9 @@ static inline void *fm_malloc(size_t size)
                 }
             }
 #endif
-            fm_head[cls] = *(void **)p;
+            void *next = *(void **)p;
+            __builtin_prefetch(next, 0, 1);
+            fm_head[cls] = next;
             return p;
         }
         return fm_refill_class(cls);
@@ -2012,15 +2086,19 @@ static inline void fm_free(void *p)
         }
     }
     FM_Span *sp = (FM_Span *)((uintptr_t)p & SPAN_MASK);
-    uint32_t cls = sp->cls;
+    uint32_t cls32 = sp->cls;
+    if (__builtin_expect(cls32 == LARGE_CLASS, 0)) {
+        fm_large_free(sp, p);
+        return;
+    }
+    size_t cls = cls32;
 #ifdef FM_DEBUG
     {
         /* The block must lie inside its span, at a block boundary of its
          * class.  If this ever fails the class mapping is inconsistent. */
         uintptr_t base = (uintptr_t)sp;
         uintptr_t off = (uintptr_t)p - (base + HEADER_SIZE);
-        if (cls != LARGE_CLASS &&
-            (off % kClassSize[cls] != 0 || off / kClassSize[cls] >= sp->nblocks)) {
+        if (off % kClassSize[cls] != 0 || off / kClassSize[cls] >= sp->nblocks) {
             fprintf(stderr,
                     "[fm] BAD BLOCK p=%p base=%p off=%lu cls=%u bs=%u "
                     "nblocks=%u\n",
@@ -2030,20 +2108,25 @@ static inline void fm_free(void *p)
         }
     }
 #endif
-    if (__builtin_expect(cls != LARGE_CLASS, 1)) {
-        void *old = fm_head[cls];
-        *(void **)p = old;
+    void *old_h = fm_head[cls];
+    *(void **)p = old_h;
 #ifdef FM_DEBUG
-        ((uint64_t *)p)[1] = 0xDEADDEADDEADDEADull;
+    ((uint64_t *)p)[1] = 0xDEADDEADDEADDEADull;
 #endif
-        fm_head[cls] = p;
-        if (!old)
-            fm_tail[cls] = p;
-        if (++fm_cnt[cls] >= kClassLimit[cls])
-            fm_flush_bin(cls);
-    } else {
-        fm_large_free(sp, p);
+    fm_head[cls] = p;
+    if (__builtin_expect(!old_h, 0)) {
+        fm_tail[cls] = p;
+        fm_list_span[cls] = (uintptr_t)sp & SPAN_MASK;
+    } else if (fm_list_span[cls] && fm_list_span[cls] != ((uintptr_t)sp & SPAN_MASK)) {
+        fm_list_span[cls] = 0;
     }
+    uint32_t cnt = fm_cnt[cls];
+    if (__builtin_expect(cnt == 0, 0))
+        cnt = kClassLimit[cls];
+    cnt--;
+    fm_cnt[cls] = cnt;
+    if (__builtin_expect(cnt == 0, 0))
+        fm_flush_bin(cls32);
 }
 
 static inline size_t fm_usable_size(void *p)
@@ -2116,5 +2199,276 @@ static inline void *fm_realloc(void *p, size_t size)
     fm_large_free(sp, p);
     return q;
 }
+
+/* ------------------------------------------------------------------ */
+/* load-time TLS displacement patching (experimental, fail-open)        */
+/* ------------------------------------------------------------------ */
+
+#ifndef FM_NO_TLS_PATCH
+
+#include <elf.h>
+#include <link.h>
+#include <stdio.h>
+
+/*
+ * malloc and free reach the thread-local free lists through the only
+ * TLS addressing form a shared library has.  The displacement of the
+ * module's static TLS block is assigned by the dynamic linker at load
+ * time, so the fast path loads it from a GOT entry that ld.so filled
+ * (R_X86_64_TPOFF64) before any code ran:
+ *
+ *     mov  disp32(%rip),%rdx        ; the GOT entry (the tpoff)
+ *     mov  %fs:(%rdx,%rcx,8),%rax   ; head of the free list
+ *
+ * By constructor time the displacement is a constant of this process,
+ * and this module's text is ours.  So: parse our own dynamic section
+ * for the TPOFF64 slots, scan our own text for the exact 7-byte load
+ * form, and rewrite every load whose GOT target is one of those slots
+ * into the same-length immediate form:
+ *
+ *     mov  $imm32,%rdx              ; sign-extended tpoff, no load
+ *
+ * The immediate is read from the already-relocated GOT slot, so the
+ * patch cannot diverge from what the load would have produced.  A
+ * candidate is rewritten only if
+ *   - its computed GOT target is exactly a TPOFF64 slot of this
+ *     module, and
+ *   - the slot's value is a plausible tpoff (negative, |v| < 2^31),
+ * and the text bytes are verified against the template before and
+ * after writing.  Anything that fails verification is left untouched:
+ * fail open to the correct, slower form.  FM_TLS_PATCH=0 disables.
+ *
+ * The patch happens in a constructor, before our threads exist (other
+ * preloaded libraries' constructors are the only theoretical race, and
+ * a 7-byte same-length overwrite is the smallest such window x86
+ * offers).  v1 keeps its table-driven paths and is never patched.
+ */
+
+typedef struct FM_TpPatch {
+    unsigned char *insn; /* runtime address of the 7-byte load */
+    unsigned char reg;   /* destination register (0..7, never 4) */
+    int32_t tpoff;
+} FM_TpPatch;
+
+static FM_TpPatch fm_tp_patches[64];
+static size_t fm_tp_npatches;
+
+static int fm_tp_modrm_ok(unsigned char m)
+{
+    /* mov r64, [rip+disp32]: mod=00, rm=101; reg must name a GPR that
+     * is not rsp (4). */
+    return (m & 0xC7) == 0x05 && ((m >> 3) & 7) != 4;
+}
+
+static void fm_tp_apply(void)
+{
+    for (size_t i = 0; i < fm_tp_npatches; i++) {
+        FM_TpPatch *pt = &fm_tp_patches[i];
+        uintptr_t start = (uintptr_t)pt->insn & ~(uintptr_t)0xFFF;
+        uintptr_t end = ((uintptr_t)pt->insn + 6) & ~(uintptr_t)0xFFF;
+        size_t len = end - start + 0x1000;
+        unsigned char want[7];
+        want[0] = 0x48;
+        want[1] = 0xC7;
+        want[2] = (unsigned char)(0xC0 | pt->reg);
+        want[3] = (unsigned char)(pt->tpoff & 0xFF);
+        want[4] = (unsigned char)((pt->tpoff >> 8) & 0xFF);
+        want[5] = (unsigned char)((pt->tpoff >> 16) & 0xFF);
+        want[6] = (unsigned char)((pt->tpoff >> 24) & 0xFF);
+        if (mprotect((void *)start, len, PROT_READ | PROT_WRITE) != 0)
+            return; /* fail open: the rest stay as loads */
+#ifdef FM_TP_DEBUG
+        fprintf(stderr, "[tp] apply @%p start=%p len=%zu\n", pt->insn,
+                (void *)start, len);
+#endif
+        memcpy(pt->insn, want, 7);
+#ifdef FM_TP_DEBUG
+        fprintf(stderr, "[tp] wrote ok\n");
+#endif
+        /* Verify what we just wrote; restore execute permission. */
+        if (memcmp(pt->insn, want, 7) != 0) {
+            /* Cannot happen; if it did, re-write once more and stop. */
+            memcpy(pt->insn, want, 7);
+        }
+#ifdef FM_TP_DEBUG
+        fprintf(stderr, "[tp] restoring\n");
+#endif
+        mprotect((void *)start, len, PROT_READ | PROT_EXEC);
+    }
+}
+
+static int fm_tp_in_hot(const unsigned char *insn)
+{
+    /* Only patch inside known hot entry points to avoid false positives
+     * from byte-pattern matches elsewhere in .text. */
+    static const void *fns[8];
+    static int init = 0;
+    if (!init) {
+        extern void free(void *);
+        extern void *malloc(size_t);
+        extern void *calloc(size_t, size_t);
+        extern void *realloc(void *, size_t);
+        extern void *fm_generic_malloc(size_t);
+        fns[0] = (const void *)(uintptr_t)malloc;
+        fns[1] = (const void *)(uintptr_t)free;
+        fns[2] = (const void *)(uintptr_t)calloc;
+        fns[3] = (const void *)(uintptr_t)realloc;
+        fns[4] = (const void *)(uintptr_t)fm_generic_malloc;
+        fns[5] = NULL;
+        init = 1;
+    }
+    for (int i = 0; fns[i]; i++) {
+        uintptr_t a = (uintptr_t)fns[i];
+        if ((uintptr_t)insn >= a && (uintptr_t)insn < a + 512)
+            return 1;
+    }
+    return 0;
+}
+
+static int fm_tp_scan_module(uintptr_t bias, const ElfW(Phdr) * phdr, int phnum)
+{
+    const ElfW(Dyn) *dyn = NULL;
+    const unsigned char *text = NULL;
+    size_t textsz = 0;
+
+    for (int i = 0; i < phnum; i++) {
+        if (phdr[i].p_type == PT_DYNAMIC)
+            dyn = (const ElfW(Dyn) *)(bias + phdr[i].p_vaddr);
+        else if (phdr[i].p_type == PT_LOAD && (phdr[i].p_flags & PF_X)) {
+            text = (const unsigned char *)(bias + phdr[i].p_vaddr);
+            textsz = phdr[i].p_memsz;
+        }
+    }
+    if (!dyn || !text || !textsz)
+        return 0;
+
+    uintptr_t rela = 0;
+    size_t relasz = 0;
+    uintptr_t lo = (uintptr_t)-1, hi = 0;
+    for (int i = 0; i < phnum; i++)
+        if (phdr[i].p_type == PT_LOAD) {
+            uintptr_t s = bias + phdr[i].p_vaddr;
+            if (s < lo)
+                lo = s;
+            if (s + phdr[i].p_memsz > hi)
+                hi = s + phdr[i].p_memsz;
+        }
+    for (const ElfW(Dyn) *d = dyn; d->d_tag != DT_NULL; d++) {
+        if (d->d_tag == DT_RELA) {
+            uintptr_t v = (uintptr_t)d->d_un.d_ptr;
+            /* Some loaders bias d_ptr entries in place, some do not.
+             * If the value is already a runtime address it sits inside
+             * the mapping; otherwise it is a link-time vaddr. */
+            if (v < lo || v >= hi)
+                v += bias;
+            rela = v;
+        } else if (d->d_tag == DT_RELASZ) {
+            relasz = (size_t)d->d_un.d_val;
+        }
+    }
+    if (!rela || !relasz || relasz % sizeof(ElfW(Rela)) != 0)
+        return 0;
+
+    /* Collect this module's TPOFF64 slots (its __thread variables). */
+    uintptr_t slots[32];
+    size_t nslots = 0;
+    const ElfW(Rela) *r = (const ElfW(Rela) *)rela;
+    for (size_t i = 0; i < relasz / sizeof(ElfW(Rela)); i++) {
+        if (ELF64_R_TYPE(r[i].r_info) != R_X86_64_TPOFF64)
+            continue;
+        if (nslots == sizeof(slots) / sizeof(slots[0]))
+            break;
+        slots[nslots++] = bias + (uintptr_t)r[i].r_offset;
+    }
+    if (!nslots)
+        return 0;
+#ifdef FM_TP_DEBUG
+    fprintf(stderr, "[tp] module: %zu tpoff slots, text=%p sz=%zu\n", nslots,
+            (const void *)text, textsz);
+    for (size_t s = 0; s < nslots; s++)
+        fprintf(stderr, "[tp] slot %zu = %p\n", s, (void *)slots[s]);
+#endif
+
+    const char *limenv = getenv("FM_TP_LIMIT");
+    size_t tplimit = sizeof(fm_tp_patches) / sizeof(fm_tp_patches[0]);
+    if (limenv && *limenv)
+        tplimit = (size_t)strtoull(limenv, NULL, 10);
+    for (size_t i = 0; i + 7 <= textsz; i++) {
+        if (text[i] != 0x48 || text[i + 1] != 0x8B ||
+            !fm_tp_modrm_ok(text[i + 2]))
+            continue;
+        int32_t disp = (int32_t)((uint32_t)text[i + 3] |
+                                 ((uint32_t)text[i + 4] << 8) |
+                                 ((uint32_t)text[i + 5] << 16) |
+                                 ((uint32_t)text[i + 6] << 24));
+        uintptr_t target = (uintptr_t)(text + i) + 7 + (uintptr_t)disp;
+        for (size_t s = 0; s < nslots; s++) {
+            if (slots[s] != target)
+                continue;
+            if (!fm_tp_in_hot(text + i))
+                break;
+            int64_t v = *(const volatile int64_t *)target;
+#ifdef FM_TP_DEBUG
+            fprintf(stderr, "[tp] cand i=%zu target=%p\n", i, (void *)target);
+#endif
+            /* A tpoff is negative (the TLS block sits below the thread
+             * pointer) and small; anything else is not one. */
+            if (v >= 0 || v < -(int64_t)(1u << 31))
+                break;
+            if (fm_tp_npatches >= tplimit)
+                break;
+            FM_TpPatch *pt = &fm_tp_patches[fm_tp_npatches++];
+            pt->insn = (unsigned char *)(text + i);
+            pt->reg = (unsigned char)((text[i + 2] >> 3) & 7);
+            pt->tpoff = (int32_t)v;
+            if (getenv("FM_TP_TRACE"))
+                fprintf(stderr, "[tp] pick #%zu i=%zu insn=%p reg=%u tpoff=%d tgt=%p\n",
+                        fm_tp_npatches - 1, i, pt->insn, pt->reg, pt->tpoff,
+                        (void *)target);
+            break;
+        }
+        if (fm_tp_npatches >= tplimit)
+            break;
+    }
+    if (fm_tp_npatches)
+        fm_tp_apply();
+#ifdef FM_TP_DEBUG
+    fprintf(stderr, "[tp] patched %zu loads\n", fm_tp_npatches);
+    for (size_t i = 0; i < fm_tp_npatches; i++)
+        fprintf(stderr, "[tp]   @%p reg=%u tpoff=%d\n", fm_tp_patches[i].insn,
+                fm_tp_patches[i].reg, fm_tp_patches[i].tpoff);
+#endif
+    return fm_tp_npatches != 0;
+}
+
+static int fm_tp_find_module(struct dl_phdr_info *info, size_t size, void *data)
+{
+    (void)size;
+    uintptr_t anchor = (uintptr_t)data;
+#ifdef FM_TP_DEBUG
+    fprintf(stderr, "[tp] phdr %s addr=%p anchor=%p\n", info->dlpi_name,
+            (void *)(uintptr_t)info->dlpi_addr, (void *)anchor);
+#endif
+    for (int i = 0; i < info->dlpi_phnum; i++) {
+        const ElfW(Phdr) *p = &info->dlpi_phdr[i];
+        if (p->p_type != PT_LOAD || !(p->p_flags & PF_X))
+            continue;
+        uintptr_t s = info->dlpi_addr + p->p_vaddr;
+        if (anchor >= s && anchor < s + p->p_memsz)
+            return fm_tp_scan_module(info->dlpi_addr, info->dlpi_phdr,
+                                     info->dlpi_phnum);
+    }
+    return 0;
+}
+
+__attribute__((constructor)) static void fm_tls_patch_ctor(void)
+{
+    const char *env = getenv("FM_TLS_PATCH");
+    if (env && env[0] == '0' && env[1] == 0)
+        return;
+    dl_iterate_phdr(fm_tp_find_module, (void *)(uintptr_t)&fm_tls_patch_ctor);
+}
+
+#endif /* FM_NO_TLS_PATCH */
 
 #endif /* FM_CORE_H */

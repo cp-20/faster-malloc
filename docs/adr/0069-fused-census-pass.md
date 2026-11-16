@@ -89,14 +89,52 @@ interaction that survives all block-level invariants — e.g. a batch whose
 recorded count still exceeds its live membership after a withhold pass, or a
 stale batch published across censuses. Unresolved; reverted.
 
-## Next attempt
+## 2026-11-16 third attempt: census logic formally verified, bug isolated upstream in the free path
 
-The instrumentation layer is now trustworthy (all invariants green), so the
-next session should: (1) record every batch publish (`fm_publish2`,
-regroup push, residue) with its chain length and verify count == length at
-pop time to catch a stale/inflated batch header; (2) verify `sp->withheld_cnt`
-against a recomputation from `purged_mask` at every census entry; (3) if both
-hold, add a global free-set membership check (hash of all blocks in all
-lists) to catch the double-hand outside the census. The measured upside
-(−16% D1, locality 24–27 ns) is the largest single lever left for the
-locality gap.
+The full fused design was rebuilt with an exact, formal-verification-grade
+instrumentation suite (per-span in-use bitmaps with exact hand-out/free
+membership, double-push checks, install-chain verification, span-overlap
+registry, per-census multiplicity and conservation invariants). Findings:
+
+1. **All census-internal invariants now pass** on every census of
+   test_basic: exact multiplicity (`seen + dead + newly-withheld - reclaimed
+   == walked + pure`), conservation (stack == live chains + residue), no
+   duplicate blocks across chains/residue, no in-use blocks in installed
+   batches. The earlier "identity bug" and the block-accounting failures
+   were instrumentation artifacts (dead entries with `acnt==0` skipped by
+   the first guard; a wrong `dead_drop` term double-counting dropped pure
+   batches; a residue merge that double-counted entries in `live`).
+
+2. **The real defect lives in the free-path hand-off, upstream of the
+   census.** The exact bitmap repeatedly proves that a *flush-published*
+   batch consists entirely of blocks that are currently handed out
+   (`IN-USE BLOCK ON STACK ... publisher=1 qidx=0 chain_len=12
+   inuse_in_chain=12 canary=<app fill>`), i.e. the TLS list contained
+   handed-out memory at publish time. Every list-mutation site is
+   instrumented (double-push on free, install-chain verification with
+   count-vs-length, non-inuse check on free) and none fires - so a
+   hand-out advances `fm_head` past a block whose predecessor's link was
+   left pointing at it by an earlier state of the list, and the next
+   publish's chain walk follows that stale interior link into handed-out
+   memory. The census then counts handed-out blocks as free, can prove a
+   span dead while it is in use, and unmaps it: the corruption users see.
+
+3. Root-cause fixes found and applied along the way (kept for any future
+   round): function-local `static` pools inside inlined header functions
+   must be hoisted to file scope (each inlined copy silently aliased
+   entries), and per-span side state must be dropped when a span is
+   unmapped (a reused VA inherits the previous span's bitmap otherwise).
+
+Blocked on identifying which hand-out leaves the stale interior link.
+Instrumenting the *pop* to verify the popped block is the list head (i.e.
+the TLS list is LIFO-consistent) is the next diagnostic; a non-LIFO pop
+would mean a list walk and head/tail update disagree somewhere between
+install, push and pop.
+
+The measured upside of the fused census is unchanged and large: locality
+D1 2,217,438 -> 1,871,108 (-16%), loc3 1,121,321 -> 950,177 (-15%),
+locality 22.9-26.4 ns/op (from 32-74), mt/macros/trim/jq parity or better,
+production v2/jit batteries 20/20 pass throughout. It stays rejected until
+the free-path aliasing is fixed, because the FM_DEBUG suite (10/10
+test_basic failures with the exact bitmap) is the correctness gate.
+

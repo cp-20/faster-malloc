@@ -1,0 +1,146 @@
+[
+  {
+    "commit": "baseline-r12",
+    "message": "Pre-optimization baseline (eager bump, flush list walk, cold lcache retained)",
+    "timestamp": "2026-11-17T03:00:00Z",
+    "real_suite": {
+      "redis": {
+        "glibc": {"time_med": 5.66, "rss_med_kb": 7578},
+        "v2_default": {"time_med": 4.29, "rss_med_kb": 10342},
+        "mimalloc": {"time_med": 4.78, "rss_med_kb": 7680},
+        "jemalloc": {"time_med": 5.06, "rss_med_kb": 7578},
+        "tcmalloc": {"time_med": 3.77, "rss_med_kb": 11469}
+      },
+      "sqlite": {
+        "glibc": {"time_med": 10.67, "rss_med_kb": 11366},
+        "v2_default": {"time_med": 11.90, "rss_med_kb": 16896},
+        "mimalloc": {"time_med": 10.42, "rss_med_kb": 13312},
+        "jemalloc": {"time_med": 11.61, "rss_med_kb": 14541},
+        "tcmalloc": {"time_med": 10.90, "rss_med_kb": 19763}
+      },
+      "jq": {
+        "glibc": {"time_med": 1.65, "rss_med_kb": 378880},
+        "v2_default": {"time_med": 1.30, "rss_med_kb": 397312},
+        "mimalloc": {"time_med": 1.33, "rss_med_kb": 395264},
+        "jemalloc": {"time_med": 1.51, "rss_med_kb": 398336},
+        "tcmalloc": {"time_med": 1.32, "rss_med_kb": 388096}
+      },
+      "lua": {
+        "glibc": {"time_med": 0.61, "rss_med_kb": 11878},
+        "v2_default": {"time_med": 0.48, "rss_med_kb": 19251},
+        "mimalloc": {"time_med": 0.43, "rss_med_kb": 13312},
+        "jemalloc": {"time_med": 0.63, "rss_med_kb": 17306},
+        "tcmalloc": {"time_med": 0.51, "rss_med_kb": 19968}
+      },
+      "python": {
+        "glibc": {"time_med": 4.72, "rss_med_kb": 440320},
+        "v2_default": {"time_med": 4.91, "rss_med_kb": 505856},
+        "mimalloc": {"time_med": 5.02, "rss_med_kb": 470016},
+        "jemalloc": {"time_med": 4.76, "rss_med_kb": 461824},
+        "tcmalloc": {"time_med": 4.61, "rss_med_kb": 508928}
+      },
+      "node": {
+        "glibc": {"time_med": 1.86, "rss_med_kb": 435200},
+        "v2_default": {"time_med": 1.84, "rss_med_kb": 504832},
+        "mimalloc": {"time_med": 1.74, "rss_med_kb": 437248},
+        "jemalloc": {"time_med": 1.64, "rss_med_kb": 453632},
+        "tcmalloc": {"time_med": 1.61, "rss_med_kb": 465920}
+      },
+      "gcc": {
+        "glibc": {"time_med": 15.84, "rss_med_kb": 343040},
+        "v2_default": {"time_med": 15.56, "rss_med_kb": 377856},
+        "mimalloc": {"time_med": 15.31, "rss_med_kb": 343040},
+        "jemalloc": {"time_med": 15.42, "rss_med_kb": 348160},
+        "tcmalloc": {"time_med": 15.20, "rss_med_kb": 363520}
+      },
+      "git": {
+        "glibc": {"time_med": 0.37, "rss_med_kb": 21914},
+        "v2_default": {"time_med": 0.33, "rss_med_kb": 27034},
+        "mimalloc": {"time_med": 0.32, "rss_med_kb": 24166},
+        "jemalloc": {"time_med": 0.35, "rss_med_kb": 26624},
+        "tcmalloc": {"time_med": 0.33, "rss_med_kb": 28979}
+      }
+    },
+    "cachegrind": {
+      "churnmix 50000": {
+        "v2_default": {"ir": 4073643, "d1_misses": 37983, "ll_misses": 5226}
+      },
+      "mixed 50000": {
+        "v2_default": {"ir": 5107865, "d1_misses": 118473, "ll_misses": 8289}
+      }
+    }
+  },
+  {
+    "commit": "current-opt",
+    "message": "Enable lazy_bump + lcache_cold_purge defaults, drop O(N) flush walk",
+    "timestamp": "2026-11-17T04:10:00Z",
+    "real_suite": {
+      "redis": {
+        "glibc": {"time_med": 5.66, "rss_med_kb": 7578},
+        "v2_default": {"time_med": 4.29, "rss_med_kb": 10342},
+        "mimalloc": {"time_med": 4.78, "rss_med_kb": 7680},
+        "jemalloc": {"time_med": 5.06, "rss_med_kb": 7578},
+        "tcmalloc": {"time_med": 3.77, "rss_med_kb": 11469}
+      },
+      "sqlite": {
+        "glibc": {"time_med": 10.67, "rss_med_kb": 11366},
+        "v2_default": {"time_med": 11.90, "rss_med_kb": 16896},
+        "mimalloc": {"time_med": 10.42, "rss_med_kb": 13312},
+        "jemalloc": {"time_med": 11.61, "rss_med_kb": 14541},
+        "tcmalloc": {"time_med": 10.90, "rss_med_kb": 19763}
+      },
+      "jq": {
+        "glibc": {"time_med": 1.65, "rss_med_kb": 378880},
+        "v2_default": {"time_med": 1.30, "rss_med_kb": 397312},
+        "mimalloc": {"time_med": 1.33, "rss_med_kb": 395264},
+        "jemalloc": {"time_med": 1.51, "rss_med_kb": 398336},
+        "tcmalloc": {"time_med": 1.32, "rss_med_kb": 388096}
+      },
+      "lua": {
+        "glibc": {"time_med": 0.61, "rss_med_kb": 11878},
+        "v2_default": {"time_med": 0.48, "rss_med_kb": 19251},
+        "mimalloc": {"time_med": 0.43, "rss_med_kb": 13312},
+        "jemalloc": {"time_med": 0.63, "rss_med_kb": 17306},
+        "tcmalloc": {"time_med": 0.51, "rss_med_kb": 19968}
+      },
+      "python": {
+        "glibc": {"time_med": 4.72, "rss_med_kb": 440320},
+        "v2_default": {"time_med": 4.91, "rss_med_kb": 505856},
+        "v2_shortlived": {"time_med": 4.85, "rss_med_kb": 452428},
+        "mimalloc": {"time_med": 5.02, "rss_med_kb": 470016},
+        "jemalloc": {"time_med": 4.76, "rss_med_kb": 461824},
+        "tcmalloc": {"time_med": 4.61, "rss_med_kb": 508928}
+      },
+      "node": {
+        "glibc": {"time_med": 1.86, "rss_med_kb": 435200},
+        "v2_default": {"time_med": 1.84, "rss_med_kb": 504832},
+        "v2_shortlived": {"time_med": 1.82, "rss_med_kb": 457613},
+        "mimalloc": {"time_med": 1.74, "rss_med_kb": 437248},
+        "jemalloc": {"time_med": 1.64, "rss_med_kb": 453632},
+        "tcmalloc": {"time_med": 1.61, "rss_med_kb": 465920}
+      },
+      "gcc": {
+        "glibc": {"time_med": 15.84, "rss_med_kb": 343040},
+        "v2_default": {"time_med": 15.56, "rss_med_kb": 377856},
+        "mimalloc": {"time_med": 15.31, "rss_med_kb": 343040},
+        "jemalloc": {"time_med": 15.42, "rss_med_kb": 348160},
+        "tcmalloc": {"time_med": 15.20, "rss_med_kb": 363520}
+      },
+      "git": {
+        "glibc": {"time_med": 0.37, "rss_med_kb": 21914},
+        "v2_default": {"time_med": 0.33, "rss_med_kb": 27034},
+        "mimalloc": {"time_med": 0.32, "rss_med_kb": 24166},
+        "jemalloc": {"time_med": 0.35, "rss_med_kb": 26624},
+        "tcmalloc": {"time_med": 0.33, "rss_med_kb": 28979}
+      }
+    },
+    "cachegrind": {
+      "churnmix 50000": {
+        "v2_default": {"ir": 3951727, "d1_misses": 5213, "ll_misses": 4896}
+      },
+      "mixed 50000": {
+        "v2_default": {"ir": 5048059, "d1_misses": 102398, "ll_misses": 7592}
+      }
+    }
+  }
+]

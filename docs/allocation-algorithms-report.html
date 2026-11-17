@@ -1,0 +1,1093 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>faster-malloc 割り当てアルゴリズム＆ベンチマーク徹底解説</title>
+  <style>
+    :root {
+      --bg: #0b1120;
+      --bg-elevated: #162033;
+      --bg-card: #111a2e;
+      --border: #26354d;
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-2: #818cf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+      --rose: #fb7185;
+      --code-bg: #070c17;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 270px 1fr;
+      max-width: 1380px;
+      margin: 0 auto;
+      min-height: 100vh;
+    }
+
+    aside {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 26px 18px;
+      border-right: 1px solid var(--border);
+      background: rgba(11, 17, 32, 0.96);
+    }
+
+    aside .brand {
+      font-size: 1.1rem;
+      font-weight: 800;
+      color: #fff;
+      letter-spacing: -0.01em;
+    }
+
+    aside .sub {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-bottom: 18px;
+    }
+
+    aside nav a {
+      display: block;
+      padding: 6px 10px;
+      border-radius: 6px;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      margin-bottom: 2px;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    aside nav a:hover {
+      background: var(--bg-elevated);
+      color: #fff;
+      text-decoration: none;
+    }
+
+    aside nav .section-label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #64748b;
+      margin: 16px 0 6px 10px;
+      font-weight: 700;
+    }
+
+    main {
+      padding: 40px 48px 90px;
+      max-width: 1020px;
+    }
+
+    header.hero {
+      padding-bottom: 28px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 36px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: rgba(56, 189, 248, 0.14);
+      color: var(--accent);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      margin-right: 6px;
+      margin-bottom: 6px;
+    }
+    .badge.green { background: rgba(52, 211, 153, 0.14); color: var(--green); border-color: rgba(52, 211, 153, 0.3); }
+    .badge.amber { background: rgba(251, 191, 36, 0.14); color: var(--amber); border-color: rgba(251, 191, 36, 0.3); }
+    .badge.purple { background: rgba(129, 140, 248, 0.15); color: var(--accent-2); border-color: rgba(129, 140, 248, 0.3); }
+    .badge.rose { background: rgba(251, 113, 133, 0.14); color: var(--rose); border-color: rgba(251, 113, 133, 0.3); }
+
+    h1 { font-size: 2rem; line-height: 1.25; margin: 10px 0 12px; color: #fff; }
+    h2 { font-size: 1.45rem; color: #fff; margin: 52px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    h3 { font-size: 1.12rem; color: #f1f5f9; margin: 28px 0 10px; }
+    p { margin: 0 0 14px; }
+    .lead { font-size: 1.02rem; color: #cbd5e1; }
+
+    .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin: 18px 0; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 18px 0; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 18px 0; }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px;
+    }
+
+    .card h4 { margin: 0 0 8px; font-size: 1rem; color: #fff; }
+    .card p:last-child, .card ul:last-child { margin-bottom: 0; }
+
+    .kpi-card {
+      background: linear-gradient(145deg, #132038, #0f172a);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 18px;
+    }
+    .kpi-val { font-size: 1.65rem; font-weight: 800; color: var(--accent); line-height: 1.2; }
+    .kpi-val.green { color: var(--green); }
+    .kpi-val.amber { color: var(--amber); }
+    .kpi-label { font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; }
+
+    .callout {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      border-radius: 0 8px 8px 0;
+      padding: 14px 18px;
+      margin: 18px 0;
+    }
+    .callout.green { background: rgba(52, 211, 153, 0.08); border-left-color: var(--green); }
+    .callout.amber { background: rgba(251, 191, 36, 0.08); border-left-color: var(--amber); }
+    .callout.rose { background: rgba(251, 113, 133, 0.08); border-left-color: var(--rose); }
+
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+      overflow-x: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.84rem;
+      line-height: 1.55;
+      color: #e2e8f0;
+      margin: 14px 0;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.87em;
+      background: rgba(148, 163, 184, 0.14);
+      padding: 2px 5px;
+      border-radius: 4px;
+      color: #7dd3fc;
+    }
+    pre code { background: none; padding: 0; color: inherit; }
+
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.88rem; }
+    th, td { border: 1px solid var(--border); padding: 9px 11px; text-align: left; vertical-align: top; }
+    th { background: var(--bg-elevated); color: #fff; font-weight: 600; }
+    tr:nth-child(even) td { background: rgba(22, 32, 51, 0.45); }
+    .num { text-align: right; font-variant-numeric: tabular-nums; font-family: ui-monospace, monospace; }
+    .best { color: var(--green); font-weight: 700; }
+
+    .diagram-box {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px;
+      margin: 18px 0;
+      overflow-x: auto;
+    }
+    .diagram-caption { font-size: 0.82rem; color: var(--text-muted); text-align: center; margin-top: 8px; }
+
+    ul, ol { padding-left: 22px; margin: 8px 0 14px; }
+    li { margin-bottom: 6px; }
+
+    /* Interactive Tabs & Buttons */
+    .tabs, .btn-group { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+    .tab-btn, .sim-btn {
+      background: var(--bg-elevated);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 13px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .tab-btn:hover, .sim-btn:hover { border-color: var(--accent); color: #fff; }
+    .tab-btn.active, .sim-btn.active {
+      background: var(--accent);
+      color: #0b1120;
+      border-color: var(--accent);
+      font-weight: 700;
+    }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* Animated Bar Charts */
+    .bar-row {
+      display: grid;
+      grid-template-columns: 115px 1fr 78px;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 9px;
+      font-size: 0.85rem;
+    }
+    .bar-track {
+      background: #070c17;
+      border-radius: 5px;
+      height: 20px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      position: relative;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    /* Interactive Simulator Styles */
+    .sim-stage {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px;
+      margin: 18px 0;
+    }
+    .sim-nodes {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin: 14px 0;
+    }
+    .sim-node {
+      background: var(--bg-card);
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+      transition: all 0.3s ease;
+      position: relative;
+    }
+    .sim-node.lit {
+      border-color: var(--accent);
+      box-shadow: 0 0 18px rgba(56, 189, 248, 0.28);
+      transform: translateY(-2px);
+    }
+    .sim-node.lit-green {
+      border-color: var(--green);
+      box-shadow: 0 0 18px rgba(52, 211, 153, 0.28);
+      transform: translateY(-2px);
+    }
+    .sim-node.lit-amber {
+      border-color: var(--amber);
+      box-shadow: 0 0 18px rgba(251, 191, 36, 0.28);
+      transform: translateY(-2px);
+    }
+    .sim-node-title { font-weight: 700; font-size: 0.88rem; color: #fff; }
+    .sim-node-sub { font-size: 0.76rem; color: var(--text-muted); margin-top: 4px; }
+    .sim-log {
+      background: #0b1120;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px 14px;
+      font-family: ui-monospace, monospace;
+      font-size: 0.82rem;
+      min-height: 76px;
+      color: #cbd5e1;
+    }
+
+    /* Animated SVG pulse */
+    @keyframes flowDash {
+      to { stroke-dashoffset: -24; }
+    }
+    .flow-line {
+      stroke-dasharray: 6 6;
+      animation: flowDash 1.1s linear infinite;
+    }
+
+    @keyframes pulseBox {
+      0%, 100% { opacity: 0.75; }
+      50% { opacity: 1; }
+    }
+    .pulse-box { animation: pulseBox 2.2s ease-in-out infinite; }
+
+    footer {
+      margin-top: 60px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+
+    @media (max-width: 960px) {
+      .layout { grid-template-columns: 1fr; }
+      aside { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--border); }
+      main { padding: 24px 18px 60px; }
+      .grid-2, .grid-3, .grid-4, .sim-nodes { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside>
+      <div class="brand">faster-malloc</div>
+      <div class="sub">アルゴリズム＆ベンチマーク徹底解説</div>
+      <nav>
+        <div class="section-label">第1部: 背景と課題</div>
+        <a href="#bg-why">1. なぜ malloc は難しいのか？</a>
+        <a href="#bg-project">2. faster-malloc の狙いと3構成</a>
+
+        <div class="section-label">第2部: 現在の仕組み (v2 / JIT)</div>
+        <a href="#v2-sim">3. 動的シミュレータ（処理の流れ）</a>
+        <a href="#v2-classes">4. サイズクラスと算術ディスパッチ</a>
+        <a href="#v2-span">5. 64 KiB スパンとヘッダレス設計</a>
+        <a href="#v2-tls">6. 並列 TLS とフレームレス高速パス</a>
+        <a href="#v2-central">7. バッチ転送・Central・Bump</a>
+        <a href="#v2-reclaim">8. メモリ返却と大規模キャッシュ</a>
+        <a href="#jit">9. JIT 版の動的特殊化</a>
+
+        <div class="section-label">第3部: 他のアルゴリズム</div>
+        <a href="#classics">10. 古典・基礎アルゴリズム</a>
+        <a href="#modern">11. 現代の主要アロケータ</a>
+
+        <div class="section-label">第4部: ベンチマークと評価</div>
+        <a href="#bench-ir">12. 命令数 (Callgrind) 比較</a>
+        <a href="#bench-real">13. 実アプリ・マルチスレッド・RSS</a>
+        <a href="#comparison">14. 横断比較表とまとめ</a>
+      </nav>
+    </aside>
+
+    <main>
+      <header class="hero">
+        <span class="badge">背景からわかる</span>
+        <span class="badge green">v2 (libfastmalloc2.so)</span>
+        <span class="badge purple">JIT (libjitmalloc.so)</span>
+        <span class="badge amber">実測ベンチマーク収録</span>
+        <h1>現在の割り当てアルゴリズムと他方式の比較解説</h1>
+        <p class="lead">
+          「そもそもなぜメモリアロケータに高度な工夫が必要なのか？」という背景から出発し、
+          このリポジトリの主力である <strong><code>faster-malloc v2</code></strong> の内部構造・高速化の勘所・メモリ返却機構を、
+          インタラクティブな図解・アニメーション付きで解説します。さらに古典方式や <code>glibc</code>・<code>tcmalloc</code>・<code>jemalloc</code>・<code>mimalloc</code> との比較と、実測ベンチマーク（命令数・実行時間・RSS・マルチスレッド性能）までを一望できます。
+        </p>
+
+        <div class="grid-4" style="margin-top: 20px;">
+          <div class="kpi-card">
+            <div class="kpi-val green">-57〜64%</div>
+            <div class="kpi-label">glibc 比の実行命令数（v2）</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-val">24% 高速</div>
+            <div class="kpi-label">実アプリ cfrac 実行時間（vs glibc）</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-val amber">2.5× 高速</div>
+            <div class="kpi-label">8スレッド Cross-thread free</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-val">44 MB</div>
+            <div class="kpi-label">bursty idle-2 RSS（mimalloc 55MB）</div>
+          </div>
+        </div>
+      </header>
+
+      <!-- ========================================================= -->
+      <!-- PART 1: BACKGROUND                                        -->
+      <!-- ========================================================= -->
+      <section id="bg-why">
+        <h2>1. 背景：そもそもなぜ <code>malloc</code> / <code>free</code> は難しいのか？</h2>
+        <p>
+          プログラムがメモリを必要とするとき、OS カーネルは <code>mmap</code> や <code>brk</code> といったシステムコールで仮想メモリを貸し出してくれます。
+          しかし、アプリケーションが <code>malloc(32)</code> や <code>free(p)</code> を呼ぶたびに OS へお願いしていては、システムコール 1 回あたり数千ナノ秒かかり、プログラムはまったく動きません。
+        </p>
+        <p>
+          そこでユーザー空間の「メモリアロケータ（<code>malloc</code>）」が OS から大きな塊をまとめて借り、アプリに小分けにして貸し出します。このとき、<strong>互いに相反する 5 つの課題</strong>を同時に解く必要があります。
+        </p>
+
+        <div class="grid-2">
+          <div class="card">
+            <h4>① 速度（CPU 命令数と分岐）</h4>
+            <ul>
+              <li>Web サーバやコンパイラ、インタプリタでは全実行時間の数%〜数十%を <code>malloc/free</code> が占めます。</li>
+              <li>高速パス（Fast Path）は<strong>数命令〜十数命令</strong>で終わらせ、ロックやシステムコールを絶対に避ける必要があります。</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h4>② マルチスレッド競合（Contention）</h4>
+            <ul>
+              <li>1 つのグローバルな空きリストを Mutex で守ると、コア数が増えるほどロック待ちで性能が崩壊します。</li>
+              <li>かといってスレッドごとにメモリを溜め込みすぎると、メモリ使用量（RSS）がスレッド数倍に膨れ上がります。</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h4>③ 断片化（Fragmentation）</h4>
+            <ul>
+              <li><strong>内部断片化</strong>：33 B 欲しいのに 64 B 渡すと 31 B が無駄になる。</li>
+              <li><strong>外部断片化</strong>：空き領域の合計は十分あるのに、細切れで連続しておらず大きな要求に応えられない／OS へ返却できない。</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h4>④ キャッシュ局所性（Locality）</h4>
+            <ul>
+              <li>命令数が少なくても、割り当てたメモリが物理ページあちこちに散らばると L1/L2 キャッシュミスが多発し、実測の壁時計時間（Wall Clock）が遅くなります。</li>
+              <li>直前に解放した「暖かい（warm）メモリ」を再利用できるかが鍵です。</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="callout">
+          <strong>⑤ OS へのメモリ返却（RSS 管理）とのジレンマ：</strong><br />
+          解放されたメモリをアロケータが手元にキャッシュすれば次の <code>malloc</code> は爆速になりますが、OS に返さないためプロセスがメモリを食いつぶします。逆にすぐ返却（<code>munmap</code> / <code>MADV_DONTNEED</code>）すると、再確保時にページフォールト（カーネルによるゼロ埋め）が発生して遅くなります。
+        </div>
+      </section>
+
+      <section id="bg-project">
+        <h2>2. <code>faster-malloc</code> の狙いと 3 つの実装</h2>
+        <p>
+          このリポジトリでは、既存の <code>jemalloc</code>・<code>tcmalloc</code>・<code>mimalloc</code> や学術論文（Free-list shaping、JIT 値特殊化など）の知見を踏まえ、
+          ゼロから 3 つの <code>LD_PRELOAD</code> 互換アロケータを構築・計測しています。
+        </p>
+
+        <div class="grid-3">
+          <div class="card">
+            <h4>v1 (<code>libfastmalloc.so</code>)</h4>
+            <p><span class="badge">ベースライン</span></p>
+            <ul>
+              <li>テーブル引きのサイズクラス分類</li>
+              <li>スレッドごとのフリーリスト</li>
+              <li>スピンロック保護の Central リスト</li>
+              <li>v2 の改善効果を測定するための基準</li>
+            </ul>
+          </div>
+          <div class="card" style="border-color: var(--accent);">
+            <h4>v2 (<code>libfastmalloc2.so</code>)</h4>
+            <p><span class="badge green">現在の主力・最速</span></p>
+            <ul>
+              <li>1024 B 以下は算術シフトのみ</li>
+              <li>64 KiB スパン（ブロックヘッダ 0 B）</li>
+              <li>並列 TLS 配列＋フレームレス高速パス</li>
+              <li>O(1) バッチ転送＋Census ページパージ</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h4>JIT (<code>libjitmalloc.so</code>)</h4>
+            <p><span class="badge purple">実験的・動的特殊化</span></p>
+            <ul>
+              <li>1/64 サンプリングでホットサイズを計測</li>
+              <li>上位クラス専用の機械語を動的生成</li>
+              <li>TLS オフセットを即値に埋め込み</li>
+              <li>負荷変化を検知して再 JIT</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================================= -->
+      <!-- PART 2: CURRENT ALGORITHM (v2 / JIT)                      -->
+      <!-- ========================================================= -->
+      <section id="v2-sim">
+        <h2>3. 現在のアルゴリズム（v2）の全体フロー【インタラクティブ体験】</h2>
+        <p>
+          下のボタンを押すと、v2 が状況に応じてどの経路（<strong>Fast Path / Slow Path / Large Path / OS 返却</strong>）を通るかをアニメーションで確認できます。
+        </p>
+
+        <div class="sim-stage">
+          <div class="btn-group">
+            <button class="sim-btn active" onclick="runSim('fast_malloc', this)">① malloc(64B) ヒット</button>
+            <button class="sim-btn" onclick="runSim('refill_central', this)">② malloc(64B) 空 → Central補充</button>
+            <button class="sim-btn" onclick="runSim('refill_span', this)">③ Centralも空 → 新規Span</button>
+            <button class="sim-btn" onclick="runSim('fast_free', this)">④ free(p) 高速パス</button>
+            <button class="sim-btn" onclick="runSim('flush_purge', this)">⑤ Flush → Census ページ返却</button>
+            <button class="sim-btn" onclick="runSim('large_alloc', this)">⑥ malloc(64KB) Largeパス</button>
+          </div>
+
+          <div class="sim-nodes">
+            <div class="sim-node" id="node-app">
+              <div class="sim-node-title">アプリケーション</div>
+              <div class="sim-node-sub">malloc(size) / free(p)</div>
+            </div>
+            <div class="sim-node" id="node-tls">
+              <div class="sim-node-title">Thread-Local (TLS)</div>
+              <div class="sim-node-sub">fm_head[cls] / lcache</div>
+            </div>
+            <div class="sim-node" id="node-central">
+              <div class="sim-node-title">Central Stack</div>
+              <div class="sim-node-sub">fm_central[cls] (Batch)</div>
+            </div>
+            <div class="sim-node" id="node-os">
+              <div class="sim-node-title">Span / OS (Kernel)</div>
+              <div class="sim-node-sub">mmap / MADV_DONTNEED</div>
+            </div>
+          </div>
+
+          <div class="sim-log" id="sim-log">
+            ボタンを押すと処理ステップがアニメーション表示されます。
+          </div>
+        </div>
+      </section>
+
+      <section id="v2-classes">
+        <h2>4. サイズクラス分類（<code>fm_class_of</code>）：分岐とメモリアクセスの削減</h2>
+        <p>
+          v2 は <code>SMALL_MAX = 32,768 B (32 KiB)</code> 以下の割り当てを <strong>145 段階のサイズクラス（<code>0..144</code>）</strong> に丸めます（[size_classes2.h](file:///home/cp20/ghq/github.com/cp-20/faster-malloc/src/size_classes2.h)）。
+        </p>
+        <ul>
+          <li><strong>1024 B 以下（Class 0〜64）は「算術計算のみ」</strong>：<code>(size + 15) &gt;&gt; 4</code> のビットシフトだけでクラスが決まります。16 B 刻みで、テーブル参照（メモリアクセス）が一切発生しません。</li>
+          <li><strong>1025 B 〜 32 KiB（Class 65〜144）は「1 バイトテーブル」</strong>：<code>kClassBig[(size + 15) &gt;&gt; 4]</code> を参照します。サイズが大きくなるほど刻み幅（64B → 128B → 256B → 512B → 1024B）が粗くなり、クラス数を 145 個に抑えています。</li>
+          <li><strong>32 KiB 超は <code>LARGE_CLASS</code></strong>：スパンには入れず、専用の Large パス（<code>mmap</code> ＋ Large キャッシュ）へ流します。</li>
+        </ul>
+
+        <div class="diagram-box">
+          <svg viewBox="0 0 760 115" width="100%" xmlns="http://www.w3.org/2000/svg">
+            <rect x="10" y="18" width="230" height="65" rx="8" fill="#0ea5e9" fill-opacity="0.16" stroke="#38bdf8" stroke-width="1.5"/>
+            <text x="125" y="42" fill="#7dd3fc" font-size="13" font-weight="bold" text-anchor="middle">0 〜 1024 B (Class 0..64)</text>
+            <text x="125" y="62" fill="#e2e8f0" font-size="11" font-family="monospace" text-anchor="middle">(size + 15) &gt;&gt; 4</text>
+            <text x="125" y="77" fill="#34d399" font-size="10" text-anchor="middle">メモリ参照ゼロ・16B刻み</text>
+
+            <rect x="260" y="18" width="250" height="65" rx="8" fill="#818cf8" fill-opacity="0.16" stroke="#818cf8" stroke-width="1.5"/>
+            <text x="385" y="42" fill="#a5b4fc" font-size="13" font-weight="bold" text-anchor="middle">1025 〜 32 KiB (Class 65..144)</text>
+            <text x="385" y="62" fill="#e2e8f0" font-size="11" font-family="monospace" text-anchor="middle">kClassBig[(size + 15) &gt;&gt; 4]</text>
+            <text x="385" y="77" fill="#cbd5e1" font-size="10" text-anchor="middle">2KB byteテーブル・段階的刻み</text>
+
+            <rect x="530" y="18" width="220" height="65" rx="8" fill="#fbbf24" fill-opacity="0.14" stroke="#fbbf24" stroke-width="1.5"/>
+            <text x="640" y="42" fill="#fcd34d" font-size="13" font-weight="bold" text-anchor="middle">32 KiB 超 (LARGE_CLASS)</text>
+            <text x="640" y="62" fill="#e2e8f0" font-size="11" font-family="monospace" text-anchor="middle">fm_large_alloc(size)</text>
+            <text x="640" y="77" fill="#cbd5e1" font-size="10" text-anchor="middle">1-syscall mmap + 64MiBキャッシュ</text>
+          </svg>
+          <div class="diagram-caption">図1: 要求サイズに応じた 3 段階のディスパッチ戦略</div>
+        </div>
+      </section>
+
+      <section id="v2-span">
+        <h2>5. 64 KiB スパンと「ブロックヘッダなし」の設計</h2>
+        <p>
+          <code>free(p)</code> が呼ばれたとき、アロケータは「ポインタ <code>p</code> がどのサイズクラスのブロックか」を知る必要があります。
+          v2 では <strong>64 KiB（<code>SPAN_SIZE = 65536</code>）境界に揃えた「スパン（Span）」</strong> を使い、各ブロックの直前にヘッダを一切置きません。
+        </p>
+        <ul>
+          <li><strong>1 スパン = 1 サイズクラス</strong>：スパン内の全ブロックは同じサイズです。</li>
+          <li><strong>先頭 64 バイトだけがメタデータ（<code>FM_Span</code>）</strong>：残りの空間にブロックが隙間なく並びます。</li>
+          <li><strong>O(1) 逆引き</strong>：<code>p</code> の下位 16 ビットを切り捨てる（<code>p &amp; ~0xFFFF</code>）だけで即座にスパン先頭の <code>FM_Span</code> に到達し、<code>sp-&gt;cls</code> を 1 回のロードで読めます。</li>
+          <li><strong>初回スパンの小型化（ADR 0060）</strong>：滅多に使われないクラスでいきなり 64 KiB 確保して RSS を増やさないよう、各クラスの最初のスパンだけは最小限のサイズ（約 16 KiB 強）で確保します。</li>
+        </ul>
+
+        <div class="diagram-box">
+          <svg viewBox="0 0 760 165" width="100%" xmlns="http://www.w3.org/2000/svg">
+            <rect x="10" y="20" width="740" height="82" rx="8" fill="#162033" stroke="#38bdf8" stroke-width="2"/>
+            <rect x="10" y="20" width="135" height="82" rx="6" fill="#0ea5e9" fill-opacity="0.22" stroke="#38bdf8"/>
+            <text x="77" y="47" fill="#7dd3fc" font-size="12" font-weight="bold" text-anchor="middle">FM_Span (64 B)</text>
+            <text x="77" y="65" fill="#cbd5e1" font-size="10" text-anchor="middle">cls, nblocks</text>
+            <text x="77" y="81" fill="#94a3b8" font-size="10" text-anchor="middle">purged_mask, dead_mark</text>
+
+            <rect x="152" y="28" width="110" height="66" rx="4" fill="#34d399" fill-opacity="0.16" stroke="#34d399"/>
+            <text x="207" y="56" fill="#6ee7b7" font-size="12" font-weight="bold" text-anchor="middle">Block 0</text>
+            <text x="207" y="75" fill="#94a3b8" font-size="10" text-anchor="middle">ヘッダ 0 B</text>
+
+            <rect x="269" y="28" width="110" height="66" rx="4" fill="#34d399" fill-opacity="0.16" stroke="#34d399"/>
+            <text x="324" y="56" fill="#6ee7b7" font-size="12" font-weight="bold" text-anchor="middle">Block 1</text>
+            <text x="324" y="75" fill="#94a3b8" font-size="10" text-anchor="middle">空き時は next ptr</text>
+
+            <rect x="386" y="28" width="110" height="66" rx="4" fill="#fb7185" fill-opacity="0.16" stroke="#fb7185"/>
+            <text x="441" y="56" fill="#fda4af" font-size="12" font-weight="bold" text-anchor="middle">Block 2 (使用中)</text>
+            <text x="441" y="75" fill="#cbd5e1" font-size="10" text-anchor="middle">p = 0x7f...4080</text>
+
+            <rect x="503" y="28" width="237" height="66" rx="4" fill="#334155" fill-opacity="0.35" stroke="#475569" stroke-dasharray="4 3"/>
+            <text x="621" y="64" fill="#94a3b8" font-size="12" text-anchor="middle">Block 3 … Block N-1</text>
+
+            <path d="M 441 96 Q 441 130 77 130 L 77 106" fill="none" stroke="#fbbf24" stroke-width="2" class="flow-line" marker-end="url(#arrow2)"/>
+            <text x="260" y="148" fill="#fbbf24" font-size="11" font-family="monospace" text-anchor="middle">free(0x7f...4080) → (p &amp; ~0xFFFF) = 0x7f...0000 → sp-&gt;cls を即取得</text>
+            <defs>
+              <marker id="arrow2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <path d="M0,0 L0,6 L7,3 z" fill="#fbbf24"/>
+              </marker>
+            </defs>
+          </svg>
+          <div class="diagram-caption">図2: 64 KiB アラインスパンと <code>free()</code> 時のビットマスク逆引きアニメーション</div>
+        </div>
+      </section>
+
+      <section id="v2-tls">
+        <h2>6. 並列 TLS 配列とフレームレス高速パス（ここが 7 倍速の正体）</h2>
+        <p>
+          開発ログ（<code>README.md</code>）によると、スレッドローカルデータの持ち方を変えただけでベンチマークが <strong>144 ns/op → 22 ns/op（約 7 倍）</strong> へ跳ね上がりました。理由は 3 つあります。
+        </p>
+
+        <div class="grid-2">
+          <div class="card">
+            <h4>① 構造体配列 (AoS) ではなく並列配列 (SoA)</h4>
+            <p><code>struct Bin { void *head, *tail; uint32_t cnt; } bins[145];</code> にすると 1 要素が 24〜32 B になり、インデックス計算にシフトや加算命令が必要です。</p>
+            <p>v2 は 8 B ポインタの並列配列にしました：</p>
+            <pre><code>__thread void *fm_head[145];
+__thread void *fm_tail[145];
+__thread uint32_t fm_cnt[145];</code></pre>
+            <p>これにより x86-64 では <code>mov %fs:(%rdx,%rcx,8), %rax</code> の<strong>単一命令</strong>でリスト先頭を引けます。</p>
+          </div>
+
+          <div class="card">
+            <h4>② <code>noinline</code> によるフレームレス高速パス</h4>
+            <ul>
+              <li><code>fm_refill_class</code> や <code>fm_flush_bin</code> などの遅いパスを <code>__attribute__((noinline))</code> で完全分離。</li>
+              <li>その結果、<code>malloc</code> / <code>free</code> の高速パスは関数プロローグ（スタック確保・レジスタ退避）が不要な「<strong>フレームレス関数</strong>」になり、全工程が約 13 命令に収まります。</li>
+            </ul>
+            <h4>③ 起動時 GOT→即値バイナリパッチ</h4>
+            <p>共有ライブラリ（<code>.so</code>）の TLS 参照は通常 GOT（Global Offset Table）を 1 回ロードしますが、<code>fm_tls_patch_ctor</code> が起動時に自身の機械語を走査して即値オフセットへ書き換え、メモリアクセスをさらに 1 回削ります。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="v2-central">
+        <h2>7. バッチ転送・Central スタック・Bump カービング</h2>
+        <p>
+          ローカル TLS キャッシュが空になったり（<code>fm_head[cls] == NULL</code>）、解放が溜まって上限（<code>kClassLimit[cls]</code>、小サイズで 256 個・大サイズで 4 個）に達したときは、
+          全スレッド共有の <strong>Central スタック（<code>fm_central[cls]</code>）</strong> と <strong>バッチ（<code>FM_Batch</code>）単位で O(1) やり取り</strong> します。
+        </p>
+        <ul>
+          <li><strong>Flush 時はリストを辿らない</strong>：他のスレッドから解放されたブロックが混ざったリストはメモリ上に散らばっており、辿ると L1/L2 キャッシュミスが多発します（ADR 0014 で検証）。そのため v2 は <code>fm_head..fm_tail</code> の塊を<strong>リンクを辿らず O(1) で Central へ渡します</strong>（同一スパン由来と分かっている場合のみカウント）。</li>
+          <li><strong>Refill 時の Bump カービング</strong>：Central も空のときは、スパンの未切り出し領域（<code>fm_bump_ptr .. fm_bump_end</code>）または新規 <code>mmap</code> スパンから <code>kClassLimit[cls]</code> 個だけ切り出してローカルへ持ち、残りのブロック群は「スパン純粋（<code>FM_COUNT_PURE</code>）」なバッチとして Central へ公開します。</li>
+        </ul>
+      </section>
+
+      <section id="v2-reclaim">
+        <h2>8. メモリ返却（Census / ページパージ）と大規模キャッシュ</h2>
+        <p>
+          初期の v2 は「速いがメモリを OS に返さない（RSS が高い）」という弱点がありました。これを Round 2〜6 の改良で解消しています。
+        </p>
+
+        <div class="grid-3">
+          <div class="card">
+            <h4>① 自動スパン回収 (Census)</h4>
+            <p>一定回数の Flush ごとに Central 内のバッチをスパン単位で集計（<code>trylock</code> で競合を回避）。全ブロックが空きになり <code>dead_mark</code> の寿命を超えたスパンは <code>munmap</code> で OS へ返却します。</p>
+          </div>
+          <div class="card">
+            <h4>② ページ粒度パージ (ADR 0030)</h4>
+            <p>1 個でも使用中ブロックが残っているとスパン全体は <code>munmap</code> できませんが、<strong>完全に空いている 4 KiB ページ</strong>を検出して <code>MADV_DONTNEED</code> で物理メモリを解放します（<code>purged_mask</code> で管理）。</p>
+          </div>
+          <div class="card">
+            <h4>③ Large パス &amp; 64 MiB キャッシュ</h4>
+            <p>32 KiB 超は 1 回の <code>mmap</code> で確保（余白トリム用の <code>munmap</code> 2 回を省略）。解放時は 48 バケット・最大 <strong>64 MiB</strong> のスレッドローカルキャッシュに保持し、ホットウィンドウ外の不要ブロックは即 <code>munmap</code> します。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="jit">
+        <h2>9. JIT 版（<code>libjitmalloc.so</code>）の動的特殊化と限界</h2>
+        <p>
+          <code>libjitmalloc.so</code> は実行中にアプリのサイズ分布を学習し、<code>malloc</code> のエントリポイントを機械語レベルで書き換えます。
+        </p>
+        <ul>
+          <li><strong>仕組み</strong>：64 回に 1 回のサンプリングでヒストグラムを作り、集中度が高い上位 4 クラスについて、サイズ比較分岐と「<code>%fs:(固定オフセット)</code>」を埋め込んだコードを <code>jit_stubs.S</code> テンプレートから生成し、関数ポインタをアトミックに差し替えます。</li>
+          <li><strong>なぜ静的 v2 に負けるのか？</strong>：特定の 1 サイズだけを連打するケースでは数%速くなりますが、複数のサイズ比較（レンジチェック）が増えると分岐コストがかさみ、<strong>「最初から算術シフトで一発計算＋インライン展開」できる静的 v2 の方が汎用的に速い</strong>という結果になりました。</li>
+        </ul>
+      </section>
+
+      <!-- ========================================================= -->
+      <!-- PART 3: OTHER ALGORITHMS                                  -->
+      <!-- ========================================================= -->
+      <section id="classics">
+        <h2>10. 他のアルゴリズム ①：古典・基礎アルゴリズム</h2>
+        <p>アロケータの進化を理解するための 4 つの基礎方式です。タブを切り替えて構造を確認できます。</p>
+
+        <div class="tabs" id="classic-tabs">
+          <button class="tab-btn active" onclick="switchTab('classic', 'bump', this)">Bump / Arena</button>
+          <button class="tab-btn" onclick="switchTab('classic', 'freelist', this)">Free List + Boundary Tag</button>
+          <button class="tab-btn" onclick="switchTab('classic', 'buddy', this)">Buddy System</button>
+          <button class="tab-btn" onclick="switchTab('classic', 'slab', this)">Slab / SLUB</button>
+        </div>
+
+        <div id="classic-bump" class="tab-panel active card">
+          <h4>Bump Allocator（Arena / Region-based）</h4>
+          <p>大きな連続メモリの現在位置ポインタを <code>ptr += size</code> と進めるだけ。個別 <code>free(p)</code> はできず、処理の終わりに Arena 全体を一括解放します。</p>
+          <ul>
+            <li><strong>メリット</strong>：数命令で完了する究極の高速性。外部・内部断片化がほぼゼロ。</li>
+            <li><strong>デメリット</strong>：長寿命オブジェクトと短寿命オブジェクトが混ざると解放できない。</li>
+            <li><strong>使われる場所</strong>：ゲームエンジンのフレーム一時領域、コンパイラの AST、v2 内部の新規スパン切り出し。</li>
+          </ul>
+        </div>
+
+        <div id="classic-freelist" class="tab-panel card">
+          <h4>Free List + Boundary Tags（First-Fit / Best-Fit）</h4>
+          <p><code>dlmalloc</code> の基礎となった古典方式。空きブロックを双方向リストで管理し、各ブロックの前後にサイズタグ（Boundary Tag）を置きます。解放時に隣接ブロックが空いていれば結合（Coalescing）して大きな空きに戻します。</p>
+          <ul>
+            <li><strong>メリット</strong>：任意のサイズを細かく扱え、結合により外部断片化に強い。</li>
+            <li><strong>デメリット</strong>：リスト探索が線形時間になり得る。全ブロックにヘッダが必要で、マルチスレッド時のロック競合が起きやすい。</li>
+          </ul>
+        </div>
+
+        <div id="classic-buddy" class="tab-panel card">
+          <h4>Buddy System（バディシステム）</h4>
+          <p>メモリを 2 のべき乗（4 KiB, 8 KiB, 16 KiB…）単位で半分ずつ分割して貸し出し、解放時はアドレスの 1 ビット反転（XOR）で求まる「相方（Buddy）」も空いていれば即座に結合して元のサイズに戻します。</p>
+          <ul>
+            <li><strong>メリット</strong>：結合判定が O(1) と高速で、ページ単位の連続領域確保に強い（Linux カーネルのページアロケータ）。</li>
+            <li><strong>デメリット</strong>：2 のべき乗への丸めにより最大約 50% の内部断片化が起きるため、数バイト〜数百バイトの汎用 <code>malloc</code> には向きません。</li>
+          </ul>
+        </div>
+
+        <div id="classic-slab" class="tab-panel card">
+          <h4>Slab / SLUB Allocator</h4>
+          <p>同じサイズ・同じ型のオブジェクト専用のキャッシュ（Slab）をページ単位で用意し、空きスロットをフリーリストで管理する方式（Linux カーネルのオブジェクト管理）。</p>
+          <ul>
+            <li><strong>メリット</strong>：同一サイズオブジェクトの連続確保・解放が爆速で、断片化が極めて小さい。</li>
+            <li><strong>現代アロケータへの継承</strong>：サイズクラスごとの専用スパン／ページを使う <code>tcmalloc</code>・<code>jemalloc</code>・<code>mimalloc</code>・<code>faster-malloc v2</code> は、Slab の汎用化といえます。</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="modern">
+        <h2>11. 他のアルゴリズム ②：現代の主要汎用アロケータ</h2>
+        <div class="grid-2">
+          <div class="card">
+            <h4>glibc <code>ptmalloc2</code></h4>
+            <p><span class="badge">Linux 標準</span></p>
+            <ul>
+              <li><strong>構造</strong>：<code>dlmalloc</code> をマルチスレッド対応させたもの。複数の <strong>Arena</strong> とスレッドごとの <strong><code>tcache</code></strong> を持つ。</li>
+              <li><strong>特徴</strong>：各ブロック直前に 8〜16 B のヘッダを持つ。Fastbin / Unsorted / Small / Large など多数のビンを条件分岐で使い分けるため、高速パスでも命令数が多い。</li>
+            </ul>
+          </div>
+
+          <div class="card">
+            <h4>Google <code>tcmalloc</code></h4>
+            <p><span class="badge">Thread / Per-CPU Cache</span></p>
+            <ul>
+              <li><strong>構造</strong>：スレッド（または CPU コア）ごとのキャッシュ ＋ Central Free List ＋ PageHeap。</li>
+              <li><strong>特徴</strong>：<code>PageMap</code>（基数木）でポインタからスパンを引く。<code>faster-malloc v2</code> と発想は近いが、v2 は 64 KiB アラインマスクで <code>PageMap</code> 参照すら省き、高速パスをさらに軽量化している。</li>
+            </ul>
+          </div>
+
+          <div class="card">
+            <h4><code>jemalloc</code></h4>
+            <p><span class="badge">低断片化・長期稼働向け</span></p>
+            <ul>
+              <li><strong>構造</strong>：複数 Arena ＋ Extent（チャンク）＋ ビットマップ管理 ＋ <code>tcache</code>。</li>
+              <li><strong>特徴</strong>：低い仮想アドレスを優先再利用することで、長時間動くサーバやブラウザでのメモリ断片化（RSS 増大）を非常に低く抑える。</li>
+            </ul>
+          </div>
+
+          <div class="card">
+            <h4>Microsoft <code>mimalloc</code></h4>
+            <p><span class="badge green">高局所性・Cross-free 最強</span></p>
+            <ul>
+              <li><strong>構造</strong>：64 KiB ページを束ねたセグメント上で、フリーリストを 3 種類に分割（<strong>Free-list sharding</strong>）。</li>
+              <li><strong>特徴</strong>：別スレッドが解放したブロックを CAS で元のページへ戻し、同じ暖かいページを使い続けるためキャッシュ局所性と Cross-thread free が極めて優秀。</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================================= -->
+      <!-- PART 4: BENCHMARKS & CONCLUSION                           -->
+      <!-- ========================================================= -->
+      <section id="bench-ir">
+        <h2>12. ベンチマーク ①：実行命令数（Callgrind）の厳密比較</h2>
+        <p>
+          実測時間（Wall Clock）は仮想環境や CPU 周波数変動で ±10% 揺れますが、<strong>Callgrind による総実行命令数（Ir）は 1 命令の狂いもなく再現</strong>します（[docs/results.md](file:///home/cp20/ghq/github.com/cp-20/faster-malloc/docs/results.md) の実測データ）。
+          ワークロードを切り替えて各アロケータの命令数（小さいほど高速）を比較できます。
+        </p>
+
+        <div class="card">
+          <div class="btn-group" id="bench-btns">
+            <button class="sim-btn active" onclick="renderBench('churn64', this)">churn 64B (30万回)</button>
+            <button class="sim-btn" onclick="renderBench('churn1k', this)">churn 1KiB (20万回)</button>
+            <button class="sim-btn" onclick="renderBench('churnmix', this)">churnmix 8サイズ (20万回)</button>
+            <button class="sim-btn" onclick="renderBench('mixed', this)">mixed ランダム (15万回)</button>
+            <button class="sim-btn" onclick="renderBench('cross', this)">cross 別スレッド解放 (15万回)</button>
+          </div>
+          <div id="bench-desc" style="font-size:0.86rem; color:var(--text-muted); margin-bottom:14px;"></div>
+          <div id="bench-bars"></div>
+        </div>
+
+        <div class="callout green">
+          <strong>ベンチマークから読み取れる事実：</strong><br />
+          v2 は測定された全 7 種のマイクロワークロードすべてで <code>glibc</code>・<code>tcmalloc</code>・<code>jemalloc</code>・<code>mimalloc</code> より少ない命令数を記録しています（<code>glibc</code> 比 <strong>57〜64% 削減</strong>）。
+        </div>
+      </section>
+
+      <section id="bench-real">
+        <h2>13. ベンチマーク ②：実アプリ・マルチスレッド・キャッシュ・RSS</h2>
+
+        <h3>実アプリケーション（Wall Clock 秒 &amp; Peak RSS KiB）</h3>
+        <p>SPEC CPU2006 由来の <code>cfrac</code>（素因数分解）・<code>espresso</code>（論理最適化）・<code>barnes</code>（N 体シミュレーション）の計測結果です。</p>
+        <table>
+          <thead>
+            <tr>
+              <th>アロケータ</th>
+              <th class="num">cfrac 時間 (s)</th>
+              <th class="num">cfrac RSS (KiB)</th>
+              <th class="num">espresso 時間 (s)</th>
+              <th class="num">espresso RSS (KiB)</th>
+              <th class="num">barnes 時間 (s)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>glibc</td><td class="num">4.18</td><td class="num best">3,276</td><td class="num">3.90</td><td class="num best">3,392</td><td class="num">2.87</td></tr>
+            <tr><td>tcmalloc</td><td class="num">3.30</td><td class="num">8,692</td><td class="num best">3.37</td><td class="num">9,584</td><td class="num">2.93</td></tr>
+            <tr><td>jemalloc</td><td class="num">3.39</td><td class="num">5,340</td><td class="num">3.50</td><td class="num">5,864</td><td class="num">3.54</td></tr>
+            <tr><td>mimalloc</td><td class="num">3.50</td><td class="num">3,380</td><td class="num">3.40</td><td class="num">3,688</td><td class="num">3.13</td></tr>
+            <tr><td>v1</td><td class="num">3.25</td><td class="num">3,412</td><td class="num">3.49</td><td class="num">8,980</td><td class="num">3.12</td></tr>
+            <tr><td><strong>v2</strong></td><td class="num best">3.16</td><td class="num">3,796</td><td class="num">3.50</td><td class="num">8,956</td><td class="num best">2.85</td></tr>
+            <tr><td>jit</td><td class="num">3.19</td><td class="num">3,692</td><td class="num">3.41</td><td class="num">9,044</td><td class="num">2.87</td></tr>
+          </tbody>
+        </table>
+
+        <div class="grid-2">
+          <div class="card">
+            <h4>マルチスレッド性能（8 threads, 2M ops, 秒）</h4>
+            <table>
+              <thead><tr><th>アロケータ</th><th class="num">Local alloc+free</th><th class="num">Cross-thread free</th></tr></thead>
+              <tbody>
+                <tr><td>glibc</td><td class="num">0.035 s</td><td class="num">0.120 s</td></tr>
+                <tr><td>tcmalloc</td><td class="num">0.028 s</td><td class="num">0.132 s</td></tr>
+                <tr><td>jemalloc</td><td class="num">0.029 s</td><td class="num">0.089 s</td></tr>
+                <tr><td>mimalloc</td><td class="num">0.045 s</td><td class="num">0.071 s</td></tr>
+                <tr><td>v1</td><td class="num">0.027 s</td><td class="num best">0.048 s</td></tr>
+                <tr><td><strong>v2</strong></td><td class="num best">0.021 s</td><td class="num">0.049 s</td></tr>
+              </tbody>
+            </table>
+            <p style="font-size:0.84rem; color:var(--text-muted);">
+              別スレッド解放（Cross-thread free）で v2 は glibc の <strong>2.5 倍</strong>、tcmalloc の <strong>2.7 倍</strong> 高速です。
+            </p>
+          </div>
+
+          <div class="card">
+            <h4>弱点と Round 2〜6 での改善（正直な評価）</h4>
+            <ul>
+              <li><strong>RSS（メモリ消費量）</strong>：<code>espresso</code> ではスレッドキャッシュ分だけ RSS が glibc (3.4 MB) より大きい 9.0 MB になります。一方、<code>bursty</code> アイドル時 RSS はページ粒度パージ（ADR 0030）により <strong>88 MB → 44 MB</strong> まで削減され、<code>mimalloc</code>（55 MB）を上回る最小値に達しました。</li>
+              <li><strong>再利用時の L1 キャッシュ局所性</strong>：単一サイズ連続確保（<code>churn 64B</code>）の D1 ミス数は <code>glibc</code> (1,264) に対し v2 (1,731) でやや多くなります。これは <code>mimalloc</code> のように「解放されたブロックを元の暖かいページへ戻す（Free-list shaping）」を行わないためです（計測の結果、v2 では速度とのトレードオフで非採用）。</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="comparison">
+        <h2>14. 横断比較表とまとめ</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>アロケータ</th>
+              <th>サイズクラス決定</th>
+              <th>メタデータ位置</th>
+              <th>マルチスレッド戦略</th>
+              <th>得意な領域</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>faster-malloc v2</strong></td>
+              <td>算術シフト (&le;1KB) + byte表</td>
+              <td>64 KiB スパン先頭 64B (ヘッダなし)</td>
+              <td>並列 TLS + O(1) バッチ Central</td>
+              <td>極小命令数・高スループット・Cross-thread free</td>
+            </tr>
+            <tr>
+              <td><strong>glibc ptmalloc2</strong></td>
+              <td>ビン計算＋分岐</td>
+              <td>各ブロック直前ヘッダ</td>
+              <td><code>tcache</code> + 複数 Arena</td>
+              <td>汎用性・Linux 標準・省初期 RSS</td>
+            </tr>
+            <tr>
+              <td><strong>tcmalloc</strong></td>
+              <td>テーブル / 算術</td>
+              <td><code>PageMap</code> (基数木) + Span</td>
+              <td>Thread / Per-CPU Cache</td>
+              <td>大規模マルチスレッドサーバ</td>
+            </tr>
+            <tr>
+              <td><strong>jemalloc</strong></td>
+              <td>テーブル / ビット演算</td>
+              <td>Arena + Extent + Bitmap</td>
+              <td><code>tcache</code> + 複数 Arena</td>
+              <td>長期稼働時の低断片化・低 RSS</td>
+            </tr>
+            <tr>
+              <td><strong>mimalloc</strong></td>
+              <td>テーブル / ビット演算</td>
+              <td>Segment + Page ヘッダ</td>
+              <td>Page 単位 Free-list sharding</td>
+              <td>高いキャッシュ局所性・Cross-thread free</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <footer>
+        Source files inspected: <code>src/fm_static.c</code>, <code>src/fm_core.h</code>, <code>src/size_classes2.h</code>, <code>src/fm_jit.c</code>, <code>README.md</code>, <code>docs/results.md</code>.
+      </footer>
+    </main>
+  </div>
+
+  <script>
+    function switchTab(group, name, btn) {
+      document.querySelectorAll('#' + group + '-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('[id^="' + group + '-"].tab-panel').forEach(p => p.classList.remove('active'));
+      const target = document.getElementById(group + '-' + name);
+      if (target) target.classList.add('active');
+    }
+
+    // Interactive Flow Simulator
+    const simScenarios = {
+      fast_malloc: [
+        { node: 'node-app', cls: 'lit', msg: 'Step 1: アプリが malloc(64) を呼び出し → (64 + 15) >> 4 で即座に Class 4 を算出（メモリアクセスなし）。' },
+        { node: 'node-tls', cls: 'lit-green', msg: 'Step 2: 並列 TLS 配列 fm_head[4] から先頭ブロックを POP（ロックなし・約 13 命令のフレームレス高速パス）。次ブロックをプリフェッチして即 return！' }
+      ],
+      refill_central: [
+        { node: 'node-app', cls: 'lit', msg: 'Step 1: アプリが malloc(64) を呼び出し → Class 4 のローカルリスト fm_head[4] が空（NULL）。' },
+        { node: 'node-tls', cls: 'lit-amber', msg: 'Step 2: noinline の遅いパス fm_refill_class(4) へ分岐（高速パスを汚さない）。' },
+        { node: 'node-central', cls: 'lit', msg: 'Step 3: fm_central[4] からロック取得し、FM_Batch（最大 256 個の塊）を O(1) で丸ごと引き取る。' },
+        { node: 'node-tls', cls: 'lit-green', msg: 'Step 4: ローカル fm_head[4] に接続し、先頭 1 個をアプリへ返却。以降の 255 回は再び高速パスに！' }
+      ],
+      refill_span: [
+        { node: 'node-app', cls: 'lit', msg: 'Step 1: malloc(64) で TLS も Central も空。' },
+        { node: 'node-os', cls: 'lit-amber', msg: 'Step 2: fm_span_new() で新規スパン（初回は約 16 KiB、2回目以降は 64 KiB アライン）を mmap で確保。' },
+        { node: 'node-tls', cls: 'lit-green', msg: 'Step 3: スパン先頭 64B に FM_Span ヘッダを書き込み、kClassLimit[4] 個を切り出してローカルへ。' },
+        { node: 'node-central', cls: 'lit', msg: 'Step 4: スパン内の残りのブロック群を「スパン純粋 (PURE)」バッチとして Central へ公開し、他スレッドも使えるようにする。' }
+      ],
+      fast_free: [
+        { node: 'node-app', cls: 'lit', msg: 'Step 1: アプリが free(p) を呼び出し。' },
+        { node: 'node-os', cls: 'lit', msg: 'Step 2: (uintptr_t)p & ~0xFFFF で 64 KiB スパン先頭へジャンプし、sp->cls (= 4) を 1 回のロードで取得（ブロックヘッダ不要）。' },
+        { node: 'node-tls', cls: 'lit-green', msg: 'Step 3: p を fm_head[4] の先頭に LIFO で繋ぎ、fm_cnt[4] をデクリメントして即完了！' }
+      ],
+      flush_purge: [
+        { node: 'node-tls', cls: 'lit-amber', msg: 'Step 1: free(p) の連続で fm_cnt[4] が 0 に到達 → fm_flush_bin(4) を呼び出し。' },
+        { node: 'node-central', cls: 'lit', msg: 'Step 2: ローカルの塊（fm_head..fm_tail）をリスト走査なしで O(1) で Central へバッチ返却。' },
+        { node: 'node-os', cls: 'lit-green', msg: 'Step 3: 定期 Census が発動！完全に空になったスパンは munmap、部分的に空いた 4 KiB ページは MADV_DONTNEED で OS へ物理メモリ返却。' }
+      ],
+      large_alloc: [
+        { node: 'node-app', cls: 'lit', msg: 'Step 1: malloc(65536) (> 32 KiB) → LARGE_CLASS パスへ分岐。' },
+        { node: 'node-tls', cls: 'lit', msg: 'Step 2: まずスレッドローカルの Large キャッシュ（64 MiB 上限・48 バケット）を検索。ヒットすればゼロ syscall で再利用！' },
+        { node: 'node-os', cls: 'lit-amber', msg: 'Step 3: キャッシュミス時は fm_map_large() で「1 回だけの mmap」（余白トリムなし）を発行し、内部の 64 KiB 境界にヘッダを置いて返却。' }
+      ]
+    };
+
+    let simTimer = null;
+    function runSim(key, btn) {
+      if (simTimer) clearTimeout(simTimer);
+      document.querySelectorAll('.sim-stage .sim-btn').forEach(b => b.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+
+      const nodes = ['node-app', 'node-tls', 'node-central', 'node-os'];
+      const clearNodes = () => nodes.forEach(id => {
+        const el = document.getElementById(id);
+        el.classList.remove('lit', 'lit-green', 'lit-amber');
+      });
+
+      const steps = simScenarios[key] || [];
+      const logEl = document.getElementById('sim-log');
+      logEl.innerHTML = '';
+      let idx = 0;
+
+      function nextStep() {
+        clearNodes();
+        if (idx >= steps.length) return;
+        const s = steps[idx];
+        const el = document.getElementById(s.node);
+        if (el) el.classList.add(s.cls);
+        const line = document.createElement('div');
+        line.textContent = s.msg;
+        logEl.appendChild(line);
+        idx++;
+        if (idx < steps.length) {
+          simTimer = setTimeout(nextStep, 1100);
+        }
+      }
+      nextStep();
+    }
+
+    // Benchmark Data (exact from docs/results.md)
+    const benchData = {
+      churn64: {
+        desc: '64 B の確保・解放を 300,000 回繰り返す単一サイズ連打ワークロード（総実行命令数 Ir）',
+        items: [
+          { name: 'glibc', val: 42748472, color: '#64748b' },
+          { name: 'mimalloc', val: 34154391, color: '#818cf8' },
+          { name: 'tcmalloc', val: 30553633, color: '#a78bfa' },
+          { name: 'jemalloc', val: 24908000, color: '#fbbf24' },
+          { name: 'v1', val: 21976432, color: '#94a3b8' },
+          { name: 'v2', val: 15577790, color: '#38bdf8' },
+          { name: 'jit', val: 15167516, color: '#34d399' }
+        ]
+      },
+      churn1k: {
+        desc: '1 KiB の確保・解放を 200,000 回繰り返すワークロード（総実行命令数 Ir）',
+        items: [
+          { name: 'mimalloc', val: 30258792, color: '#818cf8' },
+          { name: 'glibc', val: 28548499, color: '#64748b' },
+          { name: 'tcmalloc', val: 22452459, color: '#a78bfa' },
+          { name: 'jemalloc', val: 18907798, color: '#fbbf24' },
+          { name: 'v1', val: 16284566, color: '#94a3b8' },
+          { name: 'v2', val: 11641494, color: '#38bdf8' },
+          { name: 'jit', val: 10548861, color: '#34d399' }
+        ]
+      },
+      churnmix: {
+        desc: '8 種類のサイズを混ぜて 200,000 回確保・解放するワークロード（総実行命令数 Ir）',
+        items: [
+          { name: 'glibc', val: 30949251, color: '#64748b' },
+          { name: 'mimalloc', val: 25858544, color: '#818cf8' },
+          { name: 'tcmalloc', val: 24874395, color: '#a78bfa' },
+          { name: 'jemalloc', val: 19851201, color: '#fbbf24' },
+          { name: 'v1', val: 17163086, color: '#94a3b8' },
+          { name: 'jit', val: 13228924, color: '#34d399' },
+          { name: 'v2', val: 12903211, color: '#38bdf8' }
+        ]
+      },
+      mixed: {
+        desc: 'ランダムサイズで 150,000 回確保・解放する多様なワークロード（総実行命令数 Ir）',
+        items: [
+          { name: 'glibc', val: 30553572, color: '#64748b' },
+          { name: 'tcmalloc', val: 23844564, color: '#a78bfa' },
+          { name: 'jemalloc', val: 19331839, color: '#fbbf24' },
+          { name: 'v1', val: 16239827, color: '#94a3b8' },
+          { name: 'mimalloc', val: 14292674, color: '#818cf8' },
+          { name: 'jit', val: 13347837, color: '#34d399' },
+          { name: 'v2', val: 13071022, color: '#38bdf8' }
+        ]
+      },
+      cross: {
+        desc: '別スレッドが解放するパターンを含む 150,000 回ワークロード（総実行命令数 Ir）',
+        items: [
+          { name: 'glibc', val: 23176552, color: '#64748b' },
+          { name: 'tcmalloc', val: 19496439, color: '#a78bfa' },
+          { name: 'jemalloc', val: 14985103, color: '#fbbf24' },
+          { name: 'v1', val: 12044714, color: '#94a3b8' },
+          { name: 'mimalloc', val: 9610493, color: '#818cf8' },
+          { name: 'v2', val: 8823757, color: '#38bdf8' },
+          { name: 'jit', val: 8706435, color: '#34d399' }
+        ]
+      }
+    };
+
+    function renderBench(key, btn) {
+      document.querySelectorAll('#bench-btns .sim-btn').forEach(b => b.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+      const d = benchData[key];
+      document.getElementById('bench-desc').textContent = d.desc;
+      const max = Math.max(...d.items.map(i => i.val));
+      const container = document.getElementById('bench-bars');
+      container.innerHTML = '';
+
+      d.items.forEach(item => {
+        const row = document.createElement('div');
+        row.className = 'bar-row';
+        const pct = ((item.val / max) * 100).toFixed(1);
+        const isBest = item.val === Math.min(...d.items.map(i => i.val));
+        row.innerHTML = `
+          <span>${isBest ? '<strong>' + item.name + ' ★</strong>' : item.name}</span>
+          <div class="bar-track"><div class="bar-fill" style="width:0%; background:${item.color};"></div></div>
+          <span class="num">${(item.val / 1e6).toFixed(2)}M</span>
+        `;
+        container.appendChild(row);
+        requestAnimationFrame(() => {
+          row.querySelector('.bar-fill').style.width = pct + '%';
+        });
+      });
+    }
+
+    // Initialize interactive widgets on load
+    renderBench('churn64', document.querySelector('#bench-btns .sim-btn'));
+    runSim('fast_malloc', document.querySelector('.sim-stage .sim-btn'));
+  </script>
+</body>
+</html>

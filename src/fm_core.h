@@ -235,6 +235,7 @@ static _Atomic(FM_Batch *) fm_batch_global_head;
 extern __thread void *fm_lcache_head[FM_LCACHE_BUCKETS]
     __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));
+extern __thread uint64_t fm_lcache_warm_mask __attribute__((tls_model("initial-exec")));
 /* Large-block cache hotness (ADR 0011 follow-up): the cache pays off
  * only for sizes the workload allocates again soon; a bucket that
  * keeps receiving frees with no allocation in between (a one-shot
@@ -333,6 +334,10 @@ typedef struct FM_Config {
     uint32_t purge_min_pages;
     uint32_t idle_release;
     uint32_t realloc_cache_search;
+    uint32_t local_limit_div;
+    uint32_t lcache_cold_purge;
+    uint32_t lazy_bump;
+    uint32_t locality_sort;
 } FM_Config;
 
 extern FM_Config fm_cfg;
@@ -354,6 +359,10 @@ static void fm_config_init(void)
     c.purge_min_pages = 4;
     c.idle_release = 0;
     c.realloc_cache_search = 0;
+    c.local_limit_div = 1;
+    c.lcache_cold_purge = 1;
+    c.lazy_bump = 1;
+    c.locality_sort = 0;
 
     const char *prof = getenv("FM_PROFILE");
     if (prof) {
@@ -368,6 +377,7 @@ static void fm_config_init(void)
             c.release_walk_div = 25;
             c.lcache_max_bytes = 256ull << 20;
             c.page_purge = 0;
+            c.lcache_cold_purge = 0;
         } else if (!strcmp(prof, "shortlived")) {
             /* ADR 0052: avoid retaining large temporaries across app phases. */
             c.lcache_max_bytes = 0;
@@ -381,6 +391,8 @@ static void fm_config_init(void)
             c.release_walk_div = 400;
             c.lcache_max_bytes = 8ull << 20;
             c.purge_min_pages = 2;
+            c.local_limit_div = 2;
+            c.lcache_cold_purge = 1;
         }
         /* "balanced" and anything unrecognised keep the defaults. */
     }
@@ -399,6 +411,10 @@ static void fm_config_init(void)
         { "FM_PURGE_MIN_PAGES", &c.purge_min_pages, 1, 15 },
         { "FM_IDLE_RELEASE", &c.idle_release, 0, 1 },
         { "FM_REALLOC_CACHE_SEARCH", &c.realloc_cache_search, 0, 1 },
+        { "FM_LOCAL_LIMIT_DIV", &c.local_limit_div, 1, 16 },
+        { "FM_LCACHE_COLD_PURGE", &c.lcache_cold_purge, 0, 1 },
+        { "FM_LAZY_BUMP", &c.lazy_bump, 0, 1 },
+        { "FM_LOCALITY_SORT", &c.locality_sort, 0, 1 },
     };
     for (size_t i = 0; i < sizeof(num) / sizeof(num[0]); i++) {
         const char *v = getenv(num[i].name);
@@ -632,13 +648,90 @@ static void fm_auto_release_tick(uint32_t flushed_cls);
  * expensive buying that walk back is.)
  */
 
+static inline uint32_t fm_local_limit(uint32_t cls)
+{
+    uint32_t limit = kClassLimit[cls];
+    uint32_t div = FM_CFG()->local_limit_div;
+    if (div > 1) {
+        limit /= div;
+        if (!limit)
+            limit = 1;
+    }
+    return limit;
+}
+
+/* Group a mixed free-list batch by 64 KiB span so consecutive allocations
+ * stay on the same span/pages and reduce D1/TLB misses (opt-in FM_LOCALITY_SORT=1). */
+static void *fm_regroup_by_span(void *head, void **tail_out)
+{
+    enum { NBUCKETS = 16 };
+    uintptr_t keys[NBUCKETS];
+    void *bhead[NBUCKETS];
+    void *btail[NBUCKETS];
+    int nb = 0;
+    void *ov_h = NULL, *ov_t = NULL;
+
+    void *p = head;
+    while (p) {
+        void *next = *(void **)p;
+        uintptr_t sp = (uintptr_t)p & SPAN_MASK;
+        int found = -1;
+        for (int i = 0; i < nb; i++) {
+            if (keys[i] == sp) {
+                found = i;
+                break;
+            }
+        }
+        if (found >= 0) {
+            *(void **)p = bhead[found];
+            bhead[found] = p;
+        } else if (nb < NBUCKETS) {
+            keys[nb] = sp;
+            bhead[nb] = p;
+            btail[nb] = p;
+            *(void **)p = NULL;
+            nb++;
+        } else {
+            *(void **)p = ov_h;
+            if (!ov_t)
+                ov_t = p;
+            ov_h = p;
+        }
+        p = next;
+    }
+
+    void *out_h = NULL, *out_t = NULL;
+    for (int i = 0; i < nb; i++) {
+        if (!out_h) {
+            out_h = bhead[i];
+            out_t = btail[i];
+        } else {
+            *(void **)out_t = bhead[i];
+            out_t = btail[i];
+        }
+    }
+    if (ov_h) {
+        if (!out_h) {
+            out_h = ov_h;
+            out_t = ov_t;
+        } else {
+            *(void **)out_t = ov_h;
+            out_t = ov_t;
+        }
+    }
+    if (out_t)
+        *(void **)out_t = NULL;
+    *tail_out = out_t;
+    return out_h;
+}
+
 /* Take the next block of a class, refilling from the central list or from a
  * fresh span when needed.  Kept out of line so that the malloc fast path
  * needs no callee-saved registers and no stack frame. */
 __attribute__((noinline)) void *fm_refill_class(uint32_t cls)
 {
     fm_arm_thread_exit();
-    uint32_t limit = kClassLimit[cls];
+    uint32_t limit = fm_local_limit(cls);
 
     /* Try the central list first: take a whole batch, O(1). */
     {
@@ -667,14 +760,18 @@ __attribute__((noinline)) void *fm_refill_class(uint32_t cls)
         if (b) {
             /* A span-pure batch going back into service witnesses
              * its span alive: cancel any dead mark (ADR 0020). */
-            if ((b->count & FM_COUNT_MASK) && (b->count & FM_COUNT_PURE)) {
-                ((FM_Span *)((uintptr_t)b->head & SPAN_MASK))->dead_mark = 0;
-                fm_list_span[cls] = (uintptr_t)b->head & SPAN_MASK;
+            void *bh = b->head;
+            void *bt = b->tail;
+            if (b->count & FM_COUNT_PURE) {
+                ((FM_Span *)((uintptr_t)bh & SPAN_MASK))->dead_mark = 0;
+                fm_list_span[cls] = (uintptr_t)bh & SPAN_MASK;
             } else {
+                if (FM_CFG()->locality_sort && bh)
+                    bh = fm_regroup_by_span(bh, &bt);
                 fm_list_span[cls] = 0; /* unknown/mixed */
             }
-            fm_head[cls] = b->head;
-            fm_tail[cls] = b->tail;
+            fm_head[cls] = bh;
+            fm_tail[cls] = bt;
             fm_batch_release(b);
             void *p = fm_head[cls];
             fm_head[cls] = *(void **)p;
@@ -711,29 +808,36 @@ __attribute__((noinline)) void *fm_refill_class(uint32_t cls)
 #endif
         fm_head[cls] = head;
         fm_tail[cls] = t;
-        fm_cnt[cls] = kClassLimit[cls];
+        fm_cnt[cls] = limit;
         fm_list_span[cls] = (uintptr_t)base & SPAN_MASK;
 
         char *rest_cur = cur + (size_t)keep0 * bs;
-        if (avail0 > keep0) {
-            /* Publish remainder as span-pure batch for reuse. */
-            uint32_t rcount = avail0 - keep0;
-            void *rhead = rest_cur;
-            void *rt = rest_cur;
-            for (uint32_t i = 1; i < rcount; i++) {
-                void *next = (char *)rt + bs;
-                *(void **)rt = next;
-                rt = next;
-            }
-            *(void **)rt = NULL;
+        if (FM_CFG()->lazy_bump) {
+            /* Defer touching/linking the remainder of the span until needed
+             * so L1D is not polluted by unused blocks. */
+            fm_bump_ptr[cls] = rest_cur;
+            fm_bump_end[cls] = end;
+        } else {
+            if (avail0 > keep0) {
+                /* Publish remainder as span-pure batch for reuse. */
+                uint32_t rcount = avail0 - keep0;
+                void *rhead = rest_cur;
+                void *rt = rest_cur;
+                for (uint32_t i = 1; i < rcount; i++) {
+                    void *next = (char *)rt + bs;
+                    *(void **)rt = next;
+                    rt = next;
+                }
+                *(void **)rt = NULL;
 #ifdef FM_DEBUG
-            for (uint32_t i = 0; i < rcount; i++)
-                ((uint64_t *)(rest_cur + (size_t)i * bs))[1] = 0xDEADDEADDEADDEADull;
+                for (uint32_t i = 0; i < rcount; i++)
+                    ((uint64_t *)(rest_cur + (size_t)i * bs))[1] = 0xDEADDEADDEADDEADull;
 #endif
-            fm_publish2(rhead, rt, cls, rcount, 1);
+                fm_publish2(rhead, rt, cls, rcount, 1);
+            }
+            fm_bump_ptr[cls] = end;
+            fm_bump_end[cls] = end;
         }
-        fm_bump_ptr[cls] = end;
-        fm_bump_end[cls] = end;
 
         void *p = fm_head[cls];
         fm_head[cls] = *(void **)p;
@@ -758,7 +862,7 @@ __attribute__((noinline)) void *fm_refill_class(uint32_t cls)
 
     fm_head[cls] = head;
     fm_tail[cls] = t;
-    fm_cnt[cls] = kClassLimit[cls];
+    fm_cnt[cls] = limit;
     fm_list_span[cls] = (uintptr_t)head & SPAN_MASK;
 
     void *p = fm_head[cls];
@@ -799,16 +903,12 @@ __attribute__((noinline)) static void fm_flush_bin(uint32_t cls)
     fm_tail[cls] = NULL;
     uintptr_t lspan = fm_list_span[cls];
     fm_list_span[cls] = 0;
-    fm_cnt[cls] = kClassLimit[cls];
+    fm_cnt[cls] = fm_local_limit(cls);
     if (!h)
         return;
-    if (lspan) {
-        uint32_t count = 1;
-        for (void *c = *(void **)h; c; c = *(void **)c) count++;
-        fm_publish2(h, t, cls, count, 1);
-    } else {
-        fm_publish2(h, t, cls, 0, 0);
-    }
+    /* Publish in O(1) without walking the scattered list (ADR 0014);
+     * census walks count==0 batches only if/when a census actually runs. */
+    fm_publish2(h, t, cls, 0, lspan != 0);
 
     /* Automatic span release (ADR 0020): every FM_RELEASE_EVERY
      * flushes of this class, offer the release machinery a tick.
@@ -1872,6 +1972,13 @@ static inline void fm_large_free(FM_Span *sp, void *p)
         if (b < FM_LCACHE_BUCKETS &&
             fm_lcache_bytes + ms <= FM_CFG()->lcache_max_bytes &&
             fm_ltick - fm_lbucket_seen[b] <= FM_LCACHE_HOT_WINDOW) {
+            if (FM_CFG()->lcache_cold_purge &&
+                !(fm_lcache_warm_mask & (1ULL << b))) {
+                uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
+                uintptr_t pend = (sp->map_base + sp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);
+                if (pend > pstart)
+                    (void)madvise((void *)pstart, pend - pstart, MADV_DONTNEED);
+            }
             sp->lnext = (uintptr_t)fm_lcache_head[b];
             fm_lcache_head[b] = sp;
             fm_lcache_bytes += ms;
@@ -1926,6 +2033,8 @@ __attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *z
         for (int i = 0; i < 8 && *link; i++) {
             FM_Span *sp = *link;
             if (fm_large_usable(sp) >= need_map) {
+                if (b < 64)
+                    fm_lcache_warm_mask |= (1ULL << b);
                 *link = (FM_Span *)sp->lnext;
                 fm_lcache_bytes -= sp->map_size;
                 sp->user_size = size;
@@ -2042,9 +2151,28 @@ static inline int fm_is_aligned_ptr(const void *p)
  * cached mappings.  Use only core helpers: TLS teardown must not malloc. */
 static void fm_thread_exit_flush(void)
 {
-    for (uint32_t c = 0; c < CLASS_COUNT; c++)
+    for (uint32_t c = 0; c < CLASS_COUNT; c++) {
         if (fm_head[c])
             fm_flush_bin(c);
+        char *cur = fm_bump_ptr[c];
+        char *end = fm_bump_end[c];
+        if (cur < end) {
+            size_t bs = kClassSize[c];
+            uint32_t rcount = (uint32_t)((end - cur) / bs);
+            fm_bump_ptr[c] = end;
+            if (rcount > 0) {
+                void *rhead = cur;
+                void *rt = cur;
+                for (uint32_t i = 1; i < rcount; i++) {
+                    void *next = (char *)rt + bs;
+                    *(void **)rt = next;
+                    rt = next;
+                }
+                *(void **)rt = NULL;
+                fm_publish2(rhead, rt, c, rcount, 1);
+            }
+        }
+    }
     fm_large_cache_drain();
 }
 

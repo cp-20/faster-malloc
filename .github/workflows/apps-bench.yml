@@ -1,0 +1,139 @@
+name: apps-bench
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      reps:
+        description: "Repetitions per app (REPS)"
+        required: false
+        default: "3"
+      matrix:
+        description: "Include v2 option matrix (1=yes, 0=default only)"
+        required: false
+        default: "1"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages-bench"
+  cancel-in-progress: false
+
+jobs:
+  real-apps-bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain, apps, and competing allocators
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential g++ valgrind python3 nodejs lua5.4 jq sqlite3 \
+            redis-server redis-tools git curl xz-utils \
+            libjemalloc2 libmimalloc2.0
+          sudo apt-get install -y libtcmalloc-minimal4t64 || sudo apt-get install -y libtcmalloc-minimal4
+
+      - name: Build faster-malloc and benchmarks
+        run: make
+
+      - name: Restore benchmark trend history
+        uses: actions/cache@v4
+        with:
+          path: docs/bench-dashboard/history.json
+          key: bench-history-${{ github.sha }}-${{ github.run_id }}
+          restore-keys: |
+            bench-history-
+
+      - name: Run large-scale real-app suite + option matrix (real_suite.py)
+        env:
+          REPS: ${{ inputs.reps || '3' }}
+          MATRIX: ${{ inputs.matrix || '1' }}
+        run: |
+          set -o pipefail
+          python3 bench/apps/real_suite.py | tee real-suite-results.txt
+          {
+            echo "## Large-Scale Real-App Suite + Option Matrix (REPS=${REPS}, MATRIX=${MATRIX})"
+            echo '```'
+            cat real-suite-results.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run Cachegrind (D1 / LL misses & Ir)
+        run: |
+          python3 - <<'PY'
+          import json, re, subprocess
+          res = {}
+          for wl in ("churnmix 50000", "mixed 50000"):
+              res[wl] = {}
+              for name, extra in [
+                  ("v2_default", {}),
+                  ("v2_locality", {"FM_LOCALITY_SORT": "1"}),
+              ]:
+                  env = dict(**__import__("os").environ)
+                  env["LD_PRELOAD"] = f"{env['PWD']}/libfastmalloc2.so"
+                  env.update(extra)
+                  out = subprocess.check_output(
+                      ["valgrind", "--tool=cachegrind", "--cache-sim=yes",
+                       "--cachegrind-out-file=/dev/null", "./bench/instr", *wl.split()],
+                      env=env, stderr=subprocess.STDOUT, text=True
+                  )
+                  def grab(pat):
+                      m = re.search(pat, out)
+                      return int(m.group(1).replace(",", "")) if m else 0
+                  res[wl][name] = {
+                      "ir": grab(r"I refs:\s+([\d,]+)"),
+                      "d1_misses": grab(r"D1  misses:\s+([\d,]+)"),
+                      "ll_misses": grab(r"LL misses:\s+([\d,]+)"),
+                  }
+          open("cachegrind.json", "w").write(json.dumps(res, indent=2))
+          PY
+          {
+            echo "## Cachegrind"
+            echo '```json'
+            cat cachegrind.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Update dashboard history & data.js
+        run: |
+          MSG=$(git log -1 --pretty=%s)
+          python3 bench/apps/build_dashboard.py \
+            --out-dir docs/bench-dashboard \
+            --real-suite bench/apps/work/real_suite/results.json \
+            --cachegrind cachegrind.json \
+            --commit "${GITHUB_SHA}" \
+            --message "$MSG"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/bench-dashboard
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: apps-bench-results
+          path: |
+            real-suite-results.txt
+            bench/apps/work/real_suite/results.json
+            cachegrind.json
+            docs/bench-dashboard/history.json
+          if-no-files-found: ignore
+
+  deploy-dashboard:
+    needs: real-apps-bench
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy dashboard to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

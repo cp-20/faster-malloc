@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ja">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>faster-malloc · Benchmark Telemetry</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <title>faster-malloc · Telemetry Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
   <style>
     :root {
       --bg: #111217;
@@ -19,7 +19,6 @@
       --orange: #ff9830;
       --purple: #b877d9;
       --red: #f2495c;
-      --cyan: #56a64b;
     }
 
     * { box-sizing: border-box; }
@@ -27,12 +26,11 @@
       margin: 0;
       background: var(--bg);
       color: var(--text);
-      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", sans-serif;
       font-size: 13px;
       line-height: 1.5;
     }
 
-    /* Grafana-style top navbar */
     .topbar {
       display: flex;
       align-items: center;
@@ -42,58 +40,57 @@
       border-bottom: 1px solid var(--border);
       position: sticky;
       top: 0;
-      z-index: 20;
+      z-index: 30;
     }
-    .topbar-left {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    .topbar-title {
-      font-size: 15px;
-      font-weight: 600;
-      color: #fff;
-    }
+    .topbar-left { display: flex; align-items: center; gap: 12px; }
+    .topbar-title { font-size: 15px; font-weight: 600; color: #fff; }
     .topbar-sub {
       color: var(--muted);
       font-size: 12px;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     }
-    .toolbar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-    .seg-btn {
-      background: #22252b;
+    .nav-links { display: flex; gap: 8px; flex-wrap: wrap; }
+    .nav-links a {
       color: var(--muted);
+      text-decoration: none;
+      font-size: 12px;
+      padding: 4px 10px;
       border: 1px solid var(--border);
       border-radius: 3px;
-      padding: 5px 11px;
-      font-size: 12px;
-      cursor: pointer;
+      background: #20242a;
     }
-    .seg-btn:hover { color: #fff; border-color: #464c54; }
-    .seg-btn.active {
-      background: #2e343e;
-      color: #fff;
-      border-color: var(--blue);
+    .nav-links a:hover { color: #fff; border-color: var(--blue); }
+
+    .wrap { max-width: 1460px; margin: 0 auto; padding: 16px 18px 56px; }
+
+    .section-hdr {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      margin: 24px 0 10px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border);
+    }
+    .section-hdr h2 {
+      margin: 0;
+      font-size: 14px;
       font-weight: 600;
+      color: #fff;
+      letter-spacing: 0.02em;
     }
+    .section-hdr span { font-size: 11px; color: var(--muted); }
 
-    .wrap {
-      max-width: 1440px;
-      margin: 0 auto;
-      padding: 14px 18px 40px;
-    }
-
-    /* Stat row */
     .stat-row {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
       gap: 10px;
-      margin-bottom: 12px;
+      margin-bottom: 14px;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-bottom: 10px;
     }
     .panel {
       background: var(--panel);
@@ -110,68 +107,47 @@
       justify-content: space-between;
       align-items: center;
     }
-    .panel-meta {
-      font-size: 11px;
-      color: var(--muted);
-      font-weight: 400;
-    }
+    .panel-meta { font-size: 11px; color: var(--muted); font-weight: 400; }
     .stat-val {
-      font-size: 24px;
+      font-size: 23px;
       font-weight: 600;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       color: #fff;
       line-height: 1.2;
     }
-    .stat-sub {
-      font-size: 11px;
-      color: var(--muted);
-      margin-top: 4px;
-    }
+    .stat-sub { font-size: 11px; color: var(--muted); margin-top: 4px; }
 
-    /* Panels Grid */
-    .grid-2 {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 10px;
-      margin-bottom: 12px;
-    }
-    .chart-box {
-      position: relative;
-      height: 230px;
-      width: 100%;
-    }
-    .chart-box.tall {
-      height: 310px;
-    }
+    .echart { width: 100%; height: 240px; }
+    .echart.tall { height: 280px; }
 
-    /* Table */
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 12px;
-    }
-    th, td {
-      border-bottom: 1px solid var(--border);
-      padding: 6px 8px;
-      text-align: left;
-    }
-    th {
-      color: var(--blue);
-      font-weight: 600;
-      background: #14171c;
-    }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { border-bottom: 1px solid var(--border); padding: 6px 8px; text-align: left; }
+    th { color: var(--blue); font-weight: 600; background: #14171c; white-space: nowrap; }
     tr:hover td { background: var(--panel-hover); }
     .num {
       text-align: right;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-variant-numeric: tabular-nums;
+      white-space: nowrap;
     }
+    .tag {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 700;
+      font-family: ui-monospace, monospace;
+    }
+    .tag-win { background: rgba(115, 191, 105, 0.16); color: var(--green); border: 1px solid rgba(115, 191, 105, 0.35); }
+    .tag-loss { background: rgba(242, 73, 92, 0.15); color: var(--red); border: 1px solid rgba(242, 73, 92, 0.35); }
+    .tag-tie { background: rgba(250, 222, 42, 0.14); color: var(--yellow); border: 1px solid rgba(250, 222, 42, 0.35); }
     .best { color: var(--green); font-weight: 600; }
 
-    .legend-note {
-      font-size: 11px;
-      color: var(--muted);
-      margin-bottom: 10px;
+    .wl-group-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--blue);
+      margin: 14px 0 6px;
     }
 
     @media (max-width: 960px) {
@@ -182,94 +158,107 @@
 <body>
   <div class="topbar">
     <div class="topbar-left">
-      <div class="topbar-title">faster-malloc</div>
+      <div class="topbar-title">faster-malloc · Telemetry</div>
       <div class="topbar-sub" id="top-commit">commit: —</div>
     </div>
-    <div class="toolbar">
-      <button class="seg-btn active" id="btn-time" onclick="setMetric('time')">Wall Time (s)</button>
-      <button class="seg-btn" id="btn-rss" onclick="setMetric('rss')">Peak RSS (MiB)</button>
-      <select id="wl-select" class="seg-btn" onchange="onSelectWorkload(this.value)"></select>
+    <div class="nav-links">
+      <a href="#sec-winners">1. 既存最速 vs 自作最速</a>
+      <a href="#sec-apps">2. 実アプリ (Time / RSS)</a>
+      <a href="#sec-cachegrind">3. Cachegrind</a>
+      <a href="#sec-history">4. マトリクス &amp; 履歴</a>
     </div>
   </div>
 
   <div class="wrap">
+    <!-- SECTION 1: Overview & Category Winners -->
+    <div class="section-hdr" id="sec-winners">
+      <h2>1. 概要 &amp; カテゴリ別勝敗（既存最速 vs 自作最速）</h2>
+      <span>実線 = v2 各オプションの時系列 / 横破線 = 競合アロケータ最新値</span>
+    </div>
+
     <div class="stat-row" id="stat-row"></div>
 
-    <div class="legend-note">
-      実線: <code>v2</code> 各オプションの時系列推移 ／ 破線（横棒）: 最新計測における競合アロケータ（<code>glibc</code> / <code>mimalloc</code> / <code>jemalloc</code> / <code>tcmalloc</code>）のベースライン
+    <div class="panel" style="margin-bottom: 14px;">
+      <div class="panel-title">
+        <span>All Categories · Best Existing vs Best Self-Made (Wall Time &amp; Peak RSS)</span>
+        <span class="panel-meta">既存 = glibc / mimalloc / jemalloc / tcmalloc ｜ 自作 = v2_* 全オプション</span>
+      </div>
+      <div style="overflow-x:auto;">
+        <table id="winners-table"></table>
+      </div>
     </div>
 
-    <!-- Primary Focused Workload + Cachegrind -->
+    <!-- SECTION 2: Real-App Workloads Side-by-Side -->
+    <div class="section-hdr" id="sec-apps">
+      <h2>2. 実アプリワークロード推移（左: Wall Time [s] ／ 右: Peak RSS [MiB]）</h2>
+      <span>各チャートでクリックにより凡例 ON/OFF 可能</span>
+    </div>
+    <div id="apps-container"></div>
+
+    <!-- SECTION 3: Cachegrind -->
+    <div class="section-hdr" id="sec-cachegrind">
+      <h2>3. Cachegrind マイクロベンチ推移（D1 Misses &amp; Instructions Ir）</h2>
+      <span>churnmix 50000 / mixed 50000</span>
+    </div>
     <div class="grid-2">
       <div class="panel">
-        <div class="panel-title">
-          <span id="focus-title">Workload Trend</span>
-          <span class="panel-meta">lower is better</span>
-        </div>
-        <div class="chart-box tall"><canvas id="focus-chart"></canvas></div>
+        <div class="panel-title"><span>D1 Cache Misses</span><span class="panel-meta">lower is better</span></div>
+        <div class="echart tall" id="cg-d1"></div>
       </div>
-
       <div class="panel">
-        <div class="panel-title">
-          <span>Cachegrind · D1 Misses &amp; Instructions</span>
-          <span class="panel-meta">churnmix 50000 / mixed 50000</span>
-        </div>
-        <div class="chart-box tall"><canvas id="cg-chart"></canvas></div>
+        <div class="panel-title"><span>Executed Instructions (Ir)</span><span class="panel-meta">lower is better</span></div>
+        <div class="echart tall" id="cg-ir"></div>
       </div>
     </div>
 
-    <!-- All Real-App Workloads Small-Multiples -->
-    <div class="grid-2" id="all-workloads-grid"></div>
-
-    <!-- Option Matrix Table -->
+    <!-- SECTION 4: Matrix & History -->
+    <div class="section-hdr" id="sec-history">
+      <h2>4. 最新オプションマトリクス &amp; コミット履歴</h2>
+      <span id="hist-count"></span>
+    </div>
     <div class="panel" style="margin-bottom: 12px;">
-      <div class="panel-title">
-        <span>Latest Commit · Option Matrix &amp; Competitors</span>
-        <span class="panel-meta" id="matrix-meta"></span>
-      </div>
-      <div style="overflow-x:auto;">
-        <table id="matrix-table"></table>
-      </div>
+      <div class="panel-title"><span>Latest Real-App Matrix (Wall Time s / Peak RSS MiB)</span></div>
+      <div style="overflow-x:auto;"><table id="matrix-table"></table></div>
     </div>
-
-    <!-- Commit Log -->
     <div class="panel">
-      <div class="panel-title">
-        <span>Commit History</span>
-        <span class="panel-meta" id="hist-count"></span>
-      </div>
-      <div style="overflow-x:auto;">
-        <table id="history-table"></table>
-      </div>
+      <div class="panel-title"><span>Commit History Log</span></div>
+      <div style="overflow-x:auto;"><table id="history-table"></table></div>
     </div>
   </div>
 
   <script src="data.js"></script>
   <script>
-    Chart.defaults.color = '#8e9299';
-    Chart.defaults.borderColor = '#2c3235';
-    Chart.defaults.font.family = 'ui-monospace, SFMono-Regular, Menlo, monospace';
-    Chart.defaults.font.size = 11;
-
     const V2_SERIES = [
-      { key: 'v2_default',    label: 'v2_default',    color: '#5794f2' },
-      { key: 'v2_footprint',  label: 'v2_footprint',  color: '#73bf69' },
-      { key: 'v2_shortlived', label: 'v2_shortlived', color: '#56a64b' },
-      { key: 'v2_throughput', label: 'v2_throughput', color: '#ff9830' },
-      { key: 'v2_locality',   label: 'v2_locality',   color: '#b877d9' }
+      { key: 'v2_default',    name: 'v2_default',    color: '#5794f2' },
+      { key: 'v2_footprint',  name: 'v2_footprint',  color: '#73bf69' },
+      { key: 'v2_shortlived', name: 'v2_shortlived', color: '#37b24d' },
+      { key: 'v2_throughput', name: 'v2_throughput', color: '#ff9830' },
+      { key: 'v2_locality',   name: 'v2_locality',   color: '#b877d9' }
+    ];
+    const EXISTING_SERIES = [
+      { key: 'glibc',    name: 'glibc',    color: '#94a3b8', dash: 'dashed' },
+      { key: 'mimalloc', name: 'mimalloc', color: '#fade2a', dash: 'dashed' },
+      { key: 'jemalloc', name: 'jemalloc', color: '#f2495c', dash: 'dotted' },
+      { key: 'tcmalloc', name: 'tcmalloc', color: '#e07a5f', dash: 'dotted' }
     ];
 
-    const REF_LINES = [
-      { key: 'glibc',    label: 'glibc (ref)',    color: '#94a3b8', dash: [6, 4] },
-      { key: 'mimalloc', label: 'mimalloc (ref)', color: '#fade2a', dash: [4, 4] },
-      { key: 'jemalloc', label: 'jemalloc (ref)', color: '#f2495c', dash: [2, 3] },
-      { key: 'tcmalloc', label: 'tcmalloc (ref)', color: '#e07a5f', dash: [8, 3, 2, 3] }
+    const GROUPS = [
+      {
+        title: 'Group A · Compilers, CLI & Parallel Processing (Current CI Suite)',
+        workloads: ['g++_compile', 'jq_large', 'xz_mt2', 'sort_p4', 'git_revlist']
+      },
+      {
+        title: 'Group B · Databases & Managed Runtimes (Current CI Suite)',
+        workloads: ['sqlite_oltp', 'python_data']
+      },
+      {
+        title: 'Group C · Historical App Matrix (Round 5–10 Backfill)',
+        workloads: ['redis', 'sqlite', 'jq_legacy', 'lua', 'python_legacy', 'node', 'gcc', 'git_legacy']
+      }
     ];
 
     let HISTORY = [];
-    let metric = 'time';
-    let focusWl = '';
-    const charts = {};
+    const echartInstances = [];
 
     async function load() {
       try {
@@ -282,10 +271,25 @@
       init();
     }
 
-    function getAllWorkloads() {
-      const set = new Set();
-      HISTORY.forEach(h => Object.keys(h.real_suite || {}).forEach(k => set.add(k)));
-      return Array.from(set);
+    function latestForWorkload(wl) {
+      for (let i = HISTORY.length - 1; i >= 0; i--) {
+        if (HISTORY[i].real_suite && HISTORY[i].real_suite[wl]) {
+          return { entry: HISTORY[i], data: HISTORY[i].real_suite[wl] };
+        }
+      }
+      return null;
+    }
+
+    function bestOf(data, keys, field) {
+      let bestKey = null, bestVal = Infinity;
+      keys.forEach(k => {
+        const cell = data[k];
+        if (cell && typeof cell[field] === 'number' && cell[field] < bestVal) {
+          bestVal = cell[field];
+          bestKey = k;
+        }
+      });
+      return bestKey ? { key: bestKey, val: bestVal } : null;
     }
 
     function init() {
@@ -294,233 +298,279 @@
       document.getElementById('top-commit').textContent =
         `commit: ${latest.commit} · ${latest.timestamp}`;
 
-      const wls = getAllWorkloads();
-      const sel = document.getElementById('wl-select');
-      sel.innerHTML = '';
-      wls.forEach(w => {
-        const opt = document.createElement('option');
-        opt.value = w;
-        opt.textContent = w;
-        sel.appendChild(opt);
-      });
-      focusWl = wls[0] || '';
-      sel.value = focusWl;
-
-      renderStats(latest);
+      renderStatsAndWinners(latest);
+      renderAllWorkloadPanels();
       renderCachegrind();
-      renderAllWorkloads();
-      renderFocus();
       renderMatrixTable(latest);
       renderHistoryTable();
+
+      window.addEventListener('resize', () => echartInstances.forEach(c => c.resize()));
     }
 
-    function setMetric(m) {
-      metric = m;
-      document.getElementById('btn-time').classList.toggle('active', m === 'time');
-      document.getElementById('btn-rss').classList.toggle('active', m === 'rss');
-      renderFocus();
-      renderAllWorkloads();
-      renderMatrixTable(HISTORY[HISTORY.length - 1]);
-    }
+    function renderStatsAndWinners(latest) {
+      const allWls = GROUPS.flatMap(g => g.workloads);
+      let timeWins = 0, rssWins = 0, total = 0;
 
-    function onSelectWorkload(wl) {
-      focusWl = wl;
-      renderFocus();
-    }
+      const v2Keys = V2_SERIES.map(s => s.key);
+      const exKeys = EXISTING_SERIES.map(s => s.key);
 
-    function valOf(cell) {
-      if (!cell) return null;
-      return metric === 'time' ? cell.time_med : +(cell.rss_med_kb / 1024).toFixed(2);
-    }
+      let rowsHtml = `<thead>
+        <tr>
+          <th>Category / Workload</th>
+          <th>既存最速 (Time)</th>
+          <th>自作最速 (Time)</th>
+          <th>Time 勝敗</th>
+          <th>既存最速 (RSS)</th>
+          <th>自作最速 (RSS)</th>
+          <th>RSS 勝敗</th>
+        </tr>
+      </thead><tbody>`;
 
-    function buildDatasetsForWorkload(wl) {
-      const labels = HISTORY.map(h => h.commit.slice(0, 8));
-      const latest = HISTORY[HISTORY.length - 1];
-      const datasets = [];
+      GROUPS.forEach(g => {
+        g.workloads.forEach(wl => {
+          const found = latestForWorkload(wl);
+          if (!found) return;
+          const d = found.data;
+          const exT = bestOf(d, exKeys, 'time_med');
+          const v2T = bestOf(d, v2Keys, 'time_med');
+          const exR = bestOf(d, exKeys, 'rss_med_kb');
+          const v2R = bestOf(d, v2Keys, 'rss_med_kb');
+          if (!exT || !v2T || !exR || !v2R) return;
 
-      V2_SERIES.forEach(s => {
-        const data = HISTORY.map(h => valOf(((h.real_suite || {})[wl] || {})[s.key]));
-        if (data.some(v => v !== null)) {
-          datasets.push({
-            label: s.label,
-            data,
-            borderColor: s.color,
-            backgroundColor: s.color,
-            borderWidth: 2,
-            pointRadius: 3,
-            pointHoverRadius: 5,
-            tension: 0.15,
-            spanGaps: true
-          });
-        }
+          total++;
+          const tDiff = ((v2T.val - exT.val) / exT.val) * 100;
+          const rDiff = ((v2R.val - exR.val) / exR.val) * 100;
+          if (tDiff <= 0) timeWins++;
+          if (rDiff <= 0) rssWins++;
+
+          const tTag = tDiff <= 0
+            ? `<span class="tag tag-win">WIN ${tDiff.toFixed(1)}%</span>`
+            : (tDiff <= 3 ? `<span class="tag tag-tie">NEAR +${tDiff.toFixed(1)}%</span>` : `<span class="tag tag-loss">+${tDiff.toFixed(1)}%</span>`);
+          const rTag = rDiff <= 0
+            ? `<span class="tag tag-win">WIN ${rDiff.toFixed(1)}%</span>`
+            : (rDiff <= 3 ? `<span class="tag tag-tie">NEAR +${rDiff.toFixed(1)}%</span>` : `<span class="tag tag-loss">+${rDiff.toFixed(1)}%</span>`);
+
+          rowsHtml += `<tr>
+            <td><strong>${wl}</strong> <span style="color:var(--muted);font-size:10px;">(${found.entry.commit})</span></td>
+            <td class="num">${exT.key}: ${exT.val.toFixed(3)}s</td>
+            <td class="num ${tDiff <= 0 ? 'best' : ''}">${v2T.key}: ${v2T.val.toFixed(3)}s</td>
+            <td>${tTag}</td>
+            <td class="num">${exR.key}: ${(exR.val/1024).toFixed(1)} MiB</td>
+            <td class="num ${rDiff <= 0 ? 'best' : ''}">${v2R.key}: ${(v2R.val/1024).toFixed(1)} MiB</td>
+            <td>${rTag}</td>
+          </tr>`;
+        });
       });
+      rowsHtml += '</tbody>';
+      document.getElementById('winners-table').innerHTML = rowsHtml;
 
-      // Horizontal reference lines using the latest commit's competitor values
-      REF_LINES.forEach(r => {
-        const refVal = valOf(((latest.real_suite || {})[wl] || {})[r.key]);
-        if (refVal !== null) {
-          datasets.push({
-            label: `${r.label}: ${refVal}`,
-            data: labels.map(() => refVal),
-            borderColor: r.color,
-            borderWidth: 1.5,
-            borderDash: r.dash,
-            pointRadius: 0,
-            pointHoverRadius: 0,
-            fill: false
-          });
-        }
-      });
-
-      return { labels, datasets };
-    }
-
-    function makeLineChart(canvasId, labels, datasets, yLabel) {
-      if (charts[canvasId]) charts[canvasId].destroy();
-      const ctx = document.getElementById(canvasId).getContext('2d');
-      charts[canvasId] = new Chart(ctx, {
-        type: 'line',
-        data: { labels, datasets },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          interaction: { mode: 'index', intersect: false },
-          plugins: {
-            legend: {
-              position: 'bottom',
-              labels: { boxWidth: 12, padding: 10, color: '#d8d9da' }
-            },
-            tooltip: {
-              backgroundColor: '#1f2329',
-              borderColor: '#3a4149',
-              borderWidth: 1
-            }
-          },
-          scales: {
-            x: { grid: { color: '#22262c' } },
-            y: {
-              grid: { color: '#22262c' },
-              title: { display: true, text: yLabel, color: '#8e9299' }
-            }
-          }
-        }
-      });
-    }
-
-    function renderFocus() {
-      if (!focusWl) return;
-      const unit = metric === 'time' ? 'seconds' : 'MiB';
-      document.getElementById('focus-title').textContent = `${focusWl} · ${unit}`;
-      const { labels, datasets } = buildDatasetsForWorkload(focusWl);
-      makeLineChart('focus-chart', labels, datasets, unit);
-    }
-
-    function renderCachegrind() {
-      const labels = HISTORY.map(h => h.commit.slice(0, 8));
-      const datasets = [
-        {
-          label: 'churnmix D1 misses',
-          data: HISTORY.map(h => (((h.cachegrind || {})['churnmix 50000'] || {}).v2_default || {}).d1_misses ?? null),
-          borderColor: '#5794f2',
-          backgroundColor: '#5794f2',
-          borderWidth: 2,
-          pointRadius: 3,
-          spanGaps: true
-        },
-        {
-          label: 'mixed D1 misses',
-          data: HISTORY.map(h => (((h.cachegrind || {})['mixed 50000'] || {}).v2_default || {}).d1_misses ?? null),
-          borderColor: '#ff9830',
-          backgroundColor: '#ff9830',
-          borderWidth: 2,
-          pointRadius: 3,
-          spanGaps: true
-        }
-      ];
-      makeLineChart('cg-chart', labels, datasets, 'D1 misses');
-    }
-
-    function renderAllWorkloads() {
-      const wls = getAllWorkloads();
-      const grid = document.getElementById('all-workloads-grid');
-      grid.innerHTML = '';
-      const unit = metric === 'time' ? 's' : 'MiB';
-
-      wls.forEach(wl => {
-        const cid = `wl-chart-${wl.replace(/[^a-zA-Z0-9]/g, '_')}`;
-        const panel = document.createElement('div');
-        panel.className = 'panel';
-        panel.innerHTML = `
-          <div class="panel-title">
-            <span>${wl}</span>
-            <span class="panel-meta">${unit}</span>
-          </div>
-          <div class="chart-box"><canvas id="${cid}"></canvas></div>
-        `;
-        grid.appendChild(panel);
-        const { labels, datasets } = buildDatasetsForWorkload(wl);
-        makeLineChart(cid, labels, datasets, unit);
-      });
-    }
-
-    function renderStats(latest) {
       const cm = ((latest.cachegrind || {})['churnmix 50000'] || {}).v2_default || {};
       const mx = ((latest.cachegrind || {})['mixed 50000'] || {}).v2_default || {};
-      const rs = latest.real_suite || {};
-      let fastWins = 0, rssWins = 0, total = 0;
-      Object.values(rs).forEach(w => {
-        if (w.v2_default && w.glibc) {
-          total++;
-          if (w.v2_default.time_med <= w.glibc.time_med) fastWins++;
-          if (w.v2_default.rss_med_kb <= w.glibc.rss_med_kb) rssWins++;
-        }
-      });
-
       document.getElementById('stat-row').innerHTML = `
         <div class="panel">
+          <div class="panel-title"><span>Wall Time vs 既存最速</span></div>
+          <div class="stat-val" style="color:var(--yellow)">${timeWins} / ${total}</div>
+          <div class="stat-sub">全カテゴリで最速競合に勝利した割合</div>
+        </div>
+        <div class="panel">
+          <div class="panel-title"><span>Peak RSS vs 既存最速</span></div>
+          <div class="stat-val" style="color:var(--green)">${rssWins} / ${total}</div>
+          <div class="stat-sub">最小メモリ競合に勝利した割合</div>
+        </div>
+        <div class="panel">
           <div class="panel-title"><span>churnmix D1 misses</span></div>
-          <div class="stat-val" style="color:var(--green)">${cm.d1_misses ? cm.d1_misses.toLocaleString() : '—'}</div>
-          <div class="stat-sub">Ir: ${cm.ir ? cm.ir.toLocaleString() : '—'}</div>
+          <div class="stat-val" style="color:var(--blue)">${cm.d1_misses ? cm.d1_misses.toLocaleString() : '—'}</div>
+          <div class="stat-sub">Ir: ${cm.ir ? cm.ir.toLocaleString() : '—'} (baseline: 37,983)</div>
         </div>
         <div class="panel">
           <div class="panel-title"><span>mixed D1 misses</span></div>
-          <div class="stat-val" style="color:var(--blue)">${mx.d1_misses ? mx.d1_misses.toLocaleString() : '—'}</div>
-          <div class="stat-sub">Ir: ${mx.ir ? mx.ir.toLocaleString() : '—'}</div>
-        </div>
-        <div class="panel">
-          <div class="panel-title"><span>Real-App Speed vs glibc</span></div>
-          <div class="stat-val" style="color:var(--yellow)">${fastWins} / ${total}</div>
-          <div class="stat-sub">RSS wins: ${rssWins} / ${total}</div>
-        </div>
-        <div class="panel">
-          <div class="panel-title"><span>Tracked Commits</span></div>
-          <div class="stat-val">${HISTORY.length}</div>
-          <div class="stat-sub">Latest: ${latest.commit}</div>
+          <div class="stat-val" style="color:var(--purple)">${mx.d1_misses ? mx.d1_misses.toLocaleString() : '—'}</div>
+          <div class="stat-sub">Ir: ${mx.ir ? mx.ir.toLocaleString() : '—'} (baseline: 118,473)</div>
         </div>
       `;
+    }
+
+    function createWorkloadChart(elId, wl, metricType) {
+      const relevant = HISTORY.filter(h => h.real_suite && h.real_suite[wl]);
+      if (!relevant.length) return;
+
+      const labels = relevant.map(h => h.commit.slice(0, 8));
+      const latestData = relevant[relevant.length - 1].real_suite[wl];
+      const field = metricType === 'time' ? 'time_med' : 'rss_med_kb';
+      const scale = metricType === 'time' ? 1 : (1 / 1024);
+      const unit = metricType === 'time' ? 's' : 'MiB';
+
+      const series = [];
+      V2_SERIES.forEach(s => {
+        const vals = relevant.map(h => {
+          const c = h.real_suite[wl][s.key];
+          return c ? +(c[field] * scale).toFixed(metricType === 'time' ? 3 : 1) : null;
+        });
+        if (vals.some(v => v !== null)) {
+          series.push({
+            name: s.name,
+            type: 'line',
+            data: vals,
+            smooth: 0.15,
+            symbolSize: 6,
+            connectNulls: true,
+            lineStyle: { width: 2.2, color: s.color },
+            itemStyle: { color: s.color }
+          });
+        }
+      });
+
+      // Add horizontal dashed markLines onto the first v2 series
+      const markLines = [];
+      EXISTING_SERIES.forEach(r => {
+        const c = latestData[r.key];
+        if (c && typeof c[field] === 'number') {
+          const v = +(c[field] * scale).toFixed(metricType === 'time' ? 3 : 1);
+          markLines.push({
+            yAxis: v,
+            name: r.name,
+            lineStyle: { color: r.color, type: r.dash, width: 1.5 },
+            label: {
+              formatter: `${r.name}: ${v}${unit}`,
+              color: r.color,
+              fontSize: 10,
+              position: 'insideEndTop'
+            }
+          });
+        }
+      });
+      if (series.length && markLines.length) {
+        series[0].markLine = {
+          silent: true,
+          symbol: ['none', 'none'],
+          data: markLines
+        };
+      }
+
+      const chart = echarts.init(document.getElementById(elId), null, { renderer: 'canvas' });
+      chart.setOption({
+        backgroundColor: 'transparent',
+        tooltip: {
+          trigger: 'axis',
+          backgroundColor: '#1f2329',
+          borderColor: '#3a4149',
+          textStyle: { color: '#d8d9da', fontSize: 11 }
+        },
+        legend: {
+          bottom: 0,
+          textStyle: { color: '#8e9299', fontSize: 10 },
+          itemWidth: 14,
+          itemHeight: 8
+        },
+        grid: { top: 22, left: 52, right: 18, bottom: 38 },
+        xAxis: {
+          type: 'category',
+          data: labels,
+          axisLine: { lineStyle: { color: '#2c3235' } },
+          axisLabel: { color: '#8e9299', fontSize: 10 }
+        },
+        yAxis: {
+          type: 'value',
+          scale: true,
+          splitLine: { lineStyle: { color: '#22262c' } },
+          axisLabel: { color: '#8e9299', fontSize: 10, formatter: `{value} ${unit}` }
+        },
+        series
+      });
+      echartInstances.push(chart);
+    }
+
+    function renderAllWorkloadPanels() {
+      const container = document.getElementById('apps-container');
+      container.innerHTML = '';
+
+      GROUPS.forEach(g => {
+        const activeWls = g.workloads.filter(wl => latestForWorkload(wl) !== null);
+        if (!activeWls.length) return;
+
+        const hdr = document.createElement('div');
+        hdr.className = 'wl-group-label';
+        hdr.textContent = g.title;
+        container.appendChild(hdr);
+
+        activeWls.forEach(wl => {
+          const safe = wl.replace(/[^a-zA-Z0-9]/g, '_');
+          const row = document.createElement('div');
+          row.className = 'grid-2';
+          row.innerHTML = `
+            <div class="panel">
+              <div class="panel-title"><span>${wl} · Wall Time</span><span class="panel-meta">seconds (lower is better)</span></div>
+              <div class="echart" id="t-${safe}"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-title"><span>${wl} · Peak RSS</span><span class="panel-meta">MiB (lower is better)</span></div>
+              <div class="echart" id="r-${safe}"></div>
+            </div>
+          `;
+          container.appendChild(row);
+          createWorkloadChart(`t-${safe}`, wl, 'time');
+          createWorkloadChart(`r-${safe}`, wl, 'rss');
+        });
+      });
+    }
+
+    function renderCachegrind() {
+      const cgRuns = HISTORY.filter(h => h.cachegrind && Object.keys(h.cachegrind).length);
+      const labels = cgRuns.map(h => h.commit.slice(0, 8));
+
+      const mk = (elId, field, unit) => {
+        const chart = echarts.init(document.getElementById(elId), null, { renderer: 'canvas' });
+        chart.setOption({
+          backgroundColor: 'transparent',
+          tooltip: { trigger: 'axis', backgroundColor: '#1f2329', borderColor: '#3a4149', textStyle: { color: '#d8d9da', fontSize: 11 } },
+          legend: { bottom: 0, textStyle: { color: '#8e9299', fontSize: 11 } },
+          grid: { top: 20, left: 62, right: 18, bottom: 38 },
+          xAxis: { type: 'category', data: labels, axisLine: { lineStyle: { color: '#2c3235' } }, axisLabel: { color: '#8e9299', fontSize: 10 } },
+          yAxis: { type: 'value', scale: true, splitLine: { lineStyle: { color: '#22262c' } }, axisLabel: { color: '#8e9299', fontSize: 10 } },
+          series: [
+            {
+              name: 'churnmix 50000',
+              type: 'line',
+              symbolSize: 7,
+              lineStyle: { width: 2.5, color: '#5794f2' },
+              itemStyle: { color: '#5794f2' },
+              data: cgRuns.map(h => (h.cachegrind['churnmix 50000']?.v2_default || {})[field] ?? null)
+            },
+            {
+              name: 'mixed 50000',
+              type: 'line',
+              symbolSize: 7,
+              lineStyle: { width: 2.5, color: '#ff9830' },
+              itemStyle: { color: '#ff9830' },
+              data: cgRuns.map(h => (h.cachegrind['mixed 50000']?.v2_default || {})[field] ?? null)
+            }
+          ]
+        });
+        echartInstances.push(chart);
+      };
+
+      mk('cg-d1', 'd1_misses', 'misses');
+      mk('cg-ir', 'ir', 'Ir');
     }
 
     function renderMatrixTable(latest) {
       const rs = latest.real_suite || {};
       const wls = Object.keys(rs);
       const cols = [];
-      [...V2_SERIES, ...REF_LINES].forEach(s => {
+      [...V2_SERIES, ...EXISTING_SERIES].forEach(s => {
         if (wls.some(w => rs[w][s.key])) cols.push(s.key);
       });
-      document.getElementById('matrix-meta').textContent =
-        metric === 'time' ? 'Wall Time (s)' : 'Peak RSS (MiB)';
-
-      let html = '<thead><tr><th>Workload</th>' +
-        cols.map(c => `<th class="num">${c}</th>`).join('') + '</tr></thead><tbody>';
-
+      let html = '<thead><tr><th>Workload</th>' + cols.map(c => `<th class="num">${c}</th>`).join('') + '</tr></thead><tbody>';
       wls.forEach(w => {
-        const vals = cols.map(c => valOf(rs[w][c]));
-        const valid = vals.filter(v => v !== null);
-        const minV = valid.length ? Math.min(...valid) : null;
-        html += `<tr><td><strong>${w}</strong></td>` + vals.map(v => {
-          if (v === null) return '<td class="num">—</td>';
-          const cls = v === minV ? 'num best' : 'num';
-          return `<td class="${cls}">${metric === 'time' ? v.toFixed(3) : v.toFixed(1)}</td>`;
+        const minT = Math.min(...cols.map(c => rs[w][c]?.time_med ?? Infinity));
+        const minR = Math.min(...cols.map(c => rs[w][c]?.rss_med_kb ?? Infinity));
+        html += `<tr><td><strong>${w}</strong></td>` + cols.map(c => {
+          const cell = rs[w][c];
+          if (!cell) return '<td class="num">—</td>';
+          const tStr = cell.time_med === minT ? `<span class="best">${cell.time_med.toFixed(3)}s</span>` : `${cell.time_med.toFixed(3)}s`;
+          const rVal = (cell.rss_med_kb / 1024).toFixed(1);
+          const rStr = cell.rss_med_kb === minR ? `<span class="best">${rVal}M</span>` : `${rVal}M`;
+          return `<td class="num">${tStr} / ${rStr}</td>`;
         }).join('') + '</tr>';
       });
       html += '</tbody>';

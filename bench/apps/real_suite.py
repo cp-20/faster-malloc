@@ -33,7 +33,7 @@ def find_allocators():
             allocs.append(("v2_locality", str(v2), {"FM_LOCALITY_SORT": "1"}))
 
     candidates = {
-        "mimalloc": ["libmimalloc.so.2", "libmimalloc.so"],
+        "mimalloc": ["libmimalloc.so.3", "libmimalloc.so.2", "libmimalloc.so"],
         "jemalloc": ["libjemalloc.so.2", "libjemalloc.so"],
         "tcmalloc": ["libtcmalloc_minimal.so.4", "libtcmalloc.so.4"],
     }

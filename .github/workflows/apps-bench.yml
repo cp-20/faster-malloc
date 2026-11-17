@@ -36,7 +36,8 @@ jobs:
           sudo apt-get install -y \
             build-essential g++ valgrind python3 nodejs lua5.4 jq sqlite3 \
             redis-server redis-tools git curl xz-utils \
-            libjemalloc2 libmimalloc2.0
+            libjemalloc2
+          sudo apt-get install -y libmimalloc3 || sudo apt-get install -y libmimalloc2.0
           sudo apt-get install -y libtcmalloc-minimal4t64 || sudo apt-get install -y libtcmalloc-minimal4
 
       - name: Build faster-malloc and benchmarks

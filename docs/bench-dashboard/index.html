@@ -1,197 +1,280 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>faster-malloc Benchmark & Trend Dashboard</title>
+  <title>faster-malloc · Benchmark Telemetry</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <style>
     :root {
-      --bg: #0b1120;
-      --card: #111a2e;
-      --elevated: #17233b;
-      --border: #26354d;
-      --text: #e2e8f0;
-      --muted: #94a3b8;
-      --accent: #38bdf8;
-      --green: #34d399;
-      --amber: #fbbf24;
-      --purple: #818cf8;
-      --rose: #fb7185;
+      --bg: #111217;
+      --panel: #181b1f;
+      --panel-hover: #1f2329;
+      --border: #2c3235;
+      --text: #d8d9da;
+      --muted: #8e9299;
+      --blue: #5794f2;
+      --green: #73bf69;
+      --yellow: #fade2a;
+      --orange: #ff9830;
+      --purple: #b877d9;
+      --red: #f2495c;
+      --cyan: #56a64b;
     }
+
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
       background: var(--bg);
       color: var(--text);
-      line-height: 1.65;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
     }
-    .container { max-width: 1260px; margin: 0 auto; padding: 32px 24px 72px; }
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-end;
-      flex-wrap: wrap;
-      gap: 16px;
-      padding-bottom: 20px;
-      border-bottom: 1px solid var(--border);
-      margin-bottom: 26px;
-    }
-    h1 { margin: 0; font-size: 1.8rem; color: #fff; }
-    .sub { color: var(--muted); font-size: 0.9rem; margin-top: 4px; }
-    .pill {
-      display: inline-block;
-      padding: 4px 12px;
-      border-radius: 999px;
-      font-size: 0.78rem;
-      font-weight: 600;
-      background: rgba(56, 189, 248, 0.14);
-      color: var(--accent);
-      border: 1px solid rgba(56, 189, 248, 0.3);
-    }
-    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }
-    .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; margin-bottom: 24px; }
-    .card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 18px 20px;
-      margin-bottom: 20px;
-    }
-    .card h2 { margin: 0 0 12px; font-size: 1.12rem; color: #fff; }
-    .kpi-val { font-size: 1.65rem; font-weight: 800; color: var(--accent); line-height: 1.2; }
-    .kpi-val.green { color: var(--green); }
-    .kpi-val.amber { color: var(--amber); }
-    .kpi-label { font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
 
-    .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; align-items: center; }
-    .btn {
-      background: var(--elevated);
+    /* Grafana-style top navbar */
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 20px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .topbar-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #fff;
+    }
+    .topbar-sub {
+      color: var(--muted);
+      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .seg-btn {
+      background: #22252b;
       color: var(--muted);
       border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 6px 12px;
-      font-size: 0.84rem;
+      border-radius: 3px;
+      padding: 5px 11px;
+      font-size: 12px;
       cursor: pointer;
-      transition: all 0.15s;
     }
-    .btn:hover { border-color: var(--accent); color: #fff; }
-    .btn.active { background: var(--accent); color: #0b1120; border-color: var(--accent); font-weight: 700; }
+    .seg-btn:hover { color: #fff; border-color: #464c54; }
+    .seg-btn.active {
+      background: #2e343e;
+      color: #fff;
+      border-color: var(--blue);
+      font-weight: 600;
+    }
 
-    .bar-row {
+    .wrap {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 14px 18px 40px;
+    }
+
+    /* Stat row */
+    .stat-row {
       display: grid;
-      grid-template-columns: 145px 1fr 90px;
-      align-items: center;
+      grid-template-columns: repeat(4, 1fr);
       gap: 10px;
-      margin-bottom: 8px;
-      font-size: 0.85rem;
+      margin-bottom: 12px;
     }
-    .bar-track {
-      background: #070c17;
-      border-radius: 5px;
-      height: 20px;
-      overflow: hidden;
+    .panel {
+      background: var(--panel);
       border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 12px 14px;
     }
-    .bar-fill {
-      height: 100%;
-      border-radius: 4px;
-      transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+    .panel-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
     }
-    .num { text-align: right; font-family: ui-monospace, monospace; font-variant-numeric: tabular-nums; }
-    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-    th, td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; }
-    th { background: var(--elevated); color: #fff; }
-    tr:nth-child(even) td { background: rgba(23, 35, 59, 0.4); }
-    .best { color: var(--green); font-weight: 700; }
+    .panel-meta {
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 400;
+    }
+    .stat-val {
+      font-size: 24px;
+      font-weight: 600;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: #fff;
+      line-height: 1.2;
+    }
+    .stat-sub {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
 
-    @media (max-width: 900px) {
-      .grid-4, .grid-2 { grid-template-columns: 1fr; }
+    /* Panels Grid */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .chart-box {
+      position: relative;
+      height: 230px;
+      width: 100%;
+    }
+    .chart-box.tall {
+      height: 310px;
+    }
+
+    /* Table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--border);
+      padding: 6px 8px;
+      text-align: left;
+    }
+    th {
+      color: var(--blue);
+      font-weight: 600;
+      background: #14171c;
+    }
+    tr:hover td { background: var(--panel-hover); }
+    .num {
+      text-align: right;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-variant-numeric: tabular-nums;
+    }
+    .best { color: var(--green); font-weight: 600; }
+
+    .legend-note {
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    @media (max-width: 960px) {
+      .stat-row, .grid-2 { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <header>
-      <div>
-        <h1>faster-malloc Benchmark &amp; Trend Dashboard</h1>
-        <div class="sub">実アプリケーション・オプションマトリクス・Cachegrind 改善トレンド</div>
-      </div>
-      <div>
-        <span class="pill" id="latest-commit">Loading...</span>
-      </div>
-    </header>
+  <div class="topbar">
+    <div class="topbar-left">
+      <div class="topbar-title">faster-malloc</div>
+      <div class="topbar-sub" id="top-commit">commit: —</div>
+    </div>
+    <div class="toolbar">
+      <button class="seg-btn active" id="btn-time" onclick="setMetric('time')">Wall Time (s)</button>
+      <button class="seg-btn" id="btn-rss" onclick="setMetric('rss')">Peak RSS (MiB)</button>
+      <select id="wl-select" class="seg-btn" onchange="onSelectWorkload(this.value)"></select>
+    </div>
+  </div>
 
-    <div class="grid-4" id="kpi-grid"></div>
+  <div class="wrap">
+    <div class="stat-row" id="stat-row"></div>
 
-    <div class="card">
-      <h2>最新コミット: 実アプリ &amp; オプションマトリクス比較</h2>
-      <div class="controls">
-        <span style="color:var(--muted); font-size:0.84rem;">指標:</span>
-        <button class="btn active" id="m-time" onclick="setMetric('time', this)">Wall Time (秒)</button>
-        <button class="btn" id="m-rss" onclick="setMetric('rss', this)">Peak RSS (MiB)</button>
-      </div>
-      <div class="controls" id="workload-btns"></div>
-      <div id="matrix-bars"></div>
+    <div class="legend-note">
+      実線: <code>v2</code> 各オプションの時系列推移 ／ 破線（横棒）: 最新計測における競合アロケータ（<code>glibc</code> / <code>mimalloc</code> / <code>jemalloc</code> / <code>tcmalloc</code>）のベースライン
     </div>
 
+    <!-- Primary Focused Workload + Cachegrind -->
     <div class="grid-2">
-      <div class="card">
-        <h2>トレンド ①: Cachegrind D1 ミス推移 (`churnmix 50000`)</h2>
-        <div id="chart-d1"></div>
+      <div class="panel">
+        <div class="panel-title">
+          <span id="focus-title">Workload Trend</span>
+          <span class="panel-meta">lower is better</span>
+        </div>
+        <div class="chart-box tall"><canvas id="focus-chart"></canvas></div>
       </div>
-      <div class="card">
-        <h2>トレンド ②: 実アプリ Wall Time / RSS 推移</h2>
-        <div class="controls" id="trend-wl-btns"></div>
-        <div id="chart-app"></div>
+
+      <div class="panel">
+        <div class="panel-title">
+          <span>Cachegrind · D1 Misses &amp; Instructions</span>
+          <span class="panel-meta">churnmix 50000 / mixed 50000</span>
+        </div>
+        <div class="chart-box tall"><canvas id="cg-chart"></canvas></div>
       </div>
     </div>
 
-    <div class="card">
-      <h2>コミット別計測履歴</h2>
+    <!-- All Real-App Workloads Small-Multiples -->
+    <div class="grid-2" id="all-workloads-grid"></div>
+
+    <!-- Option Matrix Table -->
+    <div class="panel" style="margin-bottom: 12px;">
+      <div class="panel-title">
+        <span>Latest Commit · Option Matrix &amp; Competitors</span>
+        <span class="panel-meta" id="matrix-meta"></span>
+      </div>
       <div style="overflow-x:auto;">
-        <table id="history-table">
-          <thead>
-            <tr>
-              <th>Commit</th>
-              <th>Message</th>
-              <th>Timestamp</th>
-              <th class="num">churnmix Ir</th>
-              <th class="num">churnmix D1 miss</th>
-              <th class="num">mixed D1 miss</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+        <table id="matrix-table"></table>
+      </div>
+    </div>
+
+    <!-- Commit Log -->
+    <div class="panel">
+      <div class="panel-title">
+        <span>Commit History</span>
+        <span class="panel-meta" id="hist-count"></span>
+      </div>
+      <div style="overflow-x:auto;">
+        <table id="history-table"></table>
       </div>
     </div>
   </div>
 
   <script src="data.js"></script>
   <script>
-    const COLORS = {
-      v2_default: '#38bdf8',
-      v2_footprint: '#34d399',
-      v2_shortlived: '#2dd4bf',
-      v2_throughput: '#0ea5e9',
-      v2_locality: '#a78bfa',
-      glibc: '#64748b',
-      mimalloc: '#818cf8',
-      jemalloc: '#fbbf24',
-      tcmalloc: '#fb7185'
-    };
+    Chart.defaults.color = '#8e9299';
+    Chart.defaults.borderColor = '#2c3235';
+    Chart.defaults.font.family = 'ui-monospace, SFMono-Regular, Menlo, monospace';
+    Chart.defaults.font.size = 11;
+
+    const V2_SERIES = [
+      { key: 'v2_default',    label: 'v2_default',    color: '#5794f2' },
+      { key: 'v2_footprint',  label: 'v2_footprint',  color: '#73bf69' },
+      { key: 'v2_shortlived', label: 'v2_shortlived', color: '#56a64b' },
+      { key: 'v2_throughput', label: 'v2_throughput', color: '#ff9830' },
+      { key: 'v2_locality',   label: 'v2_locality',   color: '#b877d9' }
+    ];
+
+    const REF_LINES = [
+      { key: 'glibc',    label: 'glibc (ref)',    color: '#94a3b8', dash: [6, 4] },
+      { key: 'mimalloc', label: 'mimalloc (ref)', color: '#fade2a', dash: [4, 4] },
+      { key: 'jemalloc', label: 'jemalloc (ref)', color: '#f2495c', dash: [2, 3] },
+      { key: 'tcmalloc', label: 'tcmalloc (ref)', color: '#e07a5f', dash: [8, 3, 2, 3] }
+    ];
 
     let HISTORY = [];
-    let currentMetric = 'time';
-    let currentWorkload = '';
-    let currentTrendWl = '';
+    let metric = 'time';
+    let focusWl = '';
+    const charts = {};
 
-    async function loadData() {
+    async function load() {
       try {
         const res = await fetch('history.json', { cache: 'no-store' });
-        if (res.ok) {
-          HISTORY = await res.json();
-        }
+        if (res.ok) HISTORY = await res.json();
       } catch (_) {}
       if (!HISTORY.length && Array.isArray(window.BENCH_HISTORY)) {
         HISTORY = window.BENCH_HISTORY;
@@ -199,204 +282,271 @@
       init();
     }
 
+    function getAllWorkloads() {
+      const set = new Set();
+      HISTORY.forEach(h => Object.keys(h.real_suite || {}).forEach(k => set.add(k)));
+      return Array.from(set);
+    }
+
     function init() {
       if (!HISTORY.length) return;
       const latest = HISTORY[HISTORY.length - 1];
-      document.getElementById('latest-commit').textContent =
-        `Latest: ${latest.commit} (${latest.timestamp})`;
+      document.getElementById('top-commit').textContent =
+        `commit: ${latest.commit} · ${latest.timestamp}`;
 
-      renderKPIs(latest);
+      const wls = getAllWorkloads();
+      const sel = document.getElementById('wl-select');
+      sel.innerHTML = '';
+      wls.forEach(w => {
+        const opt = document.createElement('option');
+        opt.value = w;
+        opt.textContent = w;
+        sel.appendChild(opt);
+      });
+      focusWl = wls[0] || '';
+      sel.value = focusWl;
 
-      const workloads = Object.keys(latest.real_suite || {});
-      if (workloads.length) {
-        currentWorkload = workloads[0];
-        currentTrendWl = workloads[0];
-        const wb = document.getElementById('workload-btns');
-        const tb = document.getElementById('trend-wl-btns');
-        wb.innerHTML = '';
-        tb.innerHTML = '';
-        workloads.forEach((wl, i) => {
-          const b1 = document.createElement('button');
-          b1.className = 'btn' + (i === 0 ? ' active' : '');
-          b1.textContent = wl;
-          b1.onclick = () => {
-            wb.querySelectorAll('.btn').forEach(x => x.classList.remove('active'));
-            b1.classList.add('active');
-            currentWorkload = wl;
-            renderMatrixBars();
-          };
-          wb.appendChild(b1);
-
-          const b2 = document.createElement('button');
-          b2.className = 'btn' + (i === 0 ? ' active' : '');
-          b2.textContent = wl;
-          b2.onclick = () => {
-            tb.querySelectorAll('.btn').forEach(x => x.classList.remove('active'));
-            b2.classList.add('active');
-            currentTrendWl = wl;
-            renderAppTrend();
-          };
-          tb.appendChild(b2);
-        });
-        renderMatrixBars();
-        renderAppTrend();
-      }
-
-      renderD1Trend();
+      renderStats(latest);
+      renderCachegrind();
+      renderAllWorkloads();
+      renderFocus();
+      renderMatrixTable(latest);
       renderHistoryTable();
     }
 
-    function renderKPIs(latest) {
-      const cg = (latest.cachegrind || {})['churnmix 50000'] || {};
-      const v2cg = cg.v2_default || {};
-      const rs = latest.real_suite || {};
-      let winsVsGlibc = 0, totalWl = 0;
-      Object.values(rs).forEach(w => {
-        if (w.v2_default && w.glibc) {
-          totalWl++;
-          if (w.v2_default.time_med <= w.glibc.time_med) winsVsGlibc++;
+    function setMetric(m) {
+      metric = m;
+      document.getElementById('btn-time').classList.toggle('active', m === 'time');
+      document.getElementById('btn-rss').classList.toggle('active', m === 'rss');
+      renderFocus();
+      renderAllWorkloads();
+      renderMatrixTable(HISTORY[HISTORY.length - 1]);
+    }
+
+    function onSelectWorkload(wl) {
+      focusWl = wl;
+      renderFocus();
+    }
+
+    function valOf(cell) {
+      if (!cell) return null;
+      return metric === 'time' ? cell.time_med : +(cell.rss_med_kb / 1024).toFixed(2);
+    }
+
+    function buildDatasetsForWorkload(wl) {
+      const labels = HISTORY.map(h => h.commit.slice(0, 8));
+      const latest = HISTORY[HISTORY.length - 1];
+      const datasets = [];
+
+      V2_SERIES.forEach(s => {
+        const data = HISTORY.map(h => valOf(((h.real_suite || {})[wl] || {})[s.key]));
+        if (data.some(v => v !== null)) {
+          datasets.push({
+            label: s.label,
+            data,
+            borderColor: s.color,
+            backgroundColor: s.color,
+            borderWidth: 2,
+            pointRadius: 3,
+            pointHoverRadius: 5,
+            tension: 0.15,
+            spanGaps: true
+          });
         }
       });
 
-      const grid = document.getElementById('kpi-grid');
-      grid.innerHTML = `
-        <div class="card" style="margin:0">
-          <div class="kpi-val green">${v2cg.d1_misses ? v2cg.d1_misses.toLocaleString() : '—'}</div>
-          <div class="kpi-label">churnmix D1 misses (v2_default)</div>
+      // Horizontal reference lines using the latest commit's competitor values
+      REF_LINES.forEach(r => {
+        const refVal = valOf(((latest.real_suite || {})[wl] || {})[r.key]);
+        if (refVal !== null) {
+          datasets.push({
+            label: `${r.label}: ${refVal}`,
+            data: labels.map(() => refVal),
+            borderColor: r.color,
+            borderWidth: 1.5,
+            borderDash: r.dash,
+            pointRadius: 0,
+            pointHoverRadius: 0,
+            fill: false
+          });
+        }
+      });
+
+      return { labels, datasets };
+    }
+
+    function makeLineChart(canvasId, labels, datasets, yLabel) {
+      if (charts[canvasId]) charts[canvasId].destroy();
+      const ctx = document.getElementById(canvasId).getContext('2d');
+      charts[canvasId] = new Chart(ctx, {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { boxWidth: 12, padding: 10, color: '#d8d9da' }
+            },
+            tooltip: {
+              backgroundColor: '#1f2329',
+              borderColor: '#3a4149',
+              borderWidth: 1
+            }
+          },
+          scales: {
+            x: { grid: { color: '#22262c' } },
+            y: {
+              grid: { color: '#22262c' },
+              title: { display: true, text: yLabel, color: '#8e9299' }
+            }
+          }
+        }
+      });
+    }
+
+    function renderFocus() {
+      if (!focusWl) return;
+      const unit = metric === 'time' ? 'seconds' : 'MiB';
+      document.getElementById('focus-title').textContent = `${focusWl} · ${unit}`;
+      const { labels, datasets } = buildDatasetsForWorkload(focusWl);
+      makeLineChart('focus-chart', labels, datasets, unit);
+    }
+
+    function renderCachegrind() {
+      const labels = HISTORY.map(h => h.commit.slice(0, 8));
+      const datasets = [
+        {
+          label: 'churnmix D1 misses',
+          data: HISTORY.map(h => (((h.cachegrind || {})['churnmix 50000'] || {}).v2_default || {}).d1_misses ?? null),
+          borderColor: '#5794f2',
+          backgroundColor: '#5794f2',
+          borderWidth: 2,
+          pointRadius: 3,
+          spanGaps: true
+        },
+        {
+          label: 'mixed D1 misses',
+          data: HISTORY.map(h => (((h.cachegrind || {})['mixed 50000'] || {}).v2_default || {}).d1_misses ?? null),
+          borderColor: '#ff9830',
+          backgroundColor: '#ff9830',
+          borderWidth: 2,
+          pointRadius: 3,
+          spanGaps: true
+        }
+      ];
+      makeLineChart('cg-chart', labels, datasets, 'D1 misses');
+    }
+
+    function renderAllWorkloads() {
+      const wls = getAllWorkloads();
+      const grid = document.getElementById('all-workloads-grid');
+      grid.innerHTML = '';
+      const unit = metric === 'time' ? 's' : 'MiB';
+
+      wls.forEach(wl => {
+        const cid = `wl-chart-${wl.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        const panel = document.createElement('div');
+        panel.className = 'panel';
+        panel.innerHTML = `
+          <div class="panel-title">
+            <span>${wl}</span>
+            <span class="panel-meta">${unit}</span>
+          </div>
+          <div class="chart-box"><canvas id="${cid}"></canvas></div>
+        `;
+        grid.appendChild(panel);
+        const { labels, datasets } = buildDatasetsForWorkload(wl);
+        makeLineChart(cid, labels, datasets, unit);
+      });
+    }
+
+    function renderStats(latest) {
+      const cm = ((latest.cachegrind || {})['churnmix 50000'] || {}).v2_default || {};
+      const mx = ((latest.cachegrind || {})['mixed 50000'] || {}).v2_default || {};
+      const rs = latest.real_suite || {};
+      let fastWins = 0, rssWins = 0, total = 0;
+      Object.values(rs).forEach(w => {
+        if (w.v2_default && w.glibc) {
+          total++;
+          if (w.v2_default.time_med <= w.glibc.time_med) fastWins++;
+          if (w.v2_default.rss_med_kb <= w.glibc.rss_med_kb) rssWins++;
+        }
+      });
+
+      document.getElementById('stat-row').innerHTML = `
+        <div class="panel">
+          <div class="panel-title"><span>churnmix D1 misses</span></div>
+          <div class="stat-val" style="color:var(--green)">${cm.d1_misses ? cm.d1_misses.toLocaleString() : '—'}</div>
+          <div class="stat-sub">Ir: ${cm.ir ? cm.ir.toLocaleString() : '—'}</div>
         </div>
-        <div class="card" style="margin:0">
-          <div class="kpi-val">${v2cg.ir ? (v2cg.ir / 1e6).toFixed(2) + 'M' : '—'}</div>
-          <div class="kpi-label">churnmix Instructions Ir (v2_default)</div>
+        <div class="panel">
+          <div class="panel-title"><span>mixed D1 misses</span></div>
+          <div class="stat-val" style="color:var(--blue)">${mx.d1_misses ? mx.d1_misses.toLocaleString() : '—'}</div>
+          <div class="stat-sub">Ir: ${mx.ir ? mx.ir.toLocaleString() : '—'}</div>
         </div>
-        <div class="card" style="margin:0">
-          <div class="kpi-val amber">${winsVsGlibc} / ${totalWl}</div>
-          <div class="kpi-label">実アプリ速度勝率 vs glibc</div>
+        <div class="panel">
+          <div class="panel-title"><span>Real-App Speed vs glibc</span></div>
+          <div class="stat-val" style="color:var(--yellow)">${fastWins} / ${total}</div>
+          <div class="stat-sub">RSS wins: ${rssWins} / ${total}</div>
         </div>
-        <div class="card" style="margin:0">
-          <div class="kpi-val">${HISTORY.length}</div>
-          <div class="kpi-label">記録済みコミット数</div>
+        <div class="panel">
+          <div class="panel-title"><span>Tracked Commits</span></div>
+          <div class="stat-val">${HISTORY.length}</div>
+          <div class="stat-sub">Latest: ${latest.commit}</div>
         </div>
       `;
     }
 
-    function setMetric(m, btn) {
-      currentMetric = m;
-      document.getElementById('m-time').classList.remove('active');
-      document.getElementById('m-rss').classList.remove('active');
-      btn.classList.add('active');
-      renderMatrixBars();
-    }
-
-    function renderMatrixBars() {
-      const latest = HISTORY[HISTORY.length - 1];
-      const wdata = (latest.real_suite || {})[currentWorkload] || {};
-      const entries = Object.entries(wdata).map(([name, m]) => ({
-        name,
-        val: currentMetric === 'time' ? m.time_med : (m.rss_med_kb / 1024)
-      })).sort((a, b) => a.val - b.val);
-
-      const container = document.getElementById('matrix-bars');
-      container.innerHTML = '';
-      if (!entries.length) return;
-      const max = Math.max(...entries.map(e => e.val));
-      const min = entries[0].val;
-
-      entries.forEach(e => {
-        const pct = max > 0 ? ((e.val / max) * 100).toFixed(1) : 0;
-        const unit = currentMetric === 'time' ? 's' : 'MiB';
-        const formatted = currentMetric === 'time' ? e.val.toFixed(3) : e.val.toFixed(1);
-        const color = COLORS[e.name] || '#94a3b8';
-        const row = document.createElement('div');
-        row.className = 'bar-row';
-        row.innerHTML = `
-          <span>${e.val === min ? '<strong>' + e.name + ' ★</strong>' : e.name}</span>
-          <div class="bar-track"><div class="bar-fill" style="width:${pct}%; background:${color};"></div></div>
-          <span class="num">${formatted} ${unit}</span>
-        `;
-        container.appendChild(row);
+    function renderMatrixTable(latest) {
+      const rs = latest.real_suite || {};
+      const wls = Object.keys(rs);
+      const cols = [];
+      [...V2_SERIES, ...REF_LINES].forEach(s => {
+        if (wls.some(w => rs[w][s.key])) cols.push(s.key);
       });
-    }
+      document.getElementById('matrix-meta').textContent =
+        metric === 'time' ? 'Wall Time (s)' : 'Peak RSS (MiB)';
 
-    function renderLineChart(elId, seriesList, labels, unit) {
-      const el = document.getElementById(elId);
-      const allVals = seriesList.flatMap(s => s.values.filter(v => v !== null));
-      if (!allVals.length) { el.innerHTML = '<div class="sub">データなし</div>'; return; }
-      const W = 520, H = 200, padL = 52, padR = 16, padT = 18, padB = 34;
-      const minV = Math.min(...allVals) * 0.9;
-      const maxV = Math.max(...allVals) * 1.08 || 1;
-      const n = labels.length;
+      let html = '<thead><tr><th>Workload</th>' +
+        cols.map(c => `<th class="num">${c}</th>`).join('') + '</tr></thead><tbody>';
 
-      const xOf = i => padL + (n <= 1 ? (W - padL - padR) / 2 : (i / (n - 1)) * (W - padL - padR));
-      const yOf = v => padT + (1 - (v - minV) / (maxV - minV || 1)) * (H - padT - padB);
-
-      let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg">`;
-      for (let g = 0; g <= 3; g++) {
-        const y = padT + (g / 3) * (H - padT - padB);
-        const val = maxV - (g / 3) * (maxV - minV);
-        svg += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="#26354d" stroke-dasharray="3 3"/>`;
-        svg += `<text x="${padL-6}" y="${y+4}" fill="#94a3b8" font-size="10" text-anchor="end">${val >= 1000 ? (val/1000).toFixed(1)+'k' : val.toFixed(2)}</text>`;
-      }
-      labels.forEach((lb, i) => {
-        if (n <= 8 || i === 0 || i === n - 1 || i % Math.ceil(n / 6) === 0) {
-          svg += `<text x="${xOf(i)}" y="${H-10}" fill="#94a3b8" font-size="10" text-anchor="middle">${lb}</text>`;
-        }
+      wls.forEach(w => {
+        const vals = cols.map(c => valOf(rs[w][c]));
+        const valid = vals.filter(v => v !== null);
+        const minV = valid.length ? Math.min(...valid) : null;
+        html += `<tr><td><strong>${w}</strong></td>` + vals.map(v => {
+          if (v === null) return '<td class="num">—</td>';
+          const cls = v === minV ? 'num best' : 'num';
+          return `<td class="${cls}">${metric === 'time' ? v.toFixed(3) : v.toFixed(1)}</td>`;
+        }).join('') + '</tr>';
       });
-      seriesList.forEach(s => {
-        const pts = s.values.map((v, i) => v === null ? null : `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).filter(Boolean);
-        if (pts.length >= 2) {
-          svg += `<polyline fill="none" stroke="${s.color}" stroke-width="2.5" points="${pts.join(' ')}"/>`;
-        }
-        s.values.forEach((v, i) => {
-          if (v !== null) {
-            svg += `<circle cx="${xOf(i)}" cy="${yOf(v)}" r="4" fill="${s.color}"><title>${s.name}: ${v} ${unit}</title></circle>`;
-          }
-        });
-      });
-      svg += `</svg>`;
-      const legend = seriesList.map(s => `<span style="margin-right:12px;font-size:0.78rem;color:${s.color};">● ${s.name}</span>`).join('');
-      el.innerHTML = svg + `<div style="margin-top:6px;">${legend}</div>`;
-    }
-
-    function renderD1Trend() {
-      const labels = HISTORY.map(h => h.commit.slice(0, 8));
-      const vals = HISTORY.map(h => (((h.cachegrind || {})['churnmix 50000'] || {}).v2_default || {}).d1_misses ?? null);
-      renderLineChart('chart-d1', [{ name: 'v2_default D1 misses', color: '#38bdf8', values: vals }], labels, 'misses');
-    }
-
-    function renderAppTrend() {
-      const labels = HISTORY.map(h => h.commit.slice(0, 8));
-      const keys = ['v2_default', 'v2_footprint', 'glibc', 'mimalloc'];
-      const series = keys.map(k => ({
-        name: k,
-        color: COLORS[k] || '#94a3b8',
-        values: HISTORY.map(h => {
-          const w = ((h.real_suite || {})[currentTrendWl] || {})[k];
-          return w ? w.time_med : null;
-        })
-      })).filter(s => s.values.some(v => v !== null));
-      renderLineChart('chart-app', series, labels, 's');
+      html += '</tbody>';
+      document.getElementById('matrix-table').innerHTML = html;
     }
 
     function renderHistoryTable() {
-      const tbody = document.querySelector('#history-table tbody');
-      tbody.innerHTML = '';
+      document.getElementById('hist-count').textContent = `${HISTORY.length} runs`;
+      let html = '<thead><tr><th>Commit</th><th>Message</th><th>Timestamp</th><th class="num">churnmix Ir</th><th class="num">churnmix D1</th><th class="num">mixed D1</th></tr></thead><tbody>';
       [...HISTORY].reverse().forEach(h => {
         const cm = ((h.cachegrind || {})['churnmix 50000'] || {}).v2_default || {};
         const mx = ((h.cachegrind || {})['mixed 50000'] || {}).v2_default || {};
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
+        html += `<tr>
           <td><code>${h.commit}</code></td>
           <td>${h.message || '—'}</td>
           <td>${h.timestamp}</td>
           <td class="num">${cm.ir ? cm.ir.toLocaleString() : '—'}</td>
           <td class="num">${cm.d1_misses ? cm.d1_misses.toLocaleString() : '—'}</td>
           <td class="num">${mx.d1_misses ? mx.d1_misses.toLocaleString() : '—'}</td>
-        `;
-        tbody.appendChild(tr);
+        </tr>`;
       });
+      html += '</tbody>';
+      document.getElementById('history-table').innerHTML = html;
     }
 
-    loadData();
+    load();
   </script>
 </body>
 </html>

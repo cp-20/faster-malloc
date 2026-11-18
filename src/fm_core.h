@@ -376,7 +376,7 @@ static void fm_config_init(void)
     c.idle_release = 0;
     c.realloc_cache_search = 0;
     c.local_limit_div = 1;
-    c.lcache_cold_purge = 1;
+    c.lcache_cold_purge = 0;
     c.lazy_bump = 1;
     c.locality_sort = 0;
 
@@ -669,6 +669,44 @@ static char *fm_map_dense_span(void)
     return span;
 }
 
+/* Per-thread 2 MiB base-page slab for >4 KiB class spans and <=512 KiB
+ * large allocations: amortizes mmap/trim syscalls without hinting THP on
+ * potentially sparse allocations, and drains on malloc_trim / thread exit. */
+static _Thread_local char *fm_lextent_cur __attribute__((tls_model("initial-exec")));
+static _Thread_local size_t fm_lextent_rem __attribute__((tls_model("initial-exec")));
+
+static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out)
+{
+    size_t need = FM_ALIGN_UP(bytes + HEADER_SIZE, SPAN_SIZE);
+    if (fm_lextent_rem >= need) {
+        char *base = fm_lextent_cur;
+        fm_lextent_cur += need;
+        fm_lextent_rem -= need;
+        *raw_out = (uintptr_t)base;
+        *len_out = need;
+        return base;
+    }
+    if (fm_lextent_rem) {
+        munmap(fm_lextent_cur, fm_lextent_rem);
+        fm_lextent_cur = NULL;
+        fm_lextent_rem = 0;
+    }
+    size_t slab_len = (2u << 20) + SPAN_SIZE;
+    char *raw = mmap(NULL, slab_len, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (raw == MAP_FAILED)
+        return NULL;
+    char *aligned = (char *)FM_ALIGN_UP((uintptr_t)raw, SPAN_SIZE);
+    size_t head_slack = (size_t)(aligned - raw);
+    if (head_slack)
+        munmap(raw, head_slack);
+    *raw_out = (uintptr_t)aligned;
+    *len_out = need;
+    fm_lextent_cur = aligned + need;
+    fm_lextent_rem = slab_len - head_slack - need;
+    return aligned;
+}
+
 /* Map and initialise a fresh span for class cls.  Blocks are carved
  * lazily from the span's bump range by the refill path, so creation
  * does not touch every block's memory. */
@@ -677,17 +715,27 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
     size_t bs = kClassSize[cls];
     size_t bytes = SPAN_SIZE;
 #ifdef FM_SMALL_FIRST_SPAN
-    /* ADR 0060: sparsely used startup classes need no full span of blocks.
-     * Grow subsequent spans normally; the atomic only runs once.  Carve the
-     * 64 KiB VA slot from fm_map_dense_span() when bs <= FM_PAGE_SIZE so we
-     * avoid 3 mmap/munmap syscalls per class while leaving tail pages untouched. */
+    /* ADR 0060: sparsely used startup classes cap initial carved blocks
+     * while still drawing 64 KiB VA slots from the shared dense extent. */
     static _Atomic unsigned char started[CLASS_COUNT];
     bytes = atomic_exchange_explicit(&started[cls], 1, memory_order_relaxed)
         ? SPAN_SIZE : FM_ALIGN_UP(HEADER_SIZE + (bs > 16320 ? bs : 16320), FM_PAGE_SIZE);
 #endif
     size_t n = (bytes - HEADER_SIZE) / bs;
-    int dense = bs <= FM_PAGE_SIZE;
-    char *base = dense ? fm_map_dense_span() : fm_map_aligned(bytes - HEADER_SIZE);
+    uintptr_t raw_base = 0;
+    size_t raw_len = SPAN_SIZE;
+    char *base;
+    if (bs <= FM_PAGE_SIZE) {
+        base = fm_map_dense_span();
+        raw_base = (uintptr_t)base;
+    } else {
+        base = fm_map_large_slab(SPAN_SIZE - HEADER_SIZE, &raw_base, &raw_len);
+        if (!base) {
+            base = fm_map_aligned(SPAN_SIZE - HEADER_SIZE);
+            raw_base = (uintptr_t)base;
+            raw_len = SPAN_SIZE;
+        }
+    }
     if (!base)
         return NULL;
 
@@ -696,8 +744,8 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
     sp->magic = FM_SPAN_MAGIC;
     sp->nblocks = (uint32_t)n;
     sp->dead_mark = 0;
-    sp->map_base = (uintptr_t)base;
-    sp->map_size = dense ? SPAN_SIZE : bytes;
+    sp->map_base = raw_base;
+    sp->map_size = raw_len;
     sp->user_size = 0;
     sp->align = 0;
     sp->purge_mark = 0;
@@ -2155,6 +2203,12 @@ static inline size_t fm_large_cache_drain(void)
         }
     }
     fm_lcache_bytes = 0;
+    if (fm_lextent_rem) {
+        if (munmap(fm_lextent_cur, fm_lextent_rem) == 0)
+            released += fm_lextent_rem;
+        fm_lextent_cur = NULL;
+        fm_lextent_rem = 0;
+    }
     return released;
 }
 
@@ -2211,6 +2265,52 @@ __attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *z
 static void *fm_large_alloc_map(size_t size, int *zeroed)
 {
     size_t growing_from = fm_grow_from;
+    /* Before mapping fresh pages, carve from a larger cached block (up to
+     * 4 MiB) so medium-large bursts and sub-4 MiB growth reuse already-
+     * resident mappings left by earlier phases. */
+    if (size <= (2u << 20) && !(growing_from && FM_CFG()->realloc_cache_search)) {
+        size_t need_map = FM_ALIGN_UP(size + HEADER_SIZE, FM_PAGE_SIZE);
+        int nb = 63 - __builtin_clzll(need_map);
+        size_t want = size;
+        if (growing_from && size - growing_from < growing_from)
+            want += size;
+        size_t carve = FM_ALIGN_UP(want + HEADER_SIZE, SPAN_SIZE);
+        for (int b = nb + 2; b <= 22 && b < FM_LCACHE_BUCKETS; b++) {
+            FM_Span **link = (FM_Span **)&fm_lcache_head[b];
+            for (int i = 0; i < 8 && *link; i++) {
+                FM_Span *sp = *link;
+                size_t usable = fm_large_usable(sp);
+                if (usable <= (4u << 20) && usable >= need_map) {
+                    *link = (FM_Span *)sp->lnext;
+                    fm_lcache_bytes -= sp->map_size;
+                    if (usable >= carve + SPAN_SIZE + FM_PAGE_SIZE) {
+                        uintptr_t map_end = sp->map_base + sp->map_size;
+                        uintptr_t rem_addr = (uintptr_t)sp + carve;
+                        FM_Span *rem = (FM_Span *)rem_addr;
+                        rem->cls = LARGE_CLASS;
+                        rem->magic = FM_SPAN_MAGIC;
+                        rem->nblocks = 1;
+                        rem->map_base = rem_addr;
+                        rem->map_size = map_end - rem_addr;
+                        rem->user_size = 0;
+                        rem->align = 0;
+                        int rb = 63 - __builtin_clzll(rem->map_size);
+                        rem->lnext = (uintptr_t)fm_lcache_head[rb];
+                        fm_lcache_head[rb] = rem;
+                        fm_lcache_bytes += rem->map_size;
+                        fm_lbucket_seen[rb] = fm_ltick;
+                        sp->map_size = rem_addr - sp->map_base;
+                    }
+                    sp->user_size = size;
+                    sp->lnext = 0;
+                    if (zeroed)
+                        *zeroed = 0;
+                    return (void *)((char *)sp + HEADER_SIZE);
+                }
+                link = (FM_Span **)&sp->lnext;
+            }
+        }
+    }
     uintptr_t raw = 0;
     size_t raw_len = 0;
     /* A buffer growing in sub-doubling steps would otherwise copy and
@@ -2225,7 +2325,11 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
             capacity = FM_ALIGN_UP(capacity + HEADER_SIZE + SPAN_SIZE, huge_page)
                      - HEADER_SIZE - SPAN_SIZE;
     }
-    char *base = fm_map_large(capacity, &raw, &raw_len);
+    char *base = NULL;
+    if (capacity + HEADER_SIZE <= 8 * SPAN_SIZE)
+        base = fm_map_large_slab(capacity, &raw, &raw_len);
+    if (!base)
+        base = fm_map_large(capacity, &raw, &raw_len);
     if (!base && capacity != size)
         base = fm_map_large(size, &raw, &raw_len);
     if (!base)

@@ -86,4 +86,5 @@ mark were recorded when the work was done.
 | [0074](0074-large-cache-hot-window.md) | Large-block cache hot window (teardown detection) | Accepted (cb178ee) |
 | [0075](0075-incremental-realloc-growth.md) | Reserve capacity for incremental realloc growth | Accepted |
 | [0076](0076-dense-extents-locked-batch-pool-paced-prompt.md) | Dense span extents, locked batch pool, paced regroup prompt | Accepted |
+| [0077](0077-large-slab-cache-splitting-dense-first-spans.md) | Per-thread large slab, cached-mapping splitting, dense first spans | Accepted |
 | [0078](0078-small-object-fastpath-and-census-syscalls.md) | Frameless single-TLS free/calloc/realloc, C++17/C23 sized & aligned paths, and syscall-free census/first-span reuse | Accepted |

@@ -253,6 +253,39 @@ int main(int argc, char **argv)
             if (z2[i]) { printf("large calloc2 not zero\n"); return 1; }
         free(z2);
     }
+    /* ADR 0077: splitting a <=4 MiB cached mapping across smaller large
+     * malloc/calloc requests must isolate slices, zero calloc hits, and
+     * release any split remainder and TLS large-slab tail on malloc_trim. */
+    {
+        malloc_trim(0);
+        unsigned char *seed = malloc(2 * 1024 * 1024);
+        if (!seed) { printf("split seed null\n"); return 1; }
+        memset(seed, 0x5c, 2 * 1024 * 1024);
+        free(seed);
+        unsigned char *slices[8];
+        for (int i = 0; i < 8; i++) {
+            size_t sz = 140 * 1024;
+            slices[i] = (i & 1) ? calloc(1, sz) : malloc(sz);
+            if (!slices[i] || malloc_usable_size(slices[i]) < sz) {
+                printf("split slice %d invalid\n", i);
+                return 1;
+            }
+            if (i & 1) {
+                for (size_t k = 0; k < sz; k++)
+                    if (slices[i][k] != 0) { printf("split calloc dirty at %d\n", i); return 1; }
+            }
+            memset(slices[i], 0x20 + i, sz);
+        }
+        for (int i = 0; i < 8; i++) {
+            for (size_t k = 0; k < 140 * 1024; k += 4096)
+                if (slices[i][k] != (unsigned char)(0x20 + i)) {
+                    printf("split slice %d clobbered\n", i);
+                    return 1;
+                }
+            free(slices[i]);
+        }
+        malloc_trim(0);
+    }
     /* span release and malloc_trim (ADRs 0014/0015): allocate enough
      * same-class blocks to fill several spans, free them all (which
      * completes the spans), trim, then allocate the same amount again

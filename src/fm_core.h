@@ -70,6 +70,7 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <signal.h>
+#include <dlfcn.h>
 #ifdef FM_DEBUG
 #include <stdio.h>
 #endif
@@ -83,14 +84,20 @@
 
 static inline void *fm_malloc(size_t size);
 
-/* Thread-local free list state, one parallel array per field so that every
- * hot access uses an 8-byte (or 4-byte) stride. */
-extern __thread void *fm_head[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
-extern __thread void *fm_tail[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
-extern __thread uint32_t fm_cnt[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
+/* Hot thread-local free-list state grouped into one struct with parallel
+ * arrays inside it: head sits at offset 0 so %fs:(base,cls,8) has zero
+ * displacement in malloc/free, while cnt and tail share the SAME TLS base
+ * register in free via constant SIB displacements (%fs:disp(base,cls,4/8))
+ * instead of loading three separate GOT/tpoff values. */
+typedef struct FM_HotTls {
+    void *head[CLASS_COUNT];
+    int32_t cnt[CLASS_COUNT];
+    void *tail[CLASS_COUNT];
+} FM_HotTls;
+
+extern __thread FM_HotTls fm_tls __attribute__((tls_model("initial-exec")));
 extern __thread char *fm_bump_ptr[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 extern __thread char *fm_bump_end[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
-extern __thread uintptr_t fm_list_span[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 /* Exit hook state: 0 = not armed, 1 = armed, 2 = destructor running (disarmed). */
 extern __thread int fm_exit_armed __attribute__((tls_model("initial-exec")));
 
@@ -350,6 +357,7 @@ typedef struct FM_Config {
 
 extern FM_Config fm_cfg;
 extern pthread_once_t fm_cfg_once;
+extern _Atomic int fm_cfg_ready;
 
 static void fm_config_init(void)
 {
@@ -452,11 +460,19 @@ static void fm_config_init(void)
         c.release_max_interval_ms = c.release_interval_ms;
 
     fm_cfg = c;
+    atomic_store_explicit(&fm_cfg_ready, 1, memory_order_release);
 }
 
 /* Read a config field, initialising on first use.  Callers are all
- * slow paths (refill, flush, census, large alloc/free). */
-#define FM_CFG() (pthread_once(&fm_cfg_once, fm_config_init), &fm_cfg)
+ * slow paths (refill, flush, census, large alloc/free); fast atomic
+ * check avoids calling pthread_once through PLT/GOT after init. */
+static inline const FM_Config *fm_get_cfg(void)
+{
+    if (__builtin_expect(!atomic_load_explicit(&fm_cfg_ready, memory_order_acquire), 0))
+        pthread_once(&fm_cfg_once, fm_config_init);
+    return &fm_cfg;
+}
+#define FM_CFG() fm_get_cfg()
 /* The automatic census sets the class's next interval from how
  * many blocks it had to walk (one ms per 100 walked blocks,
  * doubling when it finds nothing, capped at 5 s): the walk is the
@@ -661,15 +677,17 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
     size_t bs = kClassSize[cls];
     size_t bytes = SPAN_SIZE;
 #ifdef FM_SMALL_FIRST_SPAN
-    /* ADR 0060: sparsely used startup classes need no full span.
-     * Grow subsequent spans normally; the atomic only runs once. */
+    /* ADR 0060: sparsely used startup classes need no full span of blocks.
+     * Grow subsequent spans normally; the atomic only runs once.  Carve the
+     * 64 KiB VA slot from fm_map_dense_span() when bs <= FM_PAGE_SIZE so we
+     * avoid 3 mmap/munmap syscalls per class while leaving tail pages untouched. */
     static _Atomic unsigned char started[CLASS_COUNT];
     bytes = atomic_exchange_explicit(&started[cls], 1, memory_order_relaxed)
         ? SPAN_SIZE : FM_ALIGN_UP(HEADER_SIZE + (bs > 16320 ? bs : 16320), FM_PAGE_SIZE);
 #endif
     size_t n = (bytes - HEADER_SIZE) / bs;
-    char *base = bytes == SPAN_SIZE && bs <= FM_PAGE_SIZE
-        ? fm_map_dense_span() : fm_map_aligned(bytes - HEADER_SIZE);
+    int dense = bs <= FM_PAGE_SIZE;
+    char *base = dense ? fm_map_dense_span() : fm_map_aligned(bytes - HEADER_SIZE);
     if (!base)
         return NULL;
 
@@ -679,7 +697,7 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
     sp->nblocks = (uint32_t)n;
     sp->dead_mark = 0;
     sp->map_base = (uintptr_t)base;
-    sp->map_size = bytes;
+    sp->map_size = dense ? SPAN_SIZE : bytes;
     sp->user_size = 0;
     sp->align = 0;
     sp->purge_mark = 0;
@@ -791,10 +809,9 @@ static void *fm_regroup_by_span(void *head, void **tail_out)
 /* Take the next block of a class, refilling from the central list or from a
  * fresh span when needed.  Kept out of line so that the malloc fast path
  * needs no callee-saved registers and no stack frame. */
-__attribute__((noinline)) void *fm_refill_class(uint32_t cls)
+__attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t cls)
 {
     fm_arm_thread_exit();
-    uint32_t limit = fm_local_limit(cls);
 
     /* Try the central list first: take a whole batch, O(1). */
     {
@@ -827,23 +844,19 @@ __attribute__((noinline)) void *fm_refill_class(uint32_t cls)
             void *bt = b->tail;
             if (b->count & FM_COUNT_PURE) {
                 ((FM_Span *)((uintptr_t)bh & SPAN_MASK))->dead_mark = 0;
-                fm_list_span[cls] = (uintptr_t)bh & SPAN_MASK;
-            } else {
-                if (FM_CFG()->locality_sort && bh)
-                    bh = fm_regroup_by_span(bh, &bt);
-                fm_list_span[cls] = 0; /* unknown/mixed */
+            } else if (FM_CFG()->locality_sort && bh) {
+                bh = fm_regroup_by_span(bh, &bt);
             }
-            fm_head[cls] = bh;
-            fm_tail[cls] = bt;
+            fm_tls.head[cls] = *(void **)bh;
+            fm_tls.tail[cls] = bt;
             fm_batch_release(b);
-            void *p = fm_head[cls];
-            fm_head[cls] = *(void **)p;
-            return p;
+            return bh;
         }
     }
 
     /* Central list is empty: carve from this class's bump range, or
      * map a fresh span and bump-carve sequentially from it. */
+    uint32_t limit = fm_local_limit(cls);
     size_t bs = kClassSize[cls];
     char *cur = fm_bump_ptr[cls];
     char *end = fm_bump_end[cls];
@@ -869,10 +882,9 @@ __attribute__((noinline)) void *fm_refill_class(uint32_t cls)
         for (uint32_t i = 0; i < keep0; i++)
             ((uint64_t *)(cur + (size_t)i * bs))[1] = 0xDEADDEADDEADDEADull;
 #endif
-        fm_head[cls] = head;
-        fm_tail[cls] = t;
-        fm_cnt[cls] = limit;
-        fm_list_span[cls] = (uintptr_t)base & SPAN_MASK;
+        fm_tls.head[cls] = *(void **)head;
+        fm_tls.tail[cls] = t;
+        fm_tls.cnt[cls] = (int32_t)limit;
 
         char *rest_cur = cur + (size_t)keep0 * bs;
         if (FM_CFG()->lazy_bump) {
@@ -902,9 +914,7 @@ __attribute__((noinline)) void *fm_refill_class(uint32_t cls)
             fm_bump_end[cls] = end;
         }
 
-        void *p = fm_head[cls];
-        fm_head[cls] = *(void **)p;
-        return p;
+        return head;
     }
     uint32_t avail = (uint32_t)((end - cur) / bs);
     uint32_t keep = limit < avail ? limit : avail;
@@ -923,14 +933,11 @@ __attribute__((noinline)) void *fm_refill_class(uint32_t cls)
 #endif
     fm_bump_ptr[cls] = cur + (size_t)keep * bs;
 
-    fm_head[cls] = head;
-    fm_tail[cls] = t;
-    fm_cnt[cls] = limit;
-    fm_list_span[cls] = (uintptr_t)head & SPAN_MASK;
+    fm_tls.head[cls] = *(void **)head;
+    fm_tls.tail[cls] = t;
+    fm_tls.cnt[cls] = (int32_t)limit;
 
-    void *p = fm_head[cls];
-    fm_head[cls] = *(void **)p;
-    return p;
+    return head;
 }
 
 __attribute__((noinline)) static void fm_flush_bin(uint32_t cls)
@@ -941,7 +948,7 @@ __attribute__((noinline)) static void fm_flush_bin(uint32_t cls)
         /* Walk the local list and verify every block belongs to a span of
          * this class, and that the list is a proper chain. */
         uint32_t n = 0;
-        void *q = fm_head[cls];
+        void *q = fm_tls.head[cls];
         while (q && n < 100000) {
             FM_Span *s2 = (FM_Span *)((uintptr_t)q & SPAN_MASK);
             uintptr_t off = (uintptr_t)q - ((uintptr_t)s2 + HEADER_SIZE);
@@ -955,23 +962,19 @@ __attribute__((noinline)) static void fm_flush_bin(uint32_t cls)
             q = *(void **)q;
             n++;
         }
-        if (n != fm_cnt[cls] + 0) {
-            /* count is frees-since-flush, not list length; only report */
-        }
+        (void)n;
     }
 #endif
-    void *h = fm_head[cls];
-    void *t = fm_tail[cls];
-    fm_head[cls] = NULL;
-    fm_tail[cls] = NULL;
-    uintptr_t lspan = fm_list_span[cls];
-    fm_list_span[cls] = 0;
-    fm_cnt[cls] = fm_local_limit(cls);
+    void *h = fm_tls.head[cls];
+    void *t = fm_tls.tail[cls];
+    fm_tls.head[cls] = NULL;
+    fm_tls.tail[cls] = NULL;
+    fm_tls.cnt[cls] = (int32_t)fm_local_limit(cls);
     if (!h)
         return;
     /* Publish in O(1) without walking the scattered list (ADR 0014);
      * census walks count==0 batches only if/when a census actually runs. */
-    fm_publish2(h, t, cls, 0, lspan != 0);
+    fm_publish2(h, t, cls, 0, 0);
 
     /* Automatic span release (ADR 0020): every FM_RELEASE_EVERY
      * flushes of this class, offer the release machinery a tick.
@@ -1045,13 +1048,34 @@ typedef struct FM_Census {
     size_t used;
 } FM_Census;
 
-static int fm_census_init(FM_Census *c)
+static FM_Census fm_shared_census; /* protected by fm_census_lock */
+
+static int fm_census_acquire(FM_Census *c)
 {
-    c->cap = 256;
-    c->used = 0;
-    c->ents = mmap(NULL, c->cap * sizeof(FM_CensusEnt), PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    return c->ents != MAP_FAILED;
+    if (!fm_shared_census.ents) {
+        fm_shared_census.cap = 256;
+        fm_shared_census.used = 0;
+        FM_CensusEnt *ents = mmap(NULL, 256 * sizeof(FM_CensusEnt),
+                                  PROT_READ | PROT_WRITE,
+                                  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (ents == MAP_FAILED)
+            return 0;
+        fm_shared_census.ents = ents;
+    }
+    *c = fm_shared_census;
+    return 1;
+}
+
+static void fm_census_reset(FM_Census *c)
+{
+    if (c->ents && c->used) {
+        for (size_t i = 0; i < c->cap; i++) {
+            if (c->ents[i].span)
+                c->ents[i].span = 0;
+        }
+        c->used = 0;
+    }
+    fm_shared_census = *c;
 }
 
 static void fm_census_destroy(FM_Census *c)
@@ -1059,6 +1083,8 @@ static void fm_census_destroy(FM_Census *c)
     if (c->ents && c->ents != MAP_FAILED)
         munmap(c->ents, c->cap * sizeof(FM_CensusEnt));
     c->ents = NULL;
+    c->cap = 0;
+    c->used = 0;
 }
 
 static FM_CensusEnt *fm_census_slot(FM_Census *c, uintptr_t span)
@@ -1125,6 +1151,16 @@ static void fm_census_add(FM_Census *c, uintptr_t span, uint32_t n)
     FM_CensusEnt *e = fm_census_slot(c, span);
     if (e->span == 0) {
         e->span = span;
+        e->cnt = 0;
+        e->dead = 0;
+        e->ahead = NULL;
+        e->atail = NULL;
+        e->acnt = 0;
+        e->pg_new_mask = 0;
+        e->pg_new_withheld = 0;
+        e->pg_skip_cnt = 0;
+        e->pg_reclaim_cnt = 0;
+        e->pg_flags = 0;
         c->used++;
     }
     e->cnt += n;
@@ -1241,10 +1277,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
     }
 
     FM_Census cen;
-    cen.ents = NULL;
-    cen.cap = 0;
-    cen.used = 0;
-    if (!fm_census_init(&cen)) {
+    if (!fm_census_acquire(&cen)) {
         /* No census: put everything back untouched. */
         while (all) {
             FM_Batch *nx = all->next;
@@ -1352,6 +1385,10 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
          * decides whether it really does. */
         if (e->cnt && (uint64_t)e->cnt * bs >=
                           (uint64_t)(cfg->purge_min_pages - 1) * FM_PAGE_SIZE) {
+            memset(e->page_free, 0, sizeof(e->page_free));
+            memset(e->page_tot, 0, sizeof(e->page_tot));
+            memset(e->page_sfree, 0, sizeof(e->page_sfree));
+            memset(e->page_stot, 0, sizeof(e->page_stot));
             e->pg_flags |= FM_PG_CANDIDATE;
             any_candidate = 1;
             for (uint32_t idx = 0; idx < nb; idx++) {
@@ -1443,22 +1480,32 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
                 continue;
             FM_Span *sp = (FM_Span *)e->span;
             uint32_t nb = sp->nblocks;
-            unsigned char vec[16];
-            int have_vec = mincore((void *)e->span, sp->map_size, vec) == 0;
-            uint16_t new_mask = 0;
-            uint32_t new_pages = 0;
+            uint16_t cand_mask = 0;
+            uint32_t cand_pages = 0;
             for (uint32_t pg = 1; pg < 16; pg++) {
                 if (sp->purged_mask & (uint16_t)(1u << pg))
                     continue;
                 if (e->page_tot[pg] && e->page_free[pg] == e->page_tot[pg] &&
-                    e->page_sfree[pg] == e->page_stot[pg] &&
-                    (!have_vec || (vec[pg] & 1))) {
-                    new_mask |= (uint16_t)(1u << pg);
-                    new_pages++;
+                    e->page_sfree[pg] == e->page_stot[pg]) {
+                    cand_mask |= (uint16_t)(1u << pg);
+                    cand_pages++;
                 }
             }
-            if (new_pages < cfg->purge_min_pages)
-                new_mask = 0, new_pages = 0;
+            uint16_t new_mask = 0;
+            uint32_t new_pages = 0;
+            if (cand_pages >= cfg->purge_min_pages) {
+                unsigned char vec[16];
+                int have_vec = mincore((void *)e->span, sp->map_size, vec) == 0;
+                for (uint32_t pg = 1; pg < 16; pg++) {
+                    if ((cand_mask & (uint16_t)(1u << pg)) &&
+                        (!have_vec || (vec[pg] & 1))) {
+                        new_mask |= (uint16_t)(1u << pg);
+                        new_pages++;
+                    }
+                }
+                if (new_pages < cfg->purge_min_pages)
+                    new_mask = 0, new_pages = 0;
+            }
             uint16_t new_withheld = 0;
             if (new_pages) {
                 for (uint32_t idx = 0; idx < nb; idx++) {
@@ -1540,6 +1587,9 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             if (!(sp->purged_mask & (uint16_t)(1u << fp)))
                 continue;
             void *blk = (void *)(e->span + HEADER_SIZE + (size_t)idx * bs);
+#ifdef FM_DEBUG
+            ((uint64_t *)blk)[1] = 0xDEADDEADDEADDEADull;
+#endif
             if (e->atail)
                 *(void **)e->atail = blk;
             else
@@ -1702,15 +1752,22 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
      * still empty completely as their last live blocks die.  The
      * residue is pushed last (top): its fragments come from the
      * fullest spans of all. */
+    FM_Batch *order_stk[256];
     FM_Batch **order = NULL;
+    int order_mapped = 0;
     size_t norder = 0;
     size_t free_blocks = 0;
-    if (cen.used)
+    if (cen.used <= 256) {
+        order = order_stk;
+    } else {
         order = mmap(NULL, cen.used * sizeof(FM_Batch *),
                      PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,
                      -1, 0);
-    if (order == MAP_FAILED)
-        order = NULL;
+        if (order == MAP_FAILED)
+            order = NULL;
+        else
+            order_mapped = 1;
+    }
     for (size_t i = 0; i < cen.cap; i++) {
         FM_CensusEnt *e = &cen.ents[i];
         if (!e->span || !e->acnt)
@@ -1759,10 +1816,12 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
         fm_publish2(res_head, res_tail, cls, res_cnt, 0);
     }
     if (order) {
-        qsort(order, norder, sizeof(FM_Batch *), fm_batch_count_desc);
+        if (norder > 1)
+            qsort(order, norder, sizeof(FM_Batch *), fm_batch_count_desc);
         for (size_t i = norder; i-- > 0;)
             fm_central_push(cls, order[i]);
-        munmap(order, cen.used * sizeof(FM_Batch *));
+        if (order_mapped)
+            munmap(order, cen.used * sizeof(FM_Batch *));
     }
     /* Rewalking the entire retained pool every 128 flushes grows costly
      * during bulk free. Scale only the early regroup prompt with the supply
@@ -1772,7 +1831,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
     while (stride <= flushes / 2 && stride < (1u << 30))
         stride *= 2;
     atomic_store_explicit(&fm_central[cls].prompt_mask, stride - 1, memory_order_relaxed);
-    fm_census_destroy(&cen);
+    fm_census_reset(&cen);
     fm_in_census = was_in_census;
     pthread_mutex_unlock(&fm_census_lock);
     return released;
@@ -1993,6 +2052,9 @@ static inline size_t fm_trim_spans(void)
     fm_stack_resume();
     for (uint32_t cls = 0; cls < CLASS_COUNT; cls++)
         released += fm_trim_class(cls, 0, 1);
+    pthread_mutex_lock(&fm_census_lock);
+    fm_census_destroy(&fm_shared_census);
+    pthread_mutex_unlock(&fm_census_lock);
     return released;
 }
 
@@ -2058,7 +2120,8 @@ static inline void fm_large_free(FM_Span *sp, void *p)
         int b = 63 - __builtin_clzll(fm_large_usable(sp));
         if (b < FM_LCACHE_BUCKETS &&
             fm_lcache_bytes + ms <= FM_CFG()->lcache_max_bytes &&
-            fm_ltick - fm_lbucket_seen[b] <= FM_LCACHE_HOT_WINDOW) {
+            fm_ltick - fm_lbucket_seen[b] <=
+                ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : FM_LCACHE_HOT_WINDOW)) {
             if (FM_CFG()->lcache_cold_purge &&
                 !(fm_lcache_warm_mask & (1ULL << b))) {
                 uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
@@ -2199,8 +2262,15 @@ __attribute__((noinline)) static void *fm_large_alloc(size_t size)
 
 __attribute__((noinline)) static void *fm_aligned_alloc_impl(size_t align, size_t size)
 {
-    if (align <= 16)
-        return fm_malloc(size);
+    if (align <= 64 && (align & (align - 1)) == 0 && size <= SMALL_MAX) {
+        if (align <= 16)
+            return fm_malloc(size);
+        /* Every small span is 64 KiB-aligned and HEADER_SIZE is 64:
+         * rounding up to 32 or 64 selects a class whose block size is a
+         * multiple of `align`, so base + 64 + idx * bs is naturally aligned. */
+        size_t req = FM_ALIGN_UP(size ? size : 1, align);
+        return fm_malloc(req);
+    }
     if (align < SPAN_SIZE) {
         size_t need = size + align + HEADER_SIZE;
         size_t map_len = need + SPAN_SIZE + FM_PAGE_SIZE;
@@ -2274,7 +2344,7 @@ static inline int fm_is_aligned_ptr(const void *p)
 static void fm_thread_exit_flush(void)
 {
     for (uint32_t c = 0; c < CLASS_COUNT; c++) {
-        if (fm_head[c])
+        if (fm_tls.head[c])
             fm_flush_bin(c);
         char *cur = fm_bump_ptr[c];
         char *end = fm_bump_end[c];
@@ -2291,6 +2361,10 @@ static void fm_thread_exit_flush(void)
                     rt = next;
                 }
                 *(void **)rt = NULL;
+#ifdef FM_DEBUG
+                for (uint32_t i = 0; i < rcount; i++)
+                    ((uint64_t *)(cur + (size_t)i * bs))[1] = 0xDEADDEADDEADDEADull;
+#endif
                 fm_publish2(rhead, rt, c, rcount, 1);
             }
         }
@@ -2351,7 +2425,7 @@ static inline void *fm_malloc(size_t size)
 {
     size_t cls = fm_class_of(size);
     if (__builtin_expect(cls != LARGE_CLASS, 1)) {
-        void *p = fm_head[cls];
+        void *p = fm_tls.head[cls];
         if (__builtin_expect(p != NULL, 1)) {
 #ifdef FM_DEBUG
             {
@@ -2359,19 +2433,17 @@ static inline void *fm_malloc(size_t size)
                 uintptr_t off = (uintptr_t)p - ((uintptr_t)sp2 + HEADER_SIZE);
                 if (sp2->cls != cls || off % kClassSize[cls] != 0) {
                     fprintf(stderr,
-                            "[fm] BAD HEAD cls=%u p=%p span_cls=%u off=%lu "
+                            "[fm] BAD HEAD cls=%zu p=%p span_cls=%u off=%lu "
                             "bs=%u\n",
                             cls, p, sp2->cls, (unsigned long)off,
                             kClassSize[cls]);
                     abort();
                 }
             }
-#endif
-#ifdef FM_DEBUG
             if (((uint64_t *)p)[1] != 0xDEADDEADDEADDEADull) {
                 FM_Span *s3 = (FM_Span *)((uintptr_t)p & SPAN_MASK);
                 fprintf(stderr,
-                        "[fm] CORRUPT HEAD size=%zu cls=%u bs=%u span_cls=%u "
+                        "[fm] CORRUPT HEAD size=%zu cls=%zu bs=%u span_cls=%u "
                         "span_nblocks=%u off=%lu canary=%lx\n",
                         size, cls, kClassSize[cls], s3->cls, s3->nblocks,
                         (unsigned long)((uintptr_t)p - ((uintptr_t)s3 + HEADER_SIZE)),
@@ -2385,7 +2457,7 @@ static inline void *fm_malloc(size_t size)
                     off / kClassSize[cls] >= s3->nblocks ||
                     s3->cls != cls) {
                     fprintf(stderr,
-                            "[fm] BAD BLOCK size=%zu cls=%u bs=%u p=%p "
+                            "[fm] BAD BLOCK size=%zu cls=%zu bs=%u p=%p "
                             "span_cls=%u off=%lu nblocks=%u\n",
                             size, cls, kClassSize[cls], p, s3->cls,
                             (unsigned long)off, s3->nblocks);
@@ -2395,29 +2467,108 @@ static inline void *fm_malloc(size_t size)
 #endif
             void *next = *(void **)p;
             __builtin_prefetch(next, 0, 1);
-            fm_head[cls] = next;
+            fm_tls.head[cls] = next;
             return p;
         }
-        return fm_refill_class(cls);
+        return fm_refill_class((uint32_t)cls);
     }
     return fm_large_alloc(size);
 }
 
-static inline void fm_free(void *p)
+__attribute__((noinline, cold)) static void fm_free_slow_large(FM_Span *sp, void *p)
 {
-    if (!p)
-        return;
-    if (__builtin_expect(((uintptr_t)p & (SPAN_SIZE - 1)) == 0, 0)) {
-        if (fm_is_aligned_ptr(p)) {
-            const FM_Span *sp = (const FM_Span *)((const char *)p - HEADER_SIZE);
-            munmap((void *)sp->map_base, sp->map_size);
+    fm_large_free(sp, p);
+}
+
+__attribute__((noinline, cold)) static void fm_free_aligned(const void *p)
+{
+    const FM_Span *sp = (const FM_Span *)((const char *)p - HEADER_SIZE);
+    munmap((void *)sp->map_base, sp->map_size);
+}
+
+__attribute__((noinline)) static void fm_free_cnt_slow(uint32_t cls)
+{
+    if (__builtin_expect(fm_tls.cnt[cls] < 0, 0)) {
+        /* First free on this thread/class (.tbss 0 decremented to -1). */
+        fm_arm_thread_exit();
+        uint32_t limit = fm_local_limit(cls);
+        if (limit > 1) {
+            fm_tls.cnt[cls] = (int32_t)(limit - 1);
             return;
         }
     }
-    FM_Span *sp = (FM_Span *)((uintptr_t)p & SPAN_MASK);
+    fm_flush_bin(cls);
+}
+
+static inline void fm_tls_push_free(void *p, size_t cls)
+{
+#if defined(__x86_64__) && !defined(FM_DEBUG) && \
+    !defined(__SANITIZE_ADDRESS__) && !defined(__SANITIZE_THREAD__) && \
+    !defined(malloc)
+    intptr_t tp_off;
+    void *old_h;
+    _Bool le;
+    __asm__(
+        "movq fm_tls@GOTTPOFF(%%rip), %[off]\n\t"
+        "movq %%fs:(%[off],%[cls],8), %[old]\n\t"
+        "movq %[old], (%[p])\n\t"
+        "movq %[p], %%fs:(%[off],%[cls],8)"
+        : [off] "=&r"(tp_off), [old] "=&r"(old_h)
+        : [cls] "r"(cls), [p] "r"(p)
+        : "memory");
+    if (__builtin_expect(!old_h, 0)) {
+        __asm__("movq %[p], %%fs:%c[toff](%[off],%[cls],8)"
+                :
+                : [off] "r"(tp_off), [cls] "r"(cls), [p] "r"(p),
+                  [toff] "i"(offsetof(FM_HotTls, tail))
+                : "memory");
+    }
+    __asm__("subl $1, %%fs:%c[coff](%[off],%[cls],4)"
+            : "=@ccle"(le)
+            : [off] "r"(tp_off), [cls] "r"(cls),
+              [coff] "i"(offsetof(FM_HotTls, cnt))
+            : "memory", "cc");
+    if (__builtin_expect(le, 0))
+        fm_free_cnt_slow((uint32_t)cls);
+#else
+    void *old_h = fm_tls.head[cls];
+    *(void **)p = old_h;
+#ifdef FM_DEBUG
+    ((uint64_t *)p)[1] = 0xDEADDEADDEADDEADull;
+#endif
+    fm_tls.head[cls] = p;
+    if (__builtin_expect(!old_h, 0))
+        fm_tls.tail[cls] = p;
+    if (__builtin_expect(--fm_tls.cnt[cls] <= 0, 0))
+        fm_free_cnt_slow((uint32_t)cls);
+#endif
+}
+
+static inline void fm_free(void *p)
+{
+    /* NULL has low 16 bits == 0 too, so one branch handles both NULL and
+     * 64 KiB-aligned over-aligned allocations off the hot path. */
+    if (__builtin_expect(((uintptr_t)p & (SPAN_SIZE - 1)) == 0, 0)) {
+        if (!p)
+            return;
+        if (fm_is_aligned_ptr(p)) {
+            fm_free_aligned(p);
+            return;
+        }
+    }
+    FM_Span *sp;
+#if defined(__x86_64__)
+    {
+        uintptr_t base = (uintptr_t)p;
+        __asm__("andq $-65536, %0" : "+r"(base) : : "cc");
+        sp = (FM_Span *)base;
+    }
+#else
+    sp = (FM_Span *)((uintptr_t)p & SPAN_MASK);
+#endif
     uint32_t cls32 = sp->cls;
     if (__builtin_expect(cls32 == LARGE_CLASS, 0)) {
-        fm_large_free(sp, p);
+        fm_free_slow_large(sp, p);
         return;
     }
     size_t cls = cls32;
@@ -2429,7 +2580,7 @@ static inline void fm_free(void *p)
         uintptr_t off = (uintptr_t)p - (base + HEADER_SIZE);
         if (off % kClassSize[cls] != 0 || off / kClassSize[cls] >= sp->nblocks) {
             fprintf(stderr,
-                    "[fm] BAD BLOCK p=%p base=%p off=%lu cls=%u bs=%u "
+                    "[fm] BAD BLOCK p=%p base=%p off=%lu cls=%zu bs=%u "
                     "nblocks=%u\n",
                     p, (void *)base, (unsigned long)off, cls,
                     kClassSize[cls], sp->nblocks);
@@ -2437,34 +2588,67 @@ static inline void fm_free(void *p)
         }
     }
 #endif
-    void *old_h = fm_head[cls];
-    *(void **)p = old_h;
-#ifdef FM_DEBUG
-    ((uint64_t *)p)[1] = 0xDEADDEADDEADDEADull;
-#endif
-    fm_head[cls] = p;
-    if (__builtin_expect(!old_h, 0)) {
-        fm_tail[cls] = p;
-        fm_list_span[cls] = (uintptr_t)sp & SPAN_MASK;
-    } else if (fm_list_span[cls] && fm_list_span[cls] != ((uintptr_t)sp & SPAN_MASK)) {
-        fm_list_span[cls] = 0;
+    fm_tls_push_free(p, cls);
+}
+
+__attribute__((noinline, cold)) static void *fm_calloc_overflow(void)
+{
+    errno = ENOMEM;
+    return NULL;
+}
+
+__attribute__((noinline)) static void *fm_calloc_slow(size_t total)
+{
+    if (total > SMALL_MAX) {
+        int zeroed = 1;
+        void *p = fm_large_alloc2(total, &zeroed);
+        if (p && !zeroed)
+            memset(p, 0, total); /* cache hit: contents are stale */
+        return p;
     }
-    uint32_t cnt = fm_cnt[cls];
-    if (__builtin_expect(cnt == 0, 0))
-        cnt = kClassLimit[cls];
-    cnt--;
-    fm_cnt[cls] = cnt;
-    if (__builtin_expect(cnt == 0, 0))
-        fm_flush_bin(cls32);
+    void *p = fm_malloc(total);
+    if (__builtin_expect(!p, 0))
+        return NULL;
+    return memset(p, 0, total);
+}
+
+static inline void *fm_calloc(size_t n, size_t sz)
+{
+    size_t total;
+    if (__builtin_expect(__builtin_mul_overflow(n, sz, &total), 0))
+        return fm_calloc_overflow();
+#ifndef FM_DEBUG
+    if (__builtin_expect(total <= 64, 1)) {
+        size_t cls = (total + 15) >> 4;
+        void *p = fm_tls.head[cls];
+        if (__builtin_expect(p != NULL, 1)) {
+            void *next = *(void **)p;
+            __builtin_prefetch(next, 0, 1);
+            fm_tls.head[cls] = next;
+            if (total <= 16) {
+                __builtin_memset(p, 0, 16);
+            } else if (total <= 32) {
+                __builtin_memset(p, 0, 32);
+            } else {
+                __builtin_memset(p, 0, 32);
+                __builtin_memset((char *)p + total - 32, 0, 32);
+            }
+            return p;
+        }
+    }
+#endif
+    return fm_calloc_slow(total);
 }
 
 static inline size_t fm_usable_size(void *p)
 {
-    if (!p)
-        return 0;
-    if (((uintptr_t)p & (SPAN_SIZE - 1)) == 0 && fm_is_aligned_ptr(p)) {
-        const FM_Span *sp = (const FM_Span *)((const char *)p - HEADER_SIZE);
-        return sp->user_size;
+    if (__builtin_expect(((uintptr_t)p & (SPAN_SIZE - 1)) == 0, 0)) {
+        if (!p)
+            return 0;
+        if (fm_is_aligned_ptr(p)) {
+            const FM_Span *sp = (const FM_Span *)((const char *)p - HEADER_SIZE);
+            return sp->user_size;
+        }
     }
     const FM_Span *sp = (const FM_Span *)((uintptr_t)p & SPAN_MASK);
     if (sp->cls == LARGE_CLASS)
@@ -2472,10 +2656,8 @@ static inline size_t fm_usable_size(void *p)
     return kClassSize[sp->cls];
 }
 
-static inline void *fm_realloc(void *p, size_t size)
+__attribute__((noinline)) static void *fm_realloc_slow(void *p, size_t size)
 {
-    if (!p)
-        return fm_malloc(size);
     if (size == 0) {
         fm_free(p);
         return NULL;
@@ -2494,7 +2676,7 @@ static inline void *fm_realloc(void *p, size_t size)
     FM_Span *sp = (FM_Span *)((uintptr_t)p & SPAN_MASK);
     if (sp->cls != LARGE_CLASS) {
         size_t old = kClassSize[sp->cls];
-        if (__builtin_expect(size <= old, 1))
+        if (size <= old)
             return p;
         /* Incremental growth across the densely spaced medium classes
          * otherwise strands the previous buffer in each class in turn. */
@@ -2511,15 +2693,8 @@ static inline void *fm_realloc(void *p, size_t size)
         return q;
     }
     if (sp->align == 0) {
-        size_t old_len = sp->map_size;
-        char *old_raw = (char *)sp->map_base;
-        size_t off = (size_t)((char *)p - old_raw);
-        /* Grow in place when the existing mapping already has room:
-         * the common case after a large-cache reuse handed out an
-         * oversized mapping.  Capacity is measured from the user
-         * pointer to the end of the mapping.  (mremap-based growth
-         * was tried three ways and rejected -- ADR 0018.) */
-        if (size <= old_len - off) {
+        size_t off = (size_t)((char *)p - (char *)sp->map_base);
+        if (size <= sp->map_size - off) {
             sp->user_size = size;
             return p;
         }
@@ -2539,6 +2714,167 @@ static inline void *fm_realloc(void *p, size_t size)
     memcpy(q, p, sp->user_size);
     fm_large_free(sp, p);
     return q;
+}
+
+static inline void *fm_realloc(void *p, size_t size)
+{
+    if (__builtin_expect(!p, 0))
+        return fm_malloc(size);
+    if (__builtin_expect(((uintptr_t)p & (SPAN_SIZE - 1)) != 0 && size != 0, 1)) {
+        FM_Span *sp = (FM_Span *)((uintptr_t)p & SPAN_MASK);
+        uint32_t cls = sp->cls;
+        if (__builtin_expect(cls != LARGE_CLASS, 1)) {
+            if (__builtin_expect(size <= kClassSize[cls], 1))
+                return p;
+        } else if (sp->align == 0) {
+            size_t off = (size_t)((char *)p - (char *)sp->map_base);
+            if (__builtin_expect(size <= sp->map_size - off, 1)) {
+                sp->user_size = size;
+                return p;
+            }
+        }
+    }
+    return fm_realloc_slow(p, size);
+}
+
+/* C++ operator new OOM slow path: resolves libstdc++/libc++ new_handler and
+ * __cxa_throw_bad_alloc lazily via dlsym so libfastmalloc2.so stays pure C
+ * with no libstdc++ dependency while preserving C++ exception semantics. */
+__attribute__((noinline, cold)) static void *fm_new_oom(size_t size, size_t align, int nothrow)
+{
+    typedef void (*new_handler_t)(void);
+    typedef new_handler_t (*get_nh_t)(void);
+    typedef void (*throw_ba_t)(void) __attribute__((noreturn));
+    static get_nh_t get_nh;
+    static throw_ba_t throw_ba;
+    static _Atomic int resolved;
+    if (!atomic_load_explicit(&resolved, memory_order_acquire)) {
+        get_nh = (get_nh_t)(uintptr_t)dlsym(RTLD_DEFAULT, "_ZSt15get_new_handlerv");
+        throw_ba = (throw_ba_t)(uintptr_t)dlsym(RTLD_DEFAULT, "_ZSt17__throw_bad_allocv");
+        if (!throw_ba)
+            throw_ba = (throw_ba_t)(uintptr_t)dlsym(RTLD_DEFAULT, "__cxa_throw_bad_alloc");
+        atomic_store_explicit(&resolved, 1, memory_order_release);
+    }
+    for (;;) {
+        new_handler_t nh = get_nh ? get_nh() : NULL;
+        if (!nh) {
+            if (!nothrow) {
+                if (throw_ba)
+                    throw_ba();
+                abort();
+            }
+            return NULL;
+        }
+        nh();
+        void *p = align ? fm_aligned_alloc_impl(align, size) : fm_malloc(size);
+        if (p)
+            return p;
+    }
+}
+
+__attribute__((noinline)) static void *fm_new_slow(size_t size, int nothrow)
+{
+    void *p = fm_malloc(size);
+    if (__builtin_expect(p != NULL, 1))
+        return p;
+    return fm_new_oom(size, 0, nothrow);
+}
+
+__attribute__((noinline)) static void *fm_new_aligned_slow(size_t size, size_t align, int nothrow)
+{
+    if (align == 0 || (align & (align - 1)) != 0) {
+        if (!nothrow)
+            return fm_new_oom(size, align, 0);
+        return NULL;
+    }
+    void *p = fm_aligned_alloc_impl(align, size);
+    if (__builtin_expect(p != NULL, 1))
+        return p;
+    return fm_new_oom(size, align, nothrow);
+}
+
+static inline void *fm_operator_new(size_t size)
+{
+#ifndef FM_DEBUG
+    if (__builtin_expect(size <= ARITH_MAX, 1)) {
+        size_t cls = (size + 15) >> 4;
+        void *p = fm_tls.head[cls];
+        if (__builtin_expect(p != NULL, 1)) {
+            void *next = *(void **)p;
+            __builtin_prefetch(next, 0, 1);
+            fm_tls.head[cls] = next;
+            return p;
+        }
+    }
+#endif
+    return fm_new_slow(size, 0);
+}
+
+static inline void *fm_operator_new_nothrow(size_t size)
+{
+#ifndef FM_DEBUG
+    if (__builtin_expect(size <= ARITH_MAX, 1)) {
+        size_t cls = (size + 15) >> 4;
+        void *p = fm_tls.head[cls];
+        if (__builtin_expect(p != NULL, 1)) {
+            void *next = *(void **)p;
+            __builtin_prefetch(next, 0, 1);
+            fm_tls.head[cls] = next;
+            return p;
+        }
+    }
+#endif
+    return fm_new_slow(size, 1);
+}
+
+static inline void *fm_operator_new_aligned(size_t size, size_t align)
+{
+#ifndef FM_DEBUG
+    if (__builtin_expect(align >= 16 && align <= 64 && (align & (align - 1)) == 0 &&
+                         size <= ARITH_MAX, 1)) {
+        size_t mask = align - 1;
+        size_t cls = ((size ? size : 1) + mask) & ~mask;
+        cls >>= 4;
+        void *p = fm_tls.head[cls];
+        if (__builtin_expect(p != NULL, 1)) {
+            void *next = *(void **)p;
+            __builtin_prefetch(next, 0, 1);
+            fm_tls.head[cls] = next;
+            return p;
+        }
+    }
+#endif
+    return fm_new_aligned_slow(size, align, 0);
+}
+
+static inline void fm_delete_sized_aligned(void *p, size_t size, size_t align)
+{
+    if (__builtin_expect(!p, 0))
+        return;
+#ifndef FM_DEBUG
+    if (__builtin_expect(align >= 16 && align <= 64 && (align & (align - 1)) == 0 &&
+                         size <= ARITH_MAX, 1)) {
+        size_t mask = align - 1;
+        size_t cls = (((size ? size : 1) + mask) & ~mask) >> 4;
+        fm_tls_push_free(p, cls);
+        return;
+    }
+#endif
+    fm_free(p);
+}
+
+static inline void fm_delete_sized(void *p, size_t size)
+{
+    if (__builtin_expect(!p, 0))
+        return;
+#ifndef FM_DEBUG
+    if (__builtin_expect(size <= ARITH_MAX, 1)) {
+        size_t cls = (size + 15) >> 4;
+        fm_tls_push_free(p, cls);
+        return;
+    }
+#endif
+    fm_free(p);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2586,84 +2922,116 @@ static inline void *fm_realloc(void *p, size_t size)
  */
 
 typedef struct FM_TpPatch {
-    unsigned char *insn; /* runtime address of the 7-byte load */
-    unsigned char reg;   /* destination register (0..7, never 4) */
+    unsigned char *insn;  /* runtime address of the 7-byte load */
+    unsigned char rex_out;/* 0x48 for %rax..%rdi, 0x49 for %r8..%r15 */
+    unsigned char reg;    /* low 3 bits of destination register (0..7) */
     int32_t tpoff;
 } FM_TpPatch;
 
 static FM_TpPatch fm_tp_patches[64];
 static size_t fm_tp_npatches;
 
-static int fm_tp_modrm_ok(unsigned char m)
+static int fm_tp_modrm_ok(unsigned char rex, unsigned char m)
 {
-    /* mov r64, [rip+disp32]: mod=00, rm=101; reg must name a GPR that
-     * is not rsp (4). */
-    return (m & 0xC7) == 0x05 && ((m >> 3) & 7) != 4;
+    /* mov r64, [rip+disp32]: mod=00, rm=101; for REX.W (0x48), reg != 4 (%rsp);
+     * for REX.WR (0x4C, %r8..%r15), all 8 registers including %r12 (4) are GPRs. */
+    if ((m & 0xC7) != 0x05)
+        return 0;
+    return rex == 0x4C || ((m >> 3) & 7) != 4;
 }
 
 static void fm_tp_apply(void)
 {
+    if (!fm_tp_npatches)
+        return;
+    uintptr_t min_start = (uintptr_t)-1;
+    uintptr_t max_end = 0;
+    for (size_t i = 0; i < fm_tp_npatches; i++) {
+        uintptr_t s = (uintptr_t)fm_tp_patches[i].insn & ~(uintptr_t)0xFFF;
+        uintptr_t e = (((uintptr_t)fm_tp_patches[i].insn + 6) & ~(uintptr_t)0xFFF) + 0x1000;
+        if (s < min_start)
+            min_start = s;
+        if (e > max_end)
+            max_end = e;
+    }
+    size_t total_len = max_end - min_start;
+    if (mprotect((void *)min_start, total_len, PROT_READ | PROT_WRITE) != 0)
+        return; /* fail open: stay as GOT loads */
     for (size_t i = 0; i < fm_tp_npatches; i++) {
         FM_TpPatch *pt = &fm_tp_patches[i];
-        uintptr_t start = (uintptr_t)pt->insn & ~(uintptr_t)0xFFF;
-        uintptr_t end = ((uintptr_t)pt->insn + 6) & ~(uintptr_t)0xFFF;
-        size_t len = end - start + 0x1000;
         unsigned char want[7];
-        want[0] = 0x48;
+        want[0] = pt->rex_out;
         want[1] = 0xC7;
         want[2] = (unsigned char)(0xC0 | pt->reg);
         want[3] = (unsigned char)(pt->tpoff & 0xFF);
         want[4] = (unsigned char)((pt->tpoff >> 8) & 0xFF);
         want[5] = (unsigned char)((pt->tpoff >> 16) & 0xFF);
         want[6] = (unsigned char)((pt->tpoff >> 24) & 0xFF);
-        if (mprotect((void *)start, len, PROT_READ | PROT_WRITE) != 0)
-            return; /* fail open: the rest stay as loads */
-#ifdef FM_TP_DEBUG
-        fprintf(stderr, "[tp] apply @%p start=%p len=%zu\n", pt->insn,
-                (void *)start, len);
-#endif
         memcpy(pt->insn, want, 7);
-#ifdef FM_TP_DEBUG
-        fprintf(stderr, "[tp] wrote ok\n");
-#endif
-        /* Verify what we just wrote; restore execute permission. */
-        if (memcmp(pt->insn, want, 7) != 0) {
-            /* Cannot happen; if it did, re-write once more and stop. */
+        if (memcmp(pt->insn, want, 7) != 0)
             memcpy(pt->insn, want, 7);
-        }
-#ifdef FM_TP_DEBUG
-        fprintf(stderr, "[tp] restoring\n");
-#endif
-        mprotect((void *)start, len, PROT_READ | PROT_EXEC);
     }
+    mprotect((void *)min_start, total_len, PROT_READ | PROT_EXEC);
 }
 
-static int fm_tp_in_hot(const unsigned char *insn)
+static size_t fm_tp_get_hot_fns(const void **fns)
 {
-    /* Only patch inside known hot entry points to avoid false positives
-     * from byte-pattern matches elsewhere in .text. */
-    static const void *fns[8];
-    static int init = 0;
-    if (!init) {
-        extern void free(void *);
-        extern void *malloc(size_t);
-        extern void *calloc(size_t, size_t);
-        extern void *realloc(void *, size_t);
-        extern void *fm_generic_malloc(size_t);
-        fns[0] = (const void *)(uintptr_t)malloc;
-        fns[1] = (const void *)(uintptr_t)free;
-        fns[2] = (const void *)(uintptr_t)calloc;
-        fns[3] = (const void *)(uintptr_t)realloc;
-        fns[4] = (const void *)(uintptr_t)fm_generic_malloc;
-        fns[5] = NULL;
-        init = 1;
-    }
-    for (int i = 0; fns[i]; i++) {
-        uintptr_t a = (uintptr_t)fns[i];
-        if ((uintptr_t)insn >= a && (uintptr_t)insn < a + 512)
-            return 1;
-    }
-    return 0;
+    size_t n = 0;
+    extern void free(void *);
+    extern void *malloc(size_t);
+    extern void *calloc(size_t, size_t);
+    extern void *realloc(void *, size_t);
+    extern void *reallocarray(void *, size_t, size_t);
+    extern void *fm_generic_malloc(size_t);
+    fns[n++] = (const void *)(uintptr_t)malloc;
+    fns[n++] = (const void *)(uintptr_t)free;
+    fns[n++] = (const void *)(uintptr_t)calloc;
+    fns[n++] = (const void *)(uintptr_t)realloc;
+    fns[n++] = (const void *)(uintptr_t)reallocarray;
+    fns[n++] = (const void *)(uintptr_t)fm_generic_malloc;
+#ifndef malloc
+    extern void free_sized(void *, size_t);
+    extern void free_aligned_sized(void *, size_t, size_t);
+    extern void *_Znwm(size_t);
+    extern void *_Znam(size_t);
+    extern void *_ZnwmRKSt9nothrow_t(size_t, const void *);
+    extern void *_ZnamRKSt9nothrow_t(size_t, const void *);
+    extern void _ZdlPv(void *);
+    extern void _ZdaPv(void *);
+    extern void _ZdlPvm(void *, size_t);
+    extern void _ZdaPvm(void *, size_t);
+    extern void _ZdlPvRKSt9nothrow_t(void *, const void *);
+    extern void _ZdaPvRKSt9nothrow_t(void *, const void *);
+    extern void *_ZnwmSt11align_val_t(size_t, size_t);
+    extern void *_ZnamSt11align_val_t(size_t, size_t);
+    extern void _ZdlPvSt11align_val_t(void *, size_t);
+    extern void _ZdaPvSt11align_val_t(void *, size_t);
+    extern void _ZdlPvmSt11align_val_t(void *, size_t, size_t);
+    extern void _ZdaPvmSt11align_val_t(void *, size_t, size_t);
+    extern void _ZdlPvSt11align_val_tRKSt9nothrow_t(void *, size_t, const void *);
+    extern void _ZdaPvSt11align_val_tRKSt9nothrow_t(void *, size_t, const void *);
+    fns[n++] = (const void *)(uintptr_t)free_sized;
+    fns[n++] = (const void *)(uintptr_t)free_aligned_sized;
+    fns[n++] = (const void *)(uintptr_t)_Znwm;
+    fns[n++] = (const void *)(uintptr_t)_Znam;
+    fns[n++] = (const void *)(uintptr_t)_ZnwmRKSt9nothrow_t;
+    fns[n++] = (const void *)(uintptr_t)_ZnamRKSt9nothrow_t;
+    fns[n++] = (const void *)(uintptr_t)_ZdlPv;
+    fns[n++] = (const void *)(uintptr_t)_ZdaPv;
+    fns[n++] = (const void *)(uintptr_t)_ZdlPvm;
+    fns[n++] = (const void *)(uintptr_t)_ZdaPvm;
+    fns[n++] = (const void *)(uintptr_t)_ZdlPvRKSt9nothrow_t;
+    fns[n++] = (const void *)(uintptr_t)_ZdaPvRKSt9nothrow_t;
+    fns[n++] = (const void *)(uintptr_t)_ZnwmSt11align_val_t;
+    fns[n++] = (const void *)(uintptr_t)_ZnamSt11align_val_t;
+    fns[n++] = (const void *)(uintptr_t)_ZdlPvSt11align_val_t;
+    fns[n++] = (const void *)(uintptr_t)_ZdaPvSt11align_val_t;
+    fns[n++] = (const void *)(uintptr_t)_ZdlPvmSt11align_val_t;
+    fns[n++] = (const void *)(uintptr_t)_ZdaPvmSt11align_val_t;
+    fns[n++] = (const void *)(uintptr_t)_ZdlPvSt11align_val_tRKSt9nothrow_t;
+    fns[n++] = (const void *)(uintptr_t)_ZdaPvSt11align_val_tRKSt9nothrow_t;
+#endif
+    return n;
 }
 
 static int fm_tp_scan_module(uintptr_t bias, const ElfW(Phdr) * phdr, int phnum)
@@ -2734,42 +3102,61 @@ static int fm_tp_scan_module(uintptr_t bias, const ElfW(Phdr) * phdr, int phnum)
     size_t tplimit = sizeof(fm_tp_patches) / sizeof(fm_tp_patches[0]);
     if (limenv && *limenv)
         tplimit = (size_t)strtoull(limenv, NULL, 10);
-    for (size_t i = 0; i + 7 <= textsz; i++) {
-        if (text[i] != 0x48 || text[i + 1] != 0x8B ||
-            !fm_tp_modrm_ok(text[i + 2]))
+
+    const void *fns[32];
+    size_t nfns = fm_tp_get_hot_fns(fns);
+    uintptr_t text_lo = (uintptr_t)text;
+    uintptr_t text_hi = text_lo + textsz;
+
+    for (size_t f = 0; f < nfns && fm_tp_npatches < tplimit; f++) {
+        uintptr_t fa = (uintptr_t)fns[f];
+        if (fa < text_lo || fa >= text_hi)
             continue;
-        int32_t disp = (int32_t)((uint32_t)text[i + 3] |
-                                 ((uint32_t)text[i + 4] << 8) |
-                                 ((uint32_t)text[i + 5] << 16) |
-                                 ((uint32_t)text[i + 6] << 24));
-        uintptr_t target = (uintptr_t)(text + i) + 7 + (uintptr_t)disp;
-        for (size_t s = 0; s < nslots; s++) {
-            if (slots[s] != target)
+        size_t i_start = (size_t)(fa - text_lo);
+        size_t i_end = i_start + 256;
+        if (i_end > textsz)
+            i_end = textsz;
+        for (size_t i = i_start; i + 7 <= i_end; i++) {
+            unsigned char rex = text[i];
+            if ((rex != 0x48 && rex != 0x4C) || text[i + 1] != 0x8B ||
+                !fm_tp_modrm_ok(rex, text[i + 2]))
                 continue;
-            if (!fm_tp_in_hot(text + i))
+            int32_t disp = (int32_t)((uint32_t)text[i + 3] |
+                                     ((uint32_t)text[i + 4] << 8) |
+                                     ((uint32_t)text[i + 5] << 16) |
+                                     ((uint32_t)text[i + 6] << 24));
+            uintptr_t target = (uintptr_t)(text + i) + 7 + (uintptr_t)disp;
+            for (size_t s = 0; s < nslots; s++) {
+                if (slots[s] != target)
+                    continue;
+                int64_t v = *(const volatile int64_t *)target;
+                /* A tpoff is negative (the TLS block sits below the thread
+                 * pointer) and small; anything else is not one. */
+                if (v >= 0 || v < -(int64_t)(1u << 31))
+                    break;
+                int dup = 0;
+                for (size_t k = 0; k < fm_tp_npatches; k++) {
+                    if (fm_tp_patches[k].insn == text + i) {
+                        dup = 1;
+                        break;
+                    }
+                }
+                if (dup || fm_tp_npatches >= tplimit)
+                    break;
+                FM_TpPatch *pt = &fm_tp_patches[fm_tp_npatches++];
+                pt->insn = (unsigned char *)(text + i);
+                pt->rex_out = (rex == 0x4C) ? 0x49 : 0x48;
+                pt->reg = (unsigned char)((text[i + 2] >> 3) & 7);
+                pt->tpoff = (int32_t)v;
+                if (getenv("FM_TP_TRACE"))
+                    fprintf(stderr, "[tp] pick #%zu i=%zu insn=%p rex=%02x reg=%u tpoff=%d tgt=%p\n",
+                            fm_tp_npatches - 1, i, pt->insn, pt->rex_out, pt->reg, pt->tpoff,
+                            (void *)target);
                 break;
-            int64_t v = *(const volatile int64_t *)target;
-#ifdef FM_TP_DEBUG
-            fprintf(stderr, "[tp] cand i=%zu target=%p\n", i, (void *)target);
-#endif
-            /* A tpoff is negative (the TLS block sits below the thread
-             * pointer) and small; anything else is not one. */
-            if (v >= 0 || v < -(int64_t)(1u << 31))
-                break;
+            }
             if (fm_tp_npatches >= tplimit)
                 break;
-            FM_TpPatch *pt = &fm_tp_patches[fm_tp_npatches++];
-            pt->insn = (unsigned char *)(text + i);
-            pt->reg = (unsigned char)((text[i + 2] >> 3) & 7);
-            pt->tpoff = (int32_t)v;
-            if (getenv("FM_TP_TRACE"))
-                fprintf(stderr, "[tp] pick #%zu i=%zu insn=%p reg=%u tpoff=%d tgt=%p\n",
-                        fm_tp_npatches - 1, i, pt->insn, pt->reg, pt->tpoff,
-                        (void *)target);
-            break;
         }
-        if (fm_tp_npatches >= tplimit)
-            break;
     }
     if (fm_tp_npatches)
         fm_tp_apply();

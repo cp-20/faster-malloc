@@ -6,12 +6,14 @@
  * to stop at "large-cache mapping not reused".  Everything before
  * that point, and the API-edge section's equivalents (verified
  * separately under v1), apply to all builds. */
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
 #include <errno.h>
 #include <malloc.h>
+#include <dlfcn.h>
 
 int main(int argc, char **argv)
 {
@@ -332,6 +334,31 @@ int main(int argc, char **argv)
             printf("aligned_alloc usable\n"); return 1;
         }
         free(a);
+        for (size_t al = 32; al <= 64; al *= 2) {
+            for (size_t sz = al; sz <= 4096; sz += al) {
+                void *sa = aligned_alloc(al, sz);
+                if (!sa || ((uintptr_t)sa & (al - 1)) != 0 || malloc_usable_size(sa) < sz) {
+                    printf("small aligned_alloc %zu/%zu\n", al, sz); return 1;
+                }
+                memset(sa, 0x33, sz);
+                free(sa);
+            }
+        }
+        void (*fn_free_sized)(void *, size_t) =
+            (void (*)(void *, size_t))(uintptr_t)dlsym(RTLD_DEFAULT, "free_sized");
+        void (*fn_free_aligned_sized)(void *, size_t, size_t) =
+            (void (*)(void *, size_t, size_t))(uintptr_t)dlsym(RTLD_DEFAULT, "free_aligned_sized");
+        if (fn_free_sized && fn_free_aligned_sized) {
+            fn_free_sized(NULL, 0);
+            void *fs = malloc(8000);
+            if (!fs) { printf("free_sized malloc\n"); return 1; }
+            memset(fs, 0x42, 8000);
+            fs = realloc(fs, 40);
+            fn_free_sized(fs, 40);
+            void *fas = aligned_alloc(64, 256);
+            if (!fas || ((uintptr_t)fas & 63) != 0) { printf("free_aligned_sized\n"); return 1; }
+            fn_free_aligned_sized(fas, 64, 256);
+        }
         if (malloc_usable_size(NULL) != 0) { printf("usable_size(NULL)\n"); return 1; }
     }
     printf("ok\n");

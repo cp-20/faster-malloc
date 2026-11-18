@@ -92,13 +92,11 @@ void *fm_refill_class(uint32_t cls);
 
 FM_Config fm_cfg;
 pthread_once_t fm_cfg_once = PTHREAD_ONCE_INIT;
+_Atomic int fm_cfg_ready;
 FM_Central fm_central[CLASS_COUNT];
-__thread void *fm_head[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
-__thread void *fm_tail[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
-__thread uint32_t fm_cnt[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
+__thread FM_HotTls fm_tls __attribute__((tls_model("initial-exec")));
 __thread char *fm_bump_ptr[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 __thread char *fm_bump_end[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
-__thread uintptr_t fm_list_span[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 __thread int fm_exit_armed __attribute__((tls_model("initial-exec")));
 __thread FM_Batch *fm_batch_pool __attribute__((tls_model("initial-exec")));
 __thread void *fm_lcache_head[FM_LCACHE_BUCKETS] __attribute__((tls_model("initial-exec")));
@@ -184,17 +182,17 @@ static const char *p_gen;
 static void jit_init_offsets(void)
 {
     uintptr_t tp = (uintptr_t)__builtin_thread_pointer();
-    g_tls_head_off = (uintptr_t)&fm_head[0] - tp;
+    g_tls_head_off = (uintptr_t)&fm_tls.head[0] - tp;
 
     /* Sanity check: the generated code reaches the thread-local array as
      * fs:[displacement].  Verify that by planting a sentinel and reading it
      * back. */
     void *sentinel = (void *)(uintptr_t)0x5A5A5A5A5A5A5A5Aull;
-    void *saved = fm_head[0];
-    fm_head[0] = sentinel;
+    void *saved = fm_tls.head[0];
+    fm_tls.head[0] = sentinel;
     uintptr_t probe;
     __asm__ volatile("mov %%fs:(%1), %0" : "=r"(probe) : "r"(g_tls_head_off) : "memory");
-    fm_head[0] = saved;
+    fm_tls.head[0] = saved;
     if (probe != (uintptr_t)sentinel) {
         fprintf(stderr, "[jit] TLS displacement mismatch (%p vs %p) -- JIT off\n",
                 (void *)probe, (void *)sentinel);
@@ -455,14 +453,16 @@ void *fm_generic_malloc(size_t n);
 /* The allocation fast path, shared by the generic and the profiling entry. */
 static inline void *fm_fast_path(size_t n)
 {
-    uint32_t cls = fm_class_of(n);
+    size_t cls = fm_class_of(n);
     if (__builtin_expect(cls != LARGE_CLASS, 1)) {
-        void *p = fm_head[cls];
+        void *p = fm_tls.head[cls];
         if (__builtin_expect(p != NULL, 1)) {
-            fm_head[cls] = *(void **)p;
+            void *next = *(void **)p;
+            __builtin_prefetch(next, 0, 1);
+            fm_tls.head[cls] = next;
             return p;
         }
-        return fm_refill_class(cls);
+        return fm_refill_class((uint32_t)cls);
     }
     return fm_large_alloc(n);
 }
@@ -547,78 +547,45 @@ __asm__(
 /* exported API                                                        */
 /* ------------------------------------------------------------------ */
 
-__attribute__((noinline, cold)) static void fm_free_slow_large(FM_Span *sp, void *p)
-{
-    fm_large_free(sp, p);
-}
+void free(void *p) { fm_free(p); }
 
-void free(void *p)
-{
-    if (!p)
-        return;
-    if (__builtin_expect(((uintptr_t)p & (SPAN_SIZE - 1)) == 0, 0)) {
-        if (fm_is_aligned_ptr(p)) {
-            const FM_Span *sp = (const FM_Span *)((const char *)p - HEADER_SIZE);
-            munmap((void *)sp->map_base, sp->map_size);
-            return;
-        }
-    }
-    FM_Span *sp = (FM_Span *)((uintptr_t)p & SPAN_MASK);
-    uint32_t cls32 = sp->cls;
-    if (__builtin_expect(cls32 == LARGE_CLASS, 0)) {
-        fm_free_slow_large(sp, p);
-        return;
-    }
-    size_t cls = cls32;
-    void *old_h = fm_head[cls];
-    *(void **)p = old_h;
-    fm_head[cls] = p;
-    if (__builtin_expect(!old_h, 0)) {
-        fm_tail[cls] = p;
-        fm_list_span[cls] = (uintptr_t)sp & SPAN_MASK;
-    } else if (fm_list_span[cls] && fm_list_span[cls] != ((uintptr_t)sp & SPAN_MASK)) {
-        fm_list_span[cls] = 0;
-    }
-    uint32_t cnt = fm_cnt[cls];
-    if (__builtin_expect(cnt == 0, 0))
-        cnt = kClassLimit[cls];
-    cnt--;
-    fm_cnt[cls] = cnt;
-    if (__builtin_expect(cnt == 0, 0))
-        fm_flush_bin(cls32);
-}
-
-void *calloc(size_t n, size_t sz)
-{
-    if (n != 0 && sz > SIZE_MAX / n) {
-        errno = ENOMEM;
-        return NULL;
-    }
-    size_t total = n * sz;
-    if (total > SMALL_MAX) {
-        int zeroed = 1;
-        void *p = fm_large_alloc2(total, &zeroed);
-        if (p && !zeroed)
-            memset(p, 0, total); /* cache hit: contents are stale */
-        return p;
-    }
-    void *p = fm_generic_malloc(total);
-    if (!p)
-        return NULL;
-    memset(p, 0, total);
-    return p;
-}
+void *calloc(size_t n, size_t sz) { return fm_calloc(n, sz); }
 
 void *realloc(void *p, size_t n) { return fm_realloc(p, n); }
 
 void *reallocarray(void *p, size_t n, size_t sz)
 {
-    if (n != 0 && sz > SIZE_MAX / n) {
-        errno = ENOMEM;
-        return NULL;
-    }
-    return fm_realloc(p, n * sz);
+    size_t total;
+    if (__builtin_expect(__builtin_mul_overflow(n, sz, &total), 0))
+        return fm_calloc_overflow();
+    return fm_realloc(p, total);
 }
+
+#ifndef malloc
+void free_sized(void *p, size_t sz) { (void)sz; fm_free(p); }
+void free_aligned_sized(void *p, size_t align, size_t sz) { (void)align; (void)sz; fm_free(p); }
+
+void *_Znwm(size_t n) { return fm_operator_new(n); }
+void *_Znam(size_t n) { return fm_operator_new(n); }
+void *_ZnwmRKSt9nothrow_t(size_t n, const void *nt) { (void)nt; return fm_operator_new_nothrow(n); }
+void *_ZnamRKSt9nothrow_t(size_t n, const void *nt) { (void)nt; return fm_operator_new_nothrow(n); }
+void _ZdlPv(void *p) { fm_free(p); }
+void _ZdaPv(void *p) { fm_free(p); }
+void _ZdlPvm(void *p, size_t sz) { fm_delete_sized(p, sz); }
+void _ZdaPvm(void *p, size_t sz) { fm_delete_sized(p, sz); }
+void _ZdlPvRKSt9nothrow_t(void *p, const void *nt) { (void)nt; fm_free(p); }
+void _ZdaPvRKSt9nothrow_t(void *p, const void *nt) { (void)nt; fm_free(p); }
+void *_ZnwmSt11align_val_t(size_t n, size_t al) { return fm_operator_new_aligned(n, al); }
+void *_ZnamSt11align_val_t(size_t n, size_t al) { return fm_operator_new_aligned(n, al); }
+void *_ZnwmSt11align_val_tRKSt9nothrow_t(size_t n, size_t al, const void *nt) { (void)nt; return fm_new_aligned_slow(n, al, 1); }
+void *_ZnamSt11align_val_tRKSt9nothrow_t(size_t n, size_t al, const void *nt) { (void)nt; return fm_new_aligned_slow(n, al, 1); }
+void _ZdlPvSt11align_val_t(void *p, size_t al) { (void)al; fm_free(p); }
+void _ZdaPvSt11align_val_t(void *p, size_t al) { (void)al; fm_free(p); }
+void _ZdlPvmSt11align_val_t(void *p, size_t sz, size_t al) { fm_delete_sized_aligned(p, sz, al); }
+void _ZdaPvmSt11align_val_t(void *p, size_t sz, size_t al) { fm_delete_sized_aligned(p, sz, al); }
+void _ZdlPvSt11align_val_tRKSt9nothrow_t(void *p, size_t al, const void *nt) { (void)al; (void)nt; fm_free(p); }
+void _ZdaPvSt11align_val_tRKSt9nothrow_t(void *p, size_t al, const void *nt) { (void)al; (void)nt; fm_free(p); }
+#endif
 
 int posix_memalign(void **out, size_t align, size_t n)
 {

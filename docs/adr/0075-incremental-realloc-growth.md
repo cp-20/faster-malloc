@@ -52,3 +52,12 @@ large realloc calls on either build.
 Both v2 and JIT passed the incremental growth test, `bench/check` and
 `bench/stress`. Under a constrained `RLIMIT_AS`, a 4 MiB reservation failed,
 the exact 1.5 MiB request succeeded and the original contents survived.
+
+## Amendment — keep the hit paths free (2026-11-18)
+
+The first version passed the grow-from size as an extra argument through
+`fm_large_alloc_search` and lost the in-place realloc branch layout, costing
+`micro large` about +11 instructions/op and `micro realloc` about +13% wall time.
+The miss path now lives in a cold `fm_large_alloc_map`, the old size travels in
+the thread-local `fm_grow_from` (set and cleared by realloc only), and the
+in-place check is marked likely. Both micros are now at or below main.

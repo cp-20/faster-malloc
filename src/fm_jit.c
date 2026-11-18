@@ -104,6 +104,7 @@ __thread FM_Batch *fm_batch_pool __attribute__((tls_model("initial-exec")));
 __thread void *fm_lcache_head[FM_LCACHE_BUCKETS] __attribute__((tls_model("initial-exec")));
 __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));
 __thread uint32_t fm_ltick __attribute__((tls_model("initial-exec")));
+__thread size_t fm_grow_from __attribute__((tls_model("initial-exec")));
 __thread uint32_t fm_lbucket_seen[FM_LCACHE_BUCKETS] __attribute__((tls_model("initial-exec")));
 __thread uint64_t fm_lcache_warm_mask __attribute__((tls_model("initial-exec")));
 __thread uint32_t fm_flush_seq[CLASS_COUNT] __attribute__((tls_model("initial-exec")));

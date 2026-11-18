@@ -85,3 +85,4 @@ mark were recorded when the work was done.
 | [0073](0073-census-slot-prefetch.md) | Prefetch census slots in census/rebuild walks | Accepted (51936cf) |
 | [0074](0074-large-cache-hot-window.md) | Large-block cache hot window (teardown detection) | Accepted (cb178ee) |
 | [0075](0075-incremental-realloc-growth.md) | Reserve capacity for incremental realloc growth | Accepted |
+| [0076](0076-dense-extents-locked-batch-pool-paced-prompt.md) | Dense span extents, locked batch pool, paced regroup prompt | Accepted |

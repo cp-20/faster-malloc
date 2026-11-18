@@ -159,7 +159,9 @@ typedef struct FM_Central {
      * responsive.  0 means "not yet censused". */
     _Atomic uint32_t last_census_ms;
     _Atomic uint32_t interval_ms;
-    char pad[64 - sizeof(_Atomic(FM_Batch *)) - 3 * sizeof(_Atomic uint32_t)];
+    /* Early placement scans are paced in flushes, separately from ageing. */
+    _Atomic uint32_t prompt_mask;
+    char pad[64 - sizeof(_Atomic(FM_Batch *)) - 4 * sizeof(_Atomic uint32_t)];
 } FM_Central;
 
 extern FM_Central fm_central[CLASS_COUNT];
@@ -220,7 +222,7 @@ static void fm_stack_resume(void)
 extern __thread uint32_t fm_flush_seq[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 extern __thread int fm_in_census __attribute__((tls_model("initial-exec")));
 extern __thread FM_Batch *fm_batch_pool __attribute__((tls_model("initial-exec")));
-static _Atomic(FM_Batch *) fm_batch_global_head;
+static FM_Batch *fm_batch_global_head; /* protected by fm_central_lock */
 
 /* Large-block cache (ADR 0011): per-thread cache of freed large blocks,
  * bucketed by the highest set bit of the mapping size, so a cached block
@@ -253,6 +255,10 @@ extern __thread uint64_t fm_lcache_warm_mask __attribute__((tls_model("initial-e
  * is per-thread, so this is race-free. */
 #define FM_LCACHE_HOT_WINDOW 8u
 extern __thread uint32_t fm_ltick __attribute__((tls_model("initial-exec")));
+/* realloc -> large-miss hint (ADR 0075): the old user size of a buffer
+ * being grown, or 0. Passed out of band so the shared cache-hit path
+ * carries no extra argument. Read and cleared only on a miss. */
+extern __thread size_t fm_grow_from __attribute__((tls_model("initial-exec")));
 extern __thread uint32_t fm_lbucket_seen[FM_LCACHE_BUCKETS]
     __attribute__((tls_model("initial-exec")));
 
@@ -277,6 +283,7 @@ extern __thread uint32_t fm_lbucket_seen[FM_LCACHE_BUCKETS]
  * FM_RELEASE_KEEP spans per class are always retained as burst
  * absorption. */
 #define FM_RELEASE_EVERY 16u
+#define FM_PROMPT_MIN_FLUSHES (8u * FM_RELEASE_EVERY)
 #define FM_RELEASE_MIN_DEPTH 4u
 #define FM_RELEASE_KEEP 2u
 #define FM_RELEASE_AGE_MS 100u
@@ -482,14 +489,16 @@ static inline FM_Batch *fm_batch_alloc(void)
         return b;
     }
     /* Try global freelist (cross-thread recycling). */
-    b = atomic_load_explicit(&fm_batch_global_head, memory_order_acquire);
-    while (b) {
-        FM_Batch *next = b->next;
-        if (atomic_compare_exchange_weak_explicit(&fm_batch_global_head, &b, next,
-                    memory_order_acq_rel, memory_order_acquire)) {
-            b->next = NULL;
-            return b;
-        }
+    /* Recycled nodes can leave and re-enter the stack between a load and
+     * a CAS. Hold the same fork-aware lock as the central batch lists. */
+    pthread_mutex_lock(&fm_central_lock);
+    b = fm_batch_global_head;
+    if (b)
+        fm_batch_global_head = b->next;
+    pthread_mutex_unlock(&fm_central_lock);
+    if (b) {
+        b->next = NULL;
+        return b;
     }
     char *page = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -510,11 +519,16 @@ static inline FM_Batch *fm_batch_alloc(void)
 
 static inline void fm_batch_release(FM_Batch *b)
 {
-    FM_Batch *old = atomic_load_explicit(&fm_batch_global_head, memory_order_relaxed);
-    do {
-        b->next = old;
-    } while (!atomic_compare_exchange_weak_explicit(&fm_batch_global_head, &old, b,
-                memory_order_release, memory_order_relaxed));
+    /* The next local publication usually needs the header we just popped. */
+    if (!fm_batch_pool) {
+        b->next = NULL;
+        fm_batch_pool = b;
+        return;
+    }
+    pthread_mutex_lock(&fm_central_lock);
+    b->next = fm_batch_global_head;
+    fm_batch_global_head = b;
+    pthread_mutex_unlock(&fm_central_lock);
 }
 
 /* ------------------------------------------------------------------ */
@@ -592,6 +606,53 @@ static inline char *fm_map_aligned(size_t bytes)
     return (char *)base;
 }
 
+/* Carve full, densely packed spans from a common 2 MiB extent. Each span
+ * still owns exactly its own mapping range and can be released independently.
+ * The central lock also serializes the cursor across fork. */
+static struct {
+    char *cursor;
+    unsigned remaining;
+    unsigned warmup;
+    uint32_t opened_ms;
+} fm_dense_extent;
+
+static char *fm_map_dense_span(void)
+{
+    enum { extent_size = 2 * 1024 * 1024, map_len = 2 * extent_size - FM_PAGE_SIZE };
+    enum { burst_ms = 100, warmup_extents = 4 };
+    fm_stack_exclusive();
+    if (!fm_dense_extent.remaining) {
+        char *raw = mmap(NULL, map_len, PROT_READ | PROT_WRITE,
+                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (raw == MAP_FAILED) {
+            fm_stack_resume();
+            return fm_map_aligned(SPAN_SIZE - HEADER_SIZE);
+        }
+        char *base = (char *)FM_ALIGN_UP((uintptr_t)raw, extent_size);
+        size_t prefix = (size_t)(base - raw);
+        size_t suffix = map_len - prefix - extent_size;
+        if (prefix)
+            munmap(raw, prefix);
+        if (suffix)
+            munmap(base + extent_size, suffix);
+        /* A rapidly consumed extent predicts dense demand for the next.
+         * Sparse/startup heaps get demand-paged base pages. */
+        uint32_t now = fm_now_ms();
+        if (fm_dense_extent.warmup < warmup_extents)
+            fm_dense_extent.warmup++;
+        else if (now - fm_dense_extent.opened_ms < burst_ms && fm_dense_extent.cursor)
+            (void)madvise(base, extent_size, MADV_HUGEPAGE);
+        fm_dense_extent.opened_ms = now;
+        fm_dense_extent.cursor = base;
+        fm_dense_extent.remaining = extent_size / SPAN_SIZE;
+    }
+    char *span = fm_dense_extent.cursor;
+    fm_dense_extent.cursor += SPAN_SIZE;
+    fm_dense_extent.remaining--;
+    fm_stack_resume();
+    return span;
+}
+
 /* Map and initialise a fresh span for class cls.  Blocks are carved
  * lazily from the span's bump range by the refill path, so creation
  * does not touch every block's memory. */
@@ -607,7 +668,8 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
         ? SPAN_SIZE : FM_ALIGN_UP(HEADER_SIZE + (bs > 16320 ? bs : 16320), FM_PAGE_SIZE);
 #endif
     size_t n = (bytes - HEADER_SIZE) / bs;
-    char *base = fm_map_aligned(bytes - HEADER_SIZE);
+    char *base = bytes == SPAN_SIZE && bs <= FM_PAGE_SIZE
+        ? fm_map_dense_span() : fm_map_aligned(bytes - HEADER_SIZE);
     if (!base)
         return NULL;
 
@@ -1642,6 +1704,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
      * fullest spans of all. */
     FM_Batch **order = NULL;
     size_t norder = 0;
+    size_t free_blocks = 0;
     if (cen.used)
         order = mmap(NULL, cen.used * sizeof(FM_Batch *),
                      PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,
@@ -1652,6 +1715,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
         FM_CensusEnt *e = &cen.ents[i];
         if (!e->span || !e->acnt)
             continue;
+        free_blocks += e->acnt;
         *(void **)e->atail = NULL;
 #ifdef FM_DEBUG
         if (!fm_census_dropped && !e->dead &&
@@ -1700,6 +1764,14 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             fm_central_push(cls, order[i]);
         munmap(order, cen.used * sizeof(FM_Batch *));
     }
+    /* Rewalking the entire retained pool every 128 flushes grows costly
+     * during bulk free. Scale only the early regroup prompt with the supply
+     * we actually rebuilt. The timed release and explicit trim still run. */
+    size_t flushes = free_blocks / fm_local_limit(cls);
+    uint32_t stride = FM_PROMPT_MIN_FLUSHES;
+    while (stride <= flushes / 2 && stride < (1u << 30))
+        stride *= 2;
+    atomic_store_explicit(&fm_central[cls].prompt_mask, stride - 1, memory_order_relaxed);
     fm_census_destroy(&cen);
     fm_in_census = was_in_census;
     pthread_mutex_unlock(&fm_census_lock);
@@ -1717,7 +1789,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
  * spacing those censuses to seconds makes the tax negligible
  * while leaving small dead stacks on the fast cadence their
  * release needs. */
-static void fm_release_maybe(uint32_t cls, uint32_t now)
+static void fm_release_maybe(uint32_t cls, uint32_t now, uint32_t flushed_cls)
 {
     const FM_Config *cfg = FM_CFG();
     FM_Central *c = &fm_central[cls];
@@ -1737,6 +1809,12 @@ static void fm_release_maybe(uint32_t cls, uint32_t now)
          * stack thousands of tiny same-set batches whose refill-time
          * consumption sprays across every span.  Rate-limit both to
          * bound cost in contention-heavy phases. */
+        if (cls != flushed_cls)
+            return;
+        uint32_t mask = atomic_load_explicit(&c->prompt_mask, memory_order_relaxed);
+        if (fm_flush_seq[cls] & (mask | (FM_PROMPT_MIN_FLUSHES - 1)))
+            return;
+        fm_stack_exclusive();
         FM_Batch *h = atomic_load_explicit(&c->head, memory_order_relaxed);
         uint32_t hd = atomic_load_explicit(&c->depth, memory_order_relaxed);
         uint32_t hc = h ? (h->count & FM_COUNT_MASK) : 0;
@@ -1747,9 +1825,8 @@ static void fm_release_maybe(uint32_t cls, uint32_t now)
          * small head batch is the fragmentation signature; big-head
          * stacks (deep regrouped or DOM-style churn) skip this. */
         int frag = h && hc != 0 && hc < 32 && hd >= 64;
+        fm_stack_resume();
         if (!unchar && !frag)
-            return;
-        if ((fm_flush_seq[cls] & (FM_RELEASE_EVERY * 8 - 1)) != 0)
             return;
     }
     atomic_store_explicit(&c->last_census_ms, now, memory_order_relaxed);
@@ -1773,7 +1850,6 @@ static void fm_idle_kick(uint32_t now);
 
 static void fm_auto_release_tick(uint32_t flushed_cls)
 {
-    (void)flushed_cls;
     uint32_t now = fm_now_ms();
     if (FM_CFG()->idle_release && !fm_in_census)
         fm_idle_kick(now);
@@ -1784,7 +1860,7 @@ static void fm_auto_release_tick(uint32_t flushed_cls)
      * full sweep per tick is cheap; the census behind them is what
      * the gates protect. */
     for (uint32_t cls = 0; cls < CLASS_COUNT; cls++)
-        fm_release_maybe(cls, now);
+        fm_release_maybe(cls, now, flushed_cls);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1905,6 +1981,16 @@ static void fm_idle_kick(uint32_t now)
 static inline size_t fm_trim_spans(void)
 {
     size_t released = 0;
+    fm_stack_exclusive();
+    if (fm_dense_extent.remaining) {
+        size_t bytes = (size_t)fm_dense_extent.remaining * SPAN_SIZE;
+        if (munmap(fm_dense_extent.cursor, bytes) == 0) {
+            released += bytes;
+            fm_dense_extent.remaining = 0;
+            fm_dense_extent.cursor = NULL;
+        }
+    }
+    fm_stack_resume();
     for (uint32_t cls = 0; cls < CLASS_COUNT; cls++)
         released += fm_trim_class(cls, 0, 1);
     return released;
@@ -2012,10 +2098,12 @@ static inline size_t fm_large_cache_drain(void)
 /* Allocate a large block.  *zeroed (when non-NULL) reports whether the
  * memory is known to be zero-filled: fresh anonymous mappings are,
  * cache hits are not.  calloc depends on this distinction. */
+__attribute__((noinline, cold)) static void *fm_large_alloc_map(size_t size, int *zeroed);
+
 __attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *zeroed,
-                                                             int wide, size_t growing_from)
+                                                             int wide)
 {
-    if (size > PTRDIFF_MAX) {
+    if (__builtin_expect(size > PTRDIFF_MAX, 0)) {
         errno = ENOMEM;
         return NULL;
     }
@@ -2052,6 +2140,14 @@ __attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *z
             link = (FM_Span **)&sp->lnext;
         }
     }
+    /* Tail call: keeps the miss path's locals and calls out of the
+     * cache-hit path's prologue/epilogue. */
+    return fm_large_alloc_map(size, zeroed);
+}
+
+static void *fm_large_alloc_map(size_t size, int *zeroed)
+{
+    size_t growing_from = fm_grow_from;
     uintptr_t raw = 0;
     size_t raw_len = 0;
     /* A buffer growing in sub-doubling steps would otherwise copy and
@@ -2093,7 +2189,7 @@ __attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *z
 
 static void *fm_large_alloc2(size_t size, int *zeroed)
 {
-    return fm_large_alloc_search(size, zeroed, 0, 0);
+    return fm_large_alloc_search(size, zeroed, 0);
 }
 
 __attribute__((noinline)) static void *fm_large_alloc(size_t size)
@@ -2200,6 +2296,16 @@ static void fm_thread_exit_flush(void)
         }
     }
     fm_large_cache_drain();
+    if (fm_batch_pool) {
+        FM_Batch *tail = fm_batch_pool;
+        while (tail->next)
+            tail = tail->next;
+        pthread_mutex_lock(&fm_central_lock);
+        tail->next = fm_batch_global_head;
+        fm_batch_global_head = fm_batch_pool;
+        pthread_mutex_unlock(&fm_central_lock);
+        fm_batch_pool = NULL;
+    }
 }
 
 static pthread_key_t fm_exit_key;
@@ -2388,7 +2494,7 @@ static inline void *fm_realloc(void *p, size_t size)
     FM_Span *sp = (FM_Span *)((uintptr_t)p & SPAN_MASK);
     if (sp->cls != LARGE_CLASS) {
         size_t old = kClassSize[sp->cls];
-        if (size <= old)
+        if (__builtin_expect(size <= old, 1))
             return p;
         /* Incremental growth across the densely spaced medium classes
          * otherwise strands the previous buffer in each class in turn. */
@@ -2420,9 +2526,14 @@ static inline void *fm_realloc(void *p, size_t size)
     } else if (size <= sp->user_size) {
         return p;
     }
-    void *q = sp->align ? fm_aligned_alloc_impl(sp->align, size)
-                       : fm_large_alloc_search(size, NULL,
-                                               FM_CFG()->realloc_cache_search, sp->user_size);
+    void *q;
+    if (sp->align) {
+        q = fm_aligned_alloc_impl(sp->align, size);
+    } else {
+        fm_grow_from = sp->user_size;
+        q = fm_large_alloc_search(size, NULL, FM_CFG()->realloc_cache_search);
+        fm_grow_from = 0;
+    }
     if (!q)
         return NULL;
     memcpy(q, p, sp->user_size);

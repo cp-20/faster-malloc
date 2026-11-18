@@ -59,6 +59,7 @@
 #define FM_CORE_H
 
 #define _GNU_SOURCE
+#include <errno.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -2011,8 +2012,13 @@ static inline size_t fm_large_cache_drain(void)
 /* Allocate a large block.  *zeroed (when non-NULL) reports whether the
  * memory is known to be zero-filled: fresh anonymous mappings are,
  * cache hits are not.  calloc depends on this distinction. */
-__attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *zeroed, int wide)
+__attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *zeroed,
+                                                             int wide, size_t growing_from)
 {
+    if (size > PTRDIFF_MAX) {
+        errno = ENOMEM;
+        return NULL;
+    }
     fm_arm_thread_exit();
     size_t need_map = FM_ALIGN_UP(size + HEADER_SIZE, FM_PAGE_SIZE);
     int nb = 63 - __builtin_clzll(need_map);
@@ -2048,9 +2054,29 @@ __attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *z
     }
     uintptr_t raw = 0;
     size_t raw_len = 0;
-    char *base = fm_map_large(size, &raw, &raw_len);
+    /* A buffer growing in sub-doubling steps would otherwise copy and
+     * fault a new mapping at almost every step. Reserve untouched VA on
+     * a miss. Cache lookup and user_size still use the actual request. */
+    size_t capacity = size;
+    const size_t huge_page = 2u << 20;
+    if (growing_from && size - growing_from < growing_from) {
+        size_t extra = size < (8u << 20) ? size : (8u << 20);
+        capacity += extra;
+        if (capacity >= huge_page / 2)
+            capacity = FM_ALIGN_UP(capacity + HEADER_SIZE + SPAN_SIZE, huge_page)
+                     - HEADER_SIZE - SPAN_SIZE;
+    }
+    char *base = fm_map_large(capacity, &raw, &raw_len);
+    if (!base && capacity != size)
+        base = fm_map_large(size, &raw, &raw_len);
     if (!base)
         return NULL;
+#ifdef MADV_HUGEPAGE
+    /* The copy will touch the old payload densely. Limit the hint to
+     * the requested portion so sparse reserve pages stay cheap. */
+    if (capacity != size && size >= huge_page / 2)
+        (void)madvise(base, FM_ALIGN_UP(size + HEADER_SIZE, FM_PAGE_SIZE), MADV_HUGEPAGE);
+#endif
     FM_Span *sp = (FM_Span *)base;
     sp->cls = LARGE_CLASS;
     sp->magic = FM_SPAN_MAGIC;
@@ -2067,7 +2093,7 @@ __attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *z
 
 static void *fm_large_alloc2(size_t size, int *zeroed)
 {
-    return fm_large_alloc_search(size, zeroed, 0);
+    return fm_large_alloc_search(size, zeroed, 0, 0);
 }
 
 __attribute__((noinline)) static void *fm_large_alloc(size_t size)
@@ -2364,7 +2390,14 @@ static inline void *fm_realloc(void *p, size_t size)
         size_t old = kClassSize[sp->cls];
         if (size <= old)
             return p;
-        void *q = fm_malloc(size);
+        /* Incremental growth across the densely spaced medium classes
+         * otherwise strands the previous buffer in each class in turn. */
+        size_t capacity = size;
+        if (old >= 512 && size <= SMALL_MAX && size - old < old)
+            capacity = (size_t)1 << (32 - __builtin_clz((unsigned)size - 1));
+        void *q = fm_malloc(capacity);
+        if (!q && capacity != size)
+            q = fm_malloc(size);
         if (!q)
             return NULL;
         memcpy(q, p, old);
@@ -2389,7 +2422,7 @@ static inline void *fm_realloc(void *p, size_t size)
     }
     void *q = sp->align ? fm_aligned_alloc_impl(sp->align, size)
                        : fm_large_alloc_search(size, NULL,
-                                                FM_CFG()->realloc_cache_search);
+                                               FM_CFG()->realloc_cache_search, sp->user_size);
     if (!q)
         return NULL;
     memcpy(q, p, sp->user_size);

@@ -75,6 +75,29 @@ int main(int argc, char **argv)
     g = realloc(g, 100000);
     if (g[0] != 9) { printf("grow data lost\n"); return 1; }
     free(g);
+    /* Incremental growth crosses medium classes, the large threshold
+     * and the spare capacity of several successive mappings. */
+    {
+        unsigned char *q = NULL;
+        size_t used = 0;
+        for (size_t next = 768; next < 12 * 1024 * 1024; next += next / 4) {
+            unsigned char *grown = realloc(q, next);
+            if (!grown || malloc_usable_size(grown) < next) {
+                printf("incremental realloc failed at %zu\n", next);
+                return 1;
+            }
+            q = grown;
+            for (size_t i = 0; i < used; i++) {
+                if (q[i] != (unsigned char)(i * 31)) {
+                    printf("incremental realloc lost byte %zu at %zu\n", i, next);
+                    return 1;
+                }
+            }
+            for (; used < next; used++)
+                q[used] = (unsigned char)(used * 31);
+        }
+        free(q);
+    }
     /* Large realloc growth with a live neighbour: preserve both blocks
      * and touch every page, including after shrinking and regrowing. */
     {

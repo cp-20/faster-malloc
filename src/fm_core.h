@@ -744,6 +744,7 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out,
     size_t bs = kClassSize[cls];
     size_t bytes = SPAN_SIZE;
     uint32_t first_cap = 0;
+    int tight_first = 0;
 #ifdef FM_SMALL_FIRST_SPAN
     /* ADR 0060 kept startup RSS low by shrinking nblocks on the first
      * span.  That still consumed a full 64 KiB dense-extent slot, so a
@@ -758,6 +759,16 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out,
         uint32_t cap = (uint32_t)((bs > 16320 ? 1u : 16320u / bs));
         first_cap = cap ? cap : 1;
     }
+    /* N31 adapted to N2: N2 gives every span a full slot, so N31's old
+     * `bytes != SPAN_SIZE` marker no longer distinguishes a first span.
+     * A first span whose ADR 0060 carve is a single >16 KiB block still
+     * needs only block+header of mapping, not a whole 64 KiB slab.  Map
+     * just that and keep n/map_size truthful; later spans of the class
+     * use the normal full carve. */
+    if (first_cap == 1 && bs > 16320) {
+        tight_first = 1;
+        bytes = FM_ALIGN_UP(HEADER_SIZE + bs, FM_PAGE_SIZE);
+    }
 #endif
     size_t n = (bytes - HEADER_SIZE) / bs;
     uintptr_t raw_base = 0;
@@ -766,7 +777,21 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out,
     if (bs <= FM_PAGE_SIZE) {
         base = fm_map_dense_span();
         raw_base = (uintptr_t)base;
+    } else if (tight_first) {
+        raw_len = FM_ALIGN_UP(bs + HEADER_SIZE, FM_PAGE_SIZE);
+        base = fm_map_aligned(raw_len - HEADER_SIZE);
+        raw_base = (uintptr_t)base;
     } else {
+        base = fm_map_large_slab(SPAN_SIZE - HEADER_SIZE, &raw_base, &raw_len);
+        if (!base) {
+            base = fm_map_aligned(SPAN_SIZE - HEADER_SIZE);
+            raw_base = (uintptr_t)base;
+            raw_len = SPAN_SIZE;
+        }
+    }
+    /* N31 fallback: if the tight first mapping fails, use the normal
+     * slab so this class still gets a span. */
+    if (!base && tight_first) {
         base = fm_map_large_slab(SPAN_SIZE - HEADER_SIZE, &raw_base, &raw_len);
         if (!base) {
             base = fm_map_aligned(SPAN_SIZE - HEADER_SIZE);

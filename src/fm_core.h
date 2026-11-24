@@ -645,11 +645,43 @@ static struct {
     uint32_t opened_ms;
 } fm_dense_extent;
 
+/* N101: bootstrap the first small spans from the program break.  The brk
+ * VMA already exists at process start, so the first ~1 MiB of span VA costs
+ * no mmap syscall and no extra VMA -- short, startup-heavy apps pay for
+ * mapping setup more than for allocator work.  The brk range is grabbed
+ * once, under the central lock; once it is exhausted every later span uses
+ * the mmap extent below.  Bootstrap spans keep the ordinary 64 KiB VA-slot
+ * bookkeeping, so a census that finds one entirely free still returns it
+ * with munmap (a page-aligned hole in the brk VMA is safe on Linux). */
+#define FM_BRK_BOOTSTRAP_BYTES (1u << 20)
+static char *fm_brk_cur;
+static size_t fm_brk_rem;
+static int fm_brk_init;
+
 static char *fm_map_dense_span(void)
 {
     enum { extent_size = 2 * 1024 * 1024, map_len = 2 * extent_size - FM_PAGE_SIZE };
     enum { burst_ms = 100, warmup_extents = 4 };
     fm_stack_exclusive();
+    if (!fm_brk_init) {
+        void *b;
+        fm_brk_init = 1;
+        b = sbrk(FM_BRK_BOOTSTRAP_BYTES + SPAN_SIZE);
+        if (b != (void *)-1) {
+            uintptr_t aligned = FM_ALIGN_UP((uintptr_t)b, SPAN_SIZE);
+            fm_brk_cur = (char *)aligned;
+            /* At most one span is lost to alignment; the tail slack stays
+             * mapped as part of the break and is simply never handed out. */
+            fm_brk_rem = FM_BRK_BOOTSTRAP_BYTES - (size_t)(aligned - (uintptr_t)b);
+        }
+    }
+    if (fm_brk_rem >= SPAN_SIZE) {
+        char *span = fm_brk_cur;
+        fm_brk_cur += SPAN_SIZE;
+        fm_brk_rem -= SPAN_SIZE;
+        fm_stack_resume();
+        return span;
+    }
     if (!fm_dense_extent.remaining) {
         char *raw = mmap(NULL, map_len, PROT_READ | PROT_WRITE,
                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);

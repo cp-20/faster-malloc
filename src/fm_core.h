@@ -254,6 +254,15 @@ static FM_Batch *fm_batch_global_head; /* protected by fm_central_lock */
 extern __thread void *fm_lcache_head[FM_LCACHE_BUCKETS]
     __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));
+/* Selective retention: a bucket that has served a hit keeps up to 4 MiB;
+ * a cold bucket keeps at most one small block.  A free-and-forget arena
+ * (CPython's 1 MiB obmalloc arenas) is cold by construction, so it is
+ * returned instead of filling the budget; a reused buffer (Lua strings,
+ * Node Buffers) is warm and keeps its cache. */
+#define FM_LCACHE_BUCKET_WARM (4u << 20)
+#define FM_LCACHE_BUCKET_COLD (256u << 10)
+extern __thread uint32_t fm_lbucket_bytes[FM_LCACHE_BUCKETS]
+    __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_warm_mask __attribute__((tls_model("initial-exec")));
 /* Large-block cache hotness (ADR 0011 follow-up): the cache pays off
  * only for sizes the workload allocates again soon; a bucket that
@@ -2227,10 +2236,16 @@ static inline void fm_large_free(FM_Span *sp, void *p)
                 if (pend > pstart)
                     (void)madvise((void *)pstart, pend - pstart, MADV_DONTNEED);
             }
-            sp->lnext = (uintptr_t)fm_lcache_head[b];
-            fm_lcache_head[b] = sp;
-            fm_lcache_bytes += ms;
-            return;
+            int warm = (fm_lcache_warm_mask & (1ULL << b)) != 0;
+            int take = warm ? (fm_lbucket_bytes[b] + ms <= FM_LCACHE_BUCKET_WARM)
+                            : (fm_lbucket_bytes[b] == 0 && ms <= FM_LCACHE_BUCKET_COLD);
+            if (take) {
+                sp->lnext = (uintptr_t)fm_lcache_head[b];
+                fm_lcache_head[b] = sp;
+                fm_lcache_bytes += ms;
+                fm_lbucket_bytes[b] += (uint32_t)ms;
+                return;
+            }
         }
     }
     munmap((void *)sp->map_base, sp->map_size);
@@ -2253,6 +2268,7 @@ static inline size_t fm_large_cache_drain(void)
         }
     }
     fm_lcache_bytes = 0;
+    memset(fm_lbucket_bytes, 0, sizeof fm_lbucket_bytes);
     if (fm_lextent_rem) {
         if (munmap(fm_lextent_cur, fm_lextent_rem) == 0)
             released += fm_lextent_rem;
@@ -2298,6 +2314,7 @@ __attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *z
                     fm_lcache_warm_mask |= (1ULL << b);
                 *link = (FM_Span *)sp->lnext;
                 fm_lcache_bytes -= sp->map_size;
+                fm_lbucket_bytes[b] -= (uint32_t)sp->map_size;
                 sp->user_size = size;
                 sp->lnext = 0;
                 if (zeroed)
@@ -2336,6 +2353,7 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
                 if (usable <= (4u << 20) && usable >= need_map) {
                     *link = (FM_Span *)sp->lnext;
                     fm_lcache_bytes -= sp->map_size;
+                    fm_lbucket_bytes[b] -= (uint32_t)sp->map_size;
                     if (usable >= carve + SPAN_SIZE + FM_PAGE_SIZE) {
                         uintptr_t map_end = sp->map_base + sp->map_size;
                         uintptr_t rem_addr = (uintptr_t)sp + carve;
@@ -2351,6 +2369,7 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
                         rem->lnext = (uintptr_t)fm_lcache_head[rb];
                         fm_lcache_head[rb] = rem;
                         fm_lcache_bytes += rem->map_size;
+                        fm_lbucket_bytes[rb] += (uint32_t)rem->map_size;
                         fm_lbucket_seen[rb] = fm_ltick;
                         sp->map_size = rem_addr - sp->map_base;
                     }

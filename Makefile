@@ -23,6 +23,11 @@ libfastmalloc2.so: src/fm_static.c src/fm_core.h src/size_classes2.h
 libjitmalloc.so: src/fm_jit.c src/jit_stubs.S src/fm_core.h src/size_classes2.h
 	$(CC) $(CFLAGS) -shared -Wl,-z,nodelete -o $@ src/fm_jit.c src/jit_stubs.S $(LDFLAGS)
 
+# v3 experiment: 4 KiB spans for small classes (SMALL_MAX=3968), same
+# fast path as v2.  Not part of `all`; screens on its own branch.
+libfastmalloc3.so: src/fm_static.c src/fm_core.h src/size_classes3.h
+	$(CC) $(CFLAGS) -DFM_V3_4K -shared -Wl,-z,nodelete -o $@ src/fm_static.c $(LDFLAGS)
+
 bench/micro: bench/micro.c
 	$(CC) -O2 -g -o $@ bench/micro.c -lpthread -ldl
 

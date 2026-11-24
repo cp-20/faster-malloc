@@ -75,11 +75,19 @@
 #include <stdio.h>
 #endif
 
+#ifdef FM_V3_4K
+#include "size_classes3.h"
+#else
 #include "size_classes2.h"
+#endif
 
 #define FM_SPAN_MAGIC 0x5A6E4C5Au
 #define FM_ALIGNED_MAGIC 0xA110CEDAu
 #define FM_PAGE_SIZE 4096u
+#ifndef FM_SPAN_SHIFT
+#define FM_SPAN_SHIFT 16
+#endif
+#define FM_SPAN_PAGES (SPAN_SIZE / FM_PAGE_SIZE)
 #define FM_ALIGN_UP(x, a) (((uintptr_t)(x) + (a)-1) & ~((uintptr_t)(a)-1))
 
 static inline void *fm_malloc(size_t size);
@@ -1164,7 +1172,7 @@ static void fm_census_destroy(FM_Census *c)
 static FM_CensusEnt *fm_census_slot(FM_Census *c, uintptr_t span)
 {
     size_t mask = c->cap - 1;
-    size_t i = (size_t)(span >> 16) & mask;
+    size_t i = (size_t)(span >> FM_SPAN_SHIFT) & mask;
     while (c->ents[i].span != 0 && c->ents[i].span != span)
         i = (i + 1) & mask;
     return &c->ents[i];
@@ -1285,6 +1293,7 @@ static inline void fm_pg_cover(FM_CensusEnt *e, uintptr_t span, void *p,
     uint32_t fp = (uint32_t)((HEADER_SIZE + (size_t)idx * bs) / FM_PAGE_SIZE);
     uint32_t lp = (uint32_t)((HEADER_SIZE + (size_t)(idx + 1) * bs - 1) /
                              FM_PAGE_SIZE);
+    if (lp >= FM_SPAN_PAGES) lp = FM_SPAN_PAGES - 1;
     for (uint32_t pg = fp; pg <= lp; pg++)
         e->page_free[pg]++;
     e->page_sfree[fp]++;
@@ -1378,12 +1387,12 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
              * the link word without loading the span header). */
             void *p = b->head;
             if (p) {
-                __builtin_prefetch(&cen.ents[(((uintptr_t)p >> 16)) &
+                __builtin_prefetch(&cen.ents[(((uintptr_t)p >> FM_SPAN_SHIFT)) &
                                              (cen.cap - 1)], 1, 1);
                 for (; p; p = *(void **)p) {
                     void *nx = *(void **)p;
                     if (nx)
-                        __builtin_prefetch(&cen.ents[(((uintptr_t)nx >> 16)) &
+                        __builtin_prefetch(&cen.ents[(((uintptr_t)nx >> FM_SPAN_SHIFT)) &
                                                      (cen.cap - 1)], 1, 1);
                     fm_census_walked++;
                     fm_census_add(&cen, (uintptr_t)p & SPAN_MASK, 1);
@@ -1556,7 +1565,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             uint32_t nb = sp->nblocks;
             uint16_t cand_mask = 0;
             uint32_t cand_pages = 0;
-            for (uint32_t pg = 1; pg < 16; pg++) {
+            for (uint32_t pg = 1; pg < FM_SPAN_PAGES; pg++) {
                 if (sp->purged_mask & (uint16_t)(1u << pg))
                     continue;
                 if (e->page_tot[pg] && e->page_free[pg] == e->page_tot[pg] &&
@@ -1570,7 +1579,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             if (cand_pages >= cfg->purge_min_pages) {
                 unsigned char vec[16];
                 int have_vec = mincore((void *)e->span, sp->map_size, vec) == 0;
-                for (uint32_t pg = 1; pg < 16; pg++) {
+                for (uint32_t pg = 1; pg < FM_SPAN_PAGES; pg++) {
                     if ((cand_mask & (uint16_t)(1u << pg)) &&
                         (!have_vec || (vec[pg] & 1))) {
                         new_mask |= (uint16_t)(1u << pg);
@@ -1723,12 +1732,12 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
         } else {
             void *p = b->head;
             if (p)
-                __builtin_prefetch(&cen.ents[(((uintptr_t)p >> 16)) &
+                __builtin_prefetch(&cen.ents[(((uintptr_t)p >> FM_SPAN_SHIFT)) &
                                              (cen.cap - 1)], 1, 1);
             while (p) {
                 void *nx = *(void **)p;
                 if (nx)
-                    __builtin_prefetch(&cen.ents[(((uintptr_t)nx >> 16)) &
+                    __builtin_prefetch(&cen.ents[(((uintptr_t)nx >> FM_SPAN_SHIFT)) &
                                                  (cen.cap - 1)], 1, 1);
                 FM_CensusEnt *e = fm_census_find(&cen, (uintptr_t)p & SPAN_MASK);
                 if (e && e->dead) {
@@ -2722,7 +2731,7 @@ static inline void fm_free(void *p)
 #if defined(__x86_64__)
     {
         uintptr_t base = (uintptr_t)p;
-        __asm__("andq $-65536, %0" : "+r"(base) : : "cc");
+        __asm__("andq %[mask], %0" : "+r"(base) : [mask] "i"(-(long)SPAN_SIZE) : "cc");
         sp = (FM_Span *)base;
     }
 #else

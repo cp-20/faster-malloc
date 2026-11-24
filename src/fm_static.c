@@ -9,7 +9,9 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#ifndef FM_V3_4K
 #define FM_SMALL_FIRST_SPAN /* ADR 0060; JIT guard rejected in ADR 0061. */
+#endif
 #include "fm_core.h"
 
 FM_Config fm_cfg;

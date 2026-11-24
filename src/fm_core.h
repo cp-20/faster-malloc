@@ -92,14 +92,28 @@
 #define SPAN_MASK (~(uintptr_t)(SPAN_SIZE - 1u))
 #define FM_SPAN_SHIFT 17
 #define FM_SPAN_PAGES (SPAN_SIZE / FM_PAGE_SIZE)
-/* The census purge mask is 16 bits and FM_Span is exactly HEADER_SIZE
- * (64) bytes, so one purge "page" becomes an 8 KiB unit (two OS pages)
- * when the span grows to 128 KiB.  The census runs at unit granularity;
- * MADV_DONTNEED still operates on whole 4 KiB OS pages. */
+/* Keep the page purge at whole 4 KiB OS pages, exactly as on 64 KiB
+ * spans.  The census mask is 16 bits and FM_Span is exactly HEADER_SIZE
+ * (64) bytes, so it can only describe the lower 64 KiB of a 128 KiB
+ * span (16 units x 4 KiB).  N8 widened each unit to 8 KiB to cover the
+ * whole span, but that doubled the number of blocks withheld by every
+ * purge (and the minimum purge run from 16 to 32 KiB), which showed up
+ * as sort +1.6% and python +2%.  Address the census at 4 KiB page
+ * granularity again; blocks in the upper half are simply never purge
+ * candidates (they are still reclaimed when the whole span dies). */
 #define FM_PURGE_UNITS 16
-#define FM_PURGE_UNIT_SIZE (SPAN_SIZE / FM_PURGE_UNITS)
-#define FM_PURGE_PPU (FM_PURGE_UNIT_SIZE / FM_PAGE_SIZE)
+#define FM_PURGE_UNIT_SIZE FM_PAGE_SIZE
+#define FM_PURGE_PPU 1
 #define FM_PG_MASK(u) ((uint16_t)1u << (u))
+/* The highest unit index representable in the 16-bit purge mask.  A
+ * block whose first unit is beyond this lives in the upper, untracked
+ * half of the span and must not index the page_* arrays or the mask. */
+#define FM_PURGE_MAX_UNIT (FM_PURGE_UNITS - 1u)
+/* Guard the 16-bit shift; an offset in the untracked upper half always
+ * tests negative. */
+#define FM_PG_IN_MASK(mask, off)                                            \
+    ((uint32_t)(off) <= FM_PURGE_MAX_UNIT &&                               \
+     ((mask) & FM_PG_MASK((uint32_t)(off))) != 0)
 
 static inline void *fm_malloc(size_t size);
 
@@ -1292,13 +1306,14 @@ static _Thread_local uint32_t fm_census_reclaimed;
  * then eligible. */
 static _Thread_local uint32_t fm_census_pg_waiting;
 
-/* ADR 0030: record one free block in a candidate span's per-unit
- * coverage counts.  A unit is FM_PURGE_UNIT_SIZE of the span (one 4 KiB
- * OS page with 64 KiB spans, two with 128 KiB spans); a block touches
- * the units between its first and last byte
- * (page_free), and starts in exactly one of them (page_sfree) --
- * the purge decision needs both, for different reasons (see the
- * decision phase in fm_trim_class). */
+/* ADR 0030: record one free block in a candidate span's per-page
+ * coverage counts.  A unit is one 4 KiB OS page; only the lower 64 KiB
+ * of a 128 KiB span is tracked (the 16-bit mask cannot reach further),
+ * so a block starting in the upper half is ignored and one straddling
+ * the boundary is clamped to the tracked units.  A block touches the
+ * units between its first and last byte (page_free), and starts in
+ * exactly one of them (page_sfree) -- the purge decision needs both,
+ * for different reasons (see the decision phase in fm_trim_class). */
 static inline void fm_pg_cover(FM_CensusEnt *e, uintptr_t span, void *p,
                                size_t bs)
 {
@@ -1306,6 +1321,10 @@ static inline void fm_pg_cover(FM_CensusEnt *e, uintptr_t span, void *p,
     uint32_t fp = (uint32_t)((HEADER_SIZE + (size_t)idx * bs) / FM_PURGE_UNIT_SIZE);
     uint32_t lp = (uint32_t)((HEADER_SIZE + (size_t)(idx + 1) * bs - 1) /
                              FM_PURGE_UNIT_SIZE);
+    if (fp > FM_PURGE_MAX_UNIT)
+        return;
+    if (lp > FM_PURGE_MAX_UNIT)
+        lp = FM_PURGE_MAX_UNIT;
     for (uint32_t pg = fp; pg <= lp; pg++)
         e->page_free[pg]++;
     e->page_sfree[fp]++;
@@ -1492,6 +1511,10 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
                 uint32_t lp = (uint32_t)((HEADER_SIZE +
                                           (size_t)(idx + 1) * bs - 1) /
                                          FM_PURGE_UNIT_SIZE);
+                if (fp > FM_PURGE_MAX_UNIT)
+                    continue;
+                if (lp > FM_PURGE_MAX_UNIT)
+                    lp = FM_PURGE_MAX_UNIT;
                 for (uint32_t pg = fp; pg <= lp; pg++)
                     e->page_tot[pg]++;
                 e->page_stot[fp]++;
@@ -1611,7 +1634,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
                     uint32_t fp = (uint32_t)((HEADER_SIZE +
                                               (size_t)idx * bs) /
                                              FM_PURGE_UNIT_SIZE);
-                    if (new_mask & FM_PG_MASK(fp))
+                    if (fp <= FM_PURGE_MAX_UNIT && (new_mask & FM_PG_MASK(fp)))
                         new_withheld++;
                 }
             }
@@ -1683,7 +1706,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
         for (uint32_t idx = 0; idx < sp->nblocks; idx++) {
             uint32_t fp = (uint32_t)((HEADER_SIZE + (size_t)idx * bs) /
                                      FM_PURGE_UNIT_SIZE);
-            if (!(sp->purged_mask & FM_PG_MASK(fp)))
+            if (fp > FM_PURGE_MAX_UNIT || !(sp->purged_mask & FM_PG_MASK(fp)))
                 continue;
             void *blk = (void *)(e->span + HEADER_SIZE + (size_t)idx * bs);
 #ifdef FM_DEBUG
@@ -1759,9 +1782,9 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
                 if (e && e->dead) {
                     /* block dies with its span */
                 } else if (e && e->pg_new_mask &&
-                           (e->pg_new_mask &
-                            FM_PG_MASK((((uintptr_t)p - e->span) /
-                                       FM_PURGE_UNIT_SIZE)))) {
+                           FM_PG_IN_MASK(e->pg_new_mask,
+                                         (((uintptr_t)p - e->span) /
+                                          FM_PURGE_UNIT_SIZE))) {
                     /* Block starting in one of this census's newly
                      * purged pages: withhold it -- it joins no
                      * chain, and its link word is about to be

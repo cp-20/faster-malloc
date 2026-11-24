@@ -270,6 +270,18 @@ extern __thread uint64_t fm_lcache_warm_mask __attribute__((tls_model("initial-e
  * bucket is always cached, so seeding a cycle still works.  All state
  * is per-thread, so this is race-free. */
 #define FM_LCACHE_HOT_WINDOW 8u
+/* N44: GCC's cc1plus grows obstacks in ~64 KiB chunks.  A 64 KiB request
+ * maps to lcache bucket 16; the untrimmed slab carve lands the freed block
+ * one bucket up (17).  The default cold hot window of 8 large frees is
+ * shorter than one function's teardown, so the chunk is munmapped before
+ * the next function's obstack searches the bucket -- no cache hit ever
+ * occurs, the bucket never turns warm, and every function mmaps fresh.
+ * Give these two buckets a dedicated longer cold window so one chunk
+ * outlives a function boundary and the next function reuses it.  Only the
+ * retention decision changes: reuse still requires usable >= need_map. */
+#define FM_LCACHE_OBSTACK_BUCKET_LO 16
+#define FM_LCACHE_OBSTACK_BUCKET_HI 17
+#define FM_LCACHE_OBSTACK_WINDOW 64u
 extern __thread uint32_t fm_ltick __attribute__((tls_model("initial-exec")));
 /* realloc -> large-miss hint (ADR 0075): the old user size of a buffer
  * being grown, or 0. Passed out of band so the shared cache-hit path
@@ -2210,10 +2222,13 @@ static inline void fm_large_free(FM_Span *sp, void *p)
     if (sp->align == 0 && (uintptr_t)p == (uintptr_t)sp + HEADER_SIZE) {
         size_t ms = sp->map_size;
         int b = 63 - __builtin_clzll(fm_large_usable(sp));
+        uint32_t hot_window =
+            (b >= FM_LCACHE_OBSTACK_BUCKET_LO && b <= FM_LCACHE_OBSTACK_BUCKET_HI)
+                ? FM_LCACHE_OBSTACK_WINDOW : FM_LCACHE_HOT_WINDOW;
         if (b < FM_LCACHE_BUCKETS &&
             fm_lcache_bytes + ms <= fm_lcache_budget(b) &&
             fm_ltick - fm_lbucket_seen[b] <=
-                ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : FM_LCACHE_HOT_WINDOW)) {
+                ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : hot_window)) {
             /* Only purge cold mappings large enough that the application is
              * unlikely to reuse them soon (bucket b covers usable sizes in
              * [2^b, 2^(b+1)), so b >= 24 means >= 16 MiB).  Medium buffers

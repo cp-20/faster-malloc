@@ -643,7 +643,13 @@ static struct {
     unsigned remaining;
     unsigned warmup;
     uint32_t opened_ms;
+    unsigned first_done; /* N43: the first span has been served already */
 } fm_dense_extent;
+
+/* N43: number of distinct threads that have entered the allocator (each
+ * thread arms its exit hook exactly once, in fm_arm_thread_exit).  Used only
+ * on the cold first-span path to recognise a single-threaded server. */
+static _Atomic unsigned fm_alloc_threads;
 
 static char *fm_map_dense_span(void)
 {
@@ -651,6 +657,25 @@ static char *fm_map_dense_span(void)
     enum { burst_ms = 100, warmup_extents = 4 };
     fm_stack_exclusive();
     if (!fm_dense_extent.remaining) {
+        /* N43: for a single-threaded server the very first span does not
+         * amortise a 2 MiB dense extent -- the rest of the extent sits as
+         * unused VA for the process's whole life.  Map that one span with a
+         * direct, exact-sized mmap (same 64 KiB mapping the span would own
+         * inside the extent, so release/munmap semantics are identical) and
+         * open the dense extent normally from the second span on.  The
+         * mmap-first branch is one-shot and gated to one allocator thread so
+         * multi-threaded workloads keep the accepted ADR 0077 dense path. */
+        if (!fm_dense_extent.cursor && !fm_dense_extent.first_done &&
+            atomic_load_explicit(&fm_alloc_threads, memory_order_relaxed) <= 1) {
+            char *base;
+            fm_dense_extent.first_done = 1;
+            base = fm_map_aligned(SPAN_SIZE - HEADER_SIZE);
+            fm_stack_resume();
+            if (base)
+                return base;
+            /* Allocation failure: fall through and try a dense extent. */
+            fm_stack_exclusive();
+        }
         char *raw = mmap(NULL, map_len, PROT_READ | PROT_WRITE,
                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (raw == MAP_FAILED) {
@@ -2575,6 +2600,7 @@ static void fm_arm_thread_exit(void)
     if (fm_exit_armed != 0) return;
     /* Mark armed first: pthread initialization can reenter the allocator. */
     fm_exit_armed = 1;
+    atomic_fetch_add_explicit(&fm_alloc_threads, 1, memory_order_relaxed);
     pthread_once(&fm_exit_once, fm_exit_make_key);
     pthread_setspecific(fm_exit_key, (const void *)&fm_exit_key);
 }

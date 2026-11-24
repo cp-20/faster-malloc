@@ -67,6 +67,7 @@
 #include <sched.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <pthread.h>
 #include <signal.h>
@@ -792,6 +793,54 @@ static void fm_auto_release_tick(uint32_t flushed_cls);
  * step is a likely cache miss, and ADR 0014 measured exactly how
  * expensive buying that walk back is.)
  */
+
+/* ------------------------------------------------------------------ */
+/* N119: malloc_trim-like pressure release on the large-free path.       */
+/*                                                                       */
+/* The per-thread large cache (ADR 0011) is the largest unambiguously    */
+/* returnable RSS component (ADR 0058).  When a process keeps setting new */
+/* resident-set records, cached large mappings from earlier phases are    */
+/* unlikely to be reused; dropping them plus the dead-span census cuts    */
+/* the peak.  Sample RSS only on the cold large-free path, every          */
+/* FM_LFREE_PRESSURE_EVERY frees, and fire only when RSS is strictly      */
+/* above the previously observed high-water (a new record) and past a     */
+/* minimum level.  A gap limiter bounds the cost. /proc failure = no-op.  */
+/* ------------------------------------------------------------------ */
+#define FM_LFREE_PRESSURE_EVERY   (64u)
+#define FM_RSS_PRESSURE_MIN_PAGES (4096u)  /* 16 MiB: ignore tiny processes */
+#define FM_RSS_RELEASE_GAP_MS     (256u)
+
+static _Atomic uint32_t fm_lfree_pressure_seq;
+static _Atomic uint32_t fm_rss_highwater_pages;
+static _Atomic uint32_t fm_rss_release_last_ms;
+
+/* Current resident pages from /proc/self/statm (field 2); 0 = no sample. */
+static uint32_t fm_rss_read_pages(void)
+{
+    int fd = open("/proc/self/statm", O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return 0;
+    char buf[96];
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n <= 0)
+        return 0;
+    buf[n] = '\0';
+    const char *p = buf;
+    while (*p >= '0' && *p <= '9')   /* virtual size */
+        p++;
+    while (*p == ' ')
+        p++;
+    uint32_t resident = 0;
+    while (*p >= '0' && *p <= '9') {
+        resident = resident * 10u + (uint32_t)(*p - '0');
+        p++;
+    }
+    return resident;
+}
+
+/* Defined after fm_large_cache_drain / fm_trim_spans below. */
+static void fm_large_free_pressure_check(void);
 
 static inline uint32_t fm_local_limit(uint32_t cls)
 {
@@ -2207,6 +2256,7 @@ static inline uint64_t fm_lcache_budget(int b)
 static inline void fm_large_free(FM_Span *sp, void *p)
 {
     fm_ltick++;
+    fm_large_free_pressure_check();
     if (sp->align == 0 && (uintptr_t)p == (uintptr_t)sp + HEADER_SIZE) {
         size_t ms = sp->map_size;
         int b = 63 - __builtin_clzll(fm_large_usable(sp));
@@ -2260,6 +2310,35 @@ static inline size_t fm_large_cache_drain(void)
         fm_lextent_rem = 0;
     }
     return released;
+}
+
+/* Cold, sampled release: only a new RSS record past the minimum level fires
+ * the trim, at most once per FM_RSS_RELEASE_GAP_MS.  Re-entrancy is safe:
+ * neither drain nor census frees a large block. */
+static void fm_large_free_pressure_check(void)
+{
+    if ((atomic_fetch_add_explicit(&fm_lfree_pressure_seq, 1,
+                                   memory_order_relaxed) &
+         (FM_LFREE_PRESSURE_EVERY - 1)) != FM_LFREE_PRESSURE_EVERY - 1)
+        return;
+    uint32_t cur = fm_rss_read_pages();
+    if (!cur)
+        return;
+    uint32_t hi = atomic_load_explicit(&fm_rss_highwater_pages, memory_order_relaxed);
+    if (cur <= hi) {
+        /* Keep the high-water honest even when a new record is not set. */
+        return;
+    }
+    atomic_store_explicit(&fm_rss_highwater_pages, cur, memory_order_relaxed);
+    if (hi < FM_RSS_PRESSURE_MIN_PAGES)
+        return;
+    uint32_t now = fm_now_ms();
+    uint32_t last = atomic_load_explicit(&fm_rss_release_last_ms, memory_order_relaxed);
+    if ((uint32_t)(now - last) < FM_RSS_RELEASE_GAP_MS)
+        return;
+    atomic_store_explicit(&fm_rss_release_last_ms, now, memory_order_relaxed);
+    (void)fm_large_cache_drain();
+    (void)fm_trim_spans();
 }
 
 /* Allocate a large block.  *zeroed (when non-NULL) reports whether the

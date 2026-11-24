@@ -67,6 +67,7 @@
 #include <sched.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <pthread.h>
 #include <signal.h>
@@ -793,6 +794,76 @@ static void fm_auto_release_tick(uint32_t flushed_cls);
  * expensive buying that walk back is.)
  */
 
+/* ------------------------------------------------------------------ */
+/* N116: RSS high-water adaptive per-class local limits.                */
+/*                                                                      */
+/* Every span a local list touches stays mapped: the census can only    */
+/* unmap a span once ALL of its blocks are visible in the central list.  */
+/* So while the process is near its resident-set high-water we want      */
+/* shorter local lists, to get freed blocks to the census sooner.  We    */
+/* sample the process RSS from /proc/self/statm on the existing cadenced  */
+/* release tick (a cold path), keep the observed high-water, and set a    */
+/* relaxed "under pressure" flag while current RSS sits close to that     */
+/* high-water.  fm_local_limit() halves each class's byte budget while    */
+/* the flag is set; no allocation/free fast path reads a file or an extra  */
+/* atomic.  If /proc is unavailable the flag stays clear (plain no-op).   */
+/* ------------------------------------------------------------------ */
+#define FM_RSS_PRESSURE_MIN_PAGES (4096u)  /* 16 MiB: ignore tiny processes */
+#define FM_RSS_PRESSURE_NEAR_PCT  (90u)    /* >=90% of high-water => pressure */
+#define FM_RSS_SAMPLE_INTERVAL_MS (32u)
+
+static _Atomic uint32_t fm_rss_highwater_pages;
+static _Atomic uint32_t fm_rss_last_ms;
+static _Atomic int fm_rss_pressure;
+
+/* Current resident pages from /proc/self/statm (field 2).  Returns 0 on
+ * any failure; 0 is just "no sample" and never an error path. */
+static uint32_t fm_rss_read_pages(void)
+{
+    int fd = open("/proc/self/statm", O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return 0;
+    char buf[96];
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n <= 0)
+        return 0;
+    buf[n] = '\0';
+    const char *p = buf;
+    while (*p >= '0' && *p <= '9')   /* skip the virtual-size field */
+        p++;
+    while (*p == ' ')
+        p++;
+    uint32_t resident = 0;
+    while (*p >= '0' && *p <= '9') {
+        resident = resident * 10u + (uint32_t)(*p - '0');
+        p++;
+    }
+    return resident;
+}
+
+/* Called from the cadenced release tick.  At most one /proc read per
+ * FM_RSS_SAMPLE_INTERVAL_MS plus two relaxed atomics. */
+static void fm_rss_sample(uint32_t now_ms)
+{
+    uint32_t last = atomic_load_explicit(&fm_rss_last_ms, memory_order_relaxed);
+    if ((uint32_t)(now_ms - last) < FM_RSS_SAMPLE_INTERVAL_MS)
+        return;
+    atomic_store_explicit(&fm_rss_last_ms, now_ms, memory_order_relaxed);
+
+    uint32_t cur = fm_rss_read_pages();
+    if (!cur)
+        return;
+    uint32_t hi = atomic_load_explicit(&fm_rss_highwater_pages, memory_order_relaxed);
+    if (cur > hi) {
+        atomic_store_explicit(&fm_rss_highwater_pages, cur, memory_order_relaxed);
+        hi = cur;
+    }
+    int pressure = hi >= FM_RSS_PRESSURE_MIN_PAGES &&
+                   (uint64_t)cur * 100u >= (uint64_t)hi * FM_RSS_PRESSURE_NEAR_PCT;
+    atomic_store_explicit(&fm_rss_pressure, pressure, memory_order_relaxed);
+}
+
 static inline uint32_t fm_local_limit(uint32_t cls)
 {
     uint32_t limit = kClassLimit[cls];
@@ -804,6 +875,10 @@ static inline uint32_t fm_local_limit(uint32_t cls)
      * acquisitions and batch round trips -- while retained bytes stay
      * bounded at 64 KiB per class.  The div override still scales it. */
     uint32_t budget = (uint32_t)((64u * 1024u) / kClassSize[cls]);
+    /* N116: while RSS sits at its high-water, halve the per-class budget
+     * so blocks reach the release census sooner and dead spans unmap. */
+    if (atomic_load_explicit(&fm_rss_pressure, memory_order_relaxed))
+        budget /= 2u;
     if (budget > limit)
         limit = budget;
     uint32_t div = FM_CFG()->local_limit_div;
@@ -1984,6 +2059,7 @@ static void fm_idle_kick(uint32_t now);
 static void fm_auto_release_tick(uint32_t flushed_cls)
 {
     uint32_t now = fm_now_ms();
+    fm_rss_sample(now);
     if (FM_CFG()->idle_release && !fm_in_census)
         fm_idle_kick(now);
     /* Consider every class, not just the one whose flush ticked: a

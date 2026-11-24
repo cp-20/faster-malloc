@@ -1924,7 +1924,13 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
 
     /* Stage 1 DIRTY -> MUZZY: return the resident payload of the newly
      * muzzy extents now.  Page 0 keeps the header (and its mapping), and
-     * the VA slot is retained until the muzzy sweep munmaps it. */
+     * the VA slot is retained until the muzzy sweep munmaps it.
+     * N129: the muzzy transition uses MADV_FREE instead of MADV_DONTNEED.
+     * A muzzy span holds no live blocks and is never re-carved before the
+     * sweep munmaps it, so lazy reclamation cannot expose stale data;
+     * only the RSS timing differs (pages stay resident until the kernel
+     * reclaims them under pressure).  PR #3's large-free purge and ADR
+     * 0030's page purge keep MADV_DONTNEED. */
     for (size_t i = 0; i < cen.cap; i++) {
         FM_CensusEnt *e = &cen.ents[i];
         if (!e->span || !(e->pg_flags & FM_PG_MUZZY_NEW))
@@ -1932,8 +1938,13 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
         FM_Span *sp = (FM_Span *)e->span;
         uintptr_t start = (uintptr_t)sp + FM_PAGE_SIZE;
         uintptr_t end = (uintptr_t)sp + sp->map_size;
-        if (end > start)
+        if (end > start) {
+#ifdef MADV_FREE
+            (void)madvise((void *)start, end - start, MADV_FREE);
+#else
             (void)madvise((void *)start, end - start, MADV_DONTNEED);
+#endif
+        }
     }
 
     /* Unmap the dead spans (once each, from the census).  A span already

@@ -735,17 +735,29 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
 
 /* Map and initialise a fresh span for class cls.  Blocks are carved
  * lazily from the span's bump range by the refill path, so creation
- * does not touch every block's memory. */
-static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
+ * does not touch every block's memory.  `first_cap_out` receives the
+ * initial-carve cap for the class's first span (0 when unrestricted);
+ * the span itself always owns a full 64 KiB slot. */
+static inline char *fm_span_new(uint32_t cls, uint32_t *count_out,
+                                uint32_t *first_cap_out)
 {
     size_t bs = kClassSize[cls];
     size_t bytes = SPAN_SIZE;
+    uint32_t first_cap = 0;
 #ifdef FM_SMALL_FIRST_SPAN
-    /* ADR 0060: sparsely used startup classes cap initial carved blocks
-     * while still drawing 64 KiB VA slots from the shared dense extent. */
+    /* ADR 0060 kept startup RSS low by shrinking nblocks on the first
+     * span.  That still consumed a full 64 KiB dense-extent slot, so a
+     * hot startup class opened a *second* slot as soon as its first
+     * 16 KiB was used, exhausting the 2 MiB extent sooner (extra mmap).
+     * Give every span the full slot but cap only the first carve to the
+     * ADR 0060 budget: later refills bump-carve the same mapping, so a
+     * second span is opened only when the first is truly exhausted.
+     * Tail pages stay untouched until blocks from them are handed out. */
     static _Atomic unsigned char started[CLASS_COUNT];
-    bytes = atomic_exchange_explicit(&started[cls], 1, memory_order_relaxed)
-        ? SPAN_SIZE : FM_ALIGN_UP(HEADER_SIZE + (bs > 16320 ? bs : 16320), FM_PAGE_SIZE);
+    if (!atomic_exchange_explicit(&started[cls], 1, memory_order_relaxed)) {
+        uint32_t cap = (uint32_t)((bs > 16320 ? 1u : 16320u / bs));
+        first_cap = cap ? cap : 1;
+    }
 #endif
     size_t n = (bytes - HEADER_SIZE) / bs;
     uintptr_t raw_base = 0;
@@ -779,6 +791,7 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
     sp->withheld_cnt = 0;
 
     *count_out = (uint32_t)n;
+    *first_cap_out = first_cap;
     return base;
 }
 
@@ -945,14 +958,20 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
     char *cur = fm_bump_ptr[cls];
     char *end = fm_bump_end[cls];
     if (cur >= end) {
-        uint32_t total = 0;
-        char *base = fm_span_new(cls, &total);
+        uint32_t total = 0, first_cap = 0;
+        char *base = fm_span_new(cls, &total, &first_cap);
         if (!base)
             return NULL;
         cur = base + HEADER_SIZE;
         end = cur + (size_t)total * bs;
         uint32_t avail0 = (uint32_t)((end - cur) / bs);
         uint32_t keep0 = limit < avail0 ? limit : avail0;
+        /* First span: carve only the ADR 0060 startup budget.  The
+         * remainder stays in this span's bump range, so the next
+         * refill reuses the same 64 KiB mapping instead of opening a
+         * second one. */
+        if (first_cap && keep0 > first_cap)
+            keep0 = first_cap;
 
         void *head = cur;
         void *t = cur;

@@ -358,6 +358,27 @@ gap is pages that each still hold at least one live block, which neither
 a page-level free list nor a cross-class page pool can reclaim without
 moving live objects.  This closes the question for git/lua/sqlite/redis.
 
+## Round 25: allocation locality is not the lever (2026-11-25)
+
+The remaining git/lua gap was attributed to partial-page fragmentation, so
+the next hypothesis was allocation locality: regroup the central stacks
+into span-pure batches more often so a class's live blocks cluster on
+fewer pages.  The census is what does that regrouping, and its cadence is
+`FM_RELEASE_INTERVAL_MS`; running it 50x more often is the cheapest test.
+
+| case | default (50 ms) | 5 ms | 1 ms |
+|---|---:|---:|---:|
+| git rev-list | 23.94 MB / 0.04 s | 23.92 / 0.03 | 23.86 / 0.04 |
+| lua churn | 16.29 MB / 0.32 s | 16.38 / 0.32 | - |
+
+No effect at all.  Combined with Round 24 (only 58 fully free pages) and
+the live-bytes measurement (11.81 vs glibc's 11.65 MB), this isolates the
+residual to pages that each still hold at least one long-lived block:
+regrouping, purging, pooling or re-ordering cannot reclaim them, and
+moving live blocks is impossible without breaking user pointers.  The
+only architectural answer is byte-granular pages, which the 11-rep matrix
+rejected on the micro (Round 20).
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

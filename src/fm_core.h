@@ -319,11 +319,15 @@ extern __thread uint32_t fm_lbucket_seen[FM_LCACHE_BUCKETS]
  * VA/header until muzzy_decay_ms, then are munmapped.  The maintenance thread
  * is armed by the internal high-water of cumulative large-block frees (a
  * cold path, so short apps and the exact-Ir micro suite never spawn it);
- * decay_pulse_spans bounds the batches a single census pulse detaches. */
-#define FM_DECAY_DIRTY_MS 500u
-#define FM_DECAY_MUZZY_MS 2000u
-#define FM_DECAY_HIGH_WATER (256ull << 20)
-#define FM_DECAY_PULSE_SPANS 32u
+ * decay_pulse_spans bounds the batches a single census pulse detaches.
+ * Tuned from the initial 256 MiB / 500 ms / 2000 ms / 32 spans: a 64 MiB
+ * arm threshold reaches large processes sooner, and the shorter dirty and
+ * muzzy windows plus a wider pulse make the decay visible within the
+ * benchmark's burst/pause cycles (N128). */
+#define FM_DECAY_DIRTY_MS 100u
+#define FM_DECAY_MUZZY_MS 1000u
+#define FM_DECAY_HIGH_WATER (64ull << 20)
+#define FM_DECAY_PULSE_SPANS 64u
 
 /* ADR 0024: in the census rebuild, a span needs at least this many
  * blocks in central to earn its own span-pure batch; smaller

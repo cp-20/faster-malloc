@@ -942,6 +942,54 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
     size_t bs = kClassSize[cls];
     char *cur = fm_bump_ptr[cls];
     char *end = fm_bump_end[cls];
+#ifdef FM_V3_4K
+    if (cur >= end) {
+        /* 4 KiB spans hold few blocks, so fill the whole 64 KiB local byte
+         * budget from up to 16 spans in one refill.  This keeps the refill
+         * rate roughly at v2's level despite the smaller span. */
+        enum { MAX_BATCH_SPANS = 16 };
+        void *head = NULL;
+        void *tail = NULL;
+        uint32_t have = 0;
+        uint32_t spans = 0;
+        while (have < limit && spans < MAX_BATCH_SPANS) {
+            uint32_t total = 0;
+            char *base = fm_span_new(cls, &total);
+            if (!base)
+                break;
+            char *c = base + HEADER_SIZE;
+            uint32_t avail = total;
+            uint32_t take = (limit - have) < avail ? (limit - have) : avail;
+            void *sh = c;
+            void *st = c;
+            for (uint32_t i = 1; i < take; i++) {
+                void *next = (char *)st + bs;
+                *(void **)st = next;
+                st = next;
+            }
+            *(void **)st = NULL;
+#ifdef FM_DEBUG
+            for (uint32_t i = 0; i < take; i++)
+                ((uint64_t *)(c + (size_t)i * bs))[1] = 0xDEADDEADDEADDEADull;
+#endif
+            if (!head)
+                head = sh;
+            else
+                *(void **)tail = sh;
+            tail = st;
+            have += take;
+            fm_bump_ptr[cls] = c + (size_t)take * bs;
+            fm_bump_end[cls] = c + (size_t)avail * bs;
+            spans++;
+        }
+        if (!head)
+            return NULL;
+        fm_tls.head[cls] = *(void **)head;
+        fm_tls.tail[cls] = tail;
+        fm_tls.cnt[cls] = (int32_t)limit;
+        return head;
+    }
+#else
     if (cur >= end) {
         uint32_t total = 0;
         char *base = fm_span_new(cls, &total);
@@ -998,6 +1046,7 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
 
         return head;
     }
+#endif
     uint32_t avail = (uint32_t)((end - cur) / bs);
     uint32_t keep = limit < avail ? limit : avail;
 

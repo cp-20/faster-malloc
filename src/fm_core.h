@@ -378,7 +378,10 @@ static void fm_config_init(void)
     c.local_limit_div = 1;
     c.lcache_cold_purge = 0;
     c.lazy_bump = 1;
-    c.locality_sort = 0;
+    /* Span-grouped refill regrouping is on by default: the CI app matrix
+     * showed a clear win on every real app once the linear bucket search was
+     * replaced by a direct-mapped table.  FM_LOCALITY_SORT=0 opts out. */
+    c.locality_sort = 1;
 
     const char *prof = getenv("FM_PROFILE");
     if (prof) {
@@ -790,47 +793,78 @@ static inline uint32_t fm_local_limit(uint32_t cls)
 }
 
 /* Group a mixed free-list batch by 64 KiB span so consecutive allocations
- * stay on the same span/pages and reduce D1/TLB misses (opt-in FM_LOCALITY_SORT=1). */
+ * stay on the same span/pages and reduce D1/TLB misses.  Enabled by default
+ * (c.locality_sort = 1); FM_LOCALITY_SORT=0 restores the pass-through.
+ *
+ * The old form linearly scanned every live bucket for each block.  With a
+ * batch spanning many distinct spans that is up to NBUCKETS compares and
+ * branches per block, and it was the whole cost of this mechanism on the
+ * mixed/churn micro workloads.  This form is direct-mapped: the 64 KiB span
+ * index (span base >> 16) selects one of NBUCKETS slots, so the common case
+ * is a single table probe.  Collisions linear-probe the table; if all slots
+ * are occupied by distinct spans the excess blocks go on one overflow
+ * chain, so list integrity and the returned tail are preserved for any
+ * batch size. */
 static void *fm_regroup_by_span(void *head, void **tail_out)
 {
-    enum { NBUCKETS = 16 };
+    enum { NBUCKETS = 16, NMASK = NBUCKETS - 1 };
+    /* A 64 KiB-aligned span base can never be all ones, so use that as the
+     * empty-slot sentinel (no separate "used" array needed). */
+    const uintptr_t EMPTY = ~(uintptr_t)0;
     uintptr_t keys[NBUCKETS];
     void *bhead[NBUCKETS];
     void *btail[NBUCKETS];
-    int nb = 0;
+    for (int i = 0; i < NBUCKETS; i++) {
+        keys[i] = EMPTY;
+        bhead[i] = btail[i] = NULL;
+    }
     void *ov_h = NULL, *ov_t = NULL;
 
     void *p = head;
     while (p) {
         void *next = *(void **)p;
-        uintptr_t sp = (uintptr_t)p & SPAN_MASK;
-        int found = -1;
-        for (int i = 0; i < nb; i++) {
+        uintptr_t sp = (uintptr_t)p & SPAN_MASK;   /* 64 KiB span base */
+        unsigned h = (unsigned)(sp >> 16) & NMASK; /* direct-mapped slot */
+        int slot = -1;
+        for (unsigned j = 0; j < NBUCKETS; j++) {
+            unsigned i = (h + j) & NMASK;
             if (keys[i] == sp) {
-                found = i;
+                slot = i;
+                break;
+            }
+            if (keys[i] == EMPTY) {
+                keys[i] = sp;
+                bhead[i] = btail[i] = NULL;
+                slot = i;
                 break;
             }
         }
-        if (found >= 0) {
-            *(void **)p = bhead[found];
-            bhead[found] = p;
-        } else if (nb < NBUCKETS) {
-            keys[nb] = sp;
-            bhead[nb] = p;
-            btail[nb] = p;
+        if (slot >= 0) {
+            /* Append to keep within-span order stable (and the chain's head
+             * is the first block of that span encountered in the batch). */
+            if (!bhead[slot]) {
+                bhead[slot] = btail[slot] = p;
+            } else {
+                *(void **)btail[slot] = p;
+                btail[slot] = p;
+            }
             *(void **)p = NULL;
-            nb++;
         } else {
-            *(void **)p = ov_h;
-            if (!ov_t)
-                ov_t = p;
-            ov_h = p;
+            /* Table full: keep the remainder on one mixed overflow chain. */
+            *(void **)p = NULL;
+            if (ov_t)
+                *(void **)ov_t = p;
+            else
+                ov_h = p;
+            ov_t = p;
         }
         p = next;
     }
 
     void *out_h = NULL, *out_t = NULL;
-    for (int i = 0; i < nb; i++) {
+    for (int i = 0; i < NBUCKETS; i++) {
+        if (!bhead[i])
+            continue;
         if (!out_h) {
             out_h = bhead[i];
             out_t = btail[i];

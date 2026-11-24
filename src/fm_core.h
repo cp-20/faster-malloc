@@ -71,6 +71,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <dlfcn.h>
+#include <fcntl.h>
 #ifdef FM_DEBUG
 #include <stdio.h>
 #endif
@@ -385,7 +386,11 @@ static void fm_config_init(void)
     c.idle_release = 0;
     c.realloc_cache_search = 0;
     c.local_limit_div = 1;
-    c.lcache_cold_purge = 0;
+    /* Enable the cold large-cache payload purge; its threshold is adaptive
+     * in fm_large_free (16 MiB by default, 8 MiB above the mapped high-water).
+     * Throughput still disables it and FM_LCACHE_COLD_PURGE=0 restores the
+     * old behaviour. */
+    c.lcache_cold_purge = 1;
     c.lazy_bump = 1;
     c.locality_sort = 0;
 
@@ -2200,6 +2205,36 @@ static inline uint64_t fm_lcache_budget(int b)
     return budget;
 }
 
+/* Adaptive cold-purge threshold.  The default keeps the 16 MiB bar (bucket
+ * >= 24) so medium-buffer churn stays resident; once the process's mapped
+ * footprint has crossed the high-water below, the bar drops to 8 MiB
+ * (bucket >= 23) to catch V8's external ArrayBuffer/Buffer churn.  The
+ * first field of /proc/self/statm is total mapped pages.  The check is
+ * paced on the (already slow) large-free tick and the result is latched, so
+ * no syscall runs on the steady path and the threshold cannot oscillate. */
+#define FM_PURGE_MAPPED_HIGHWATER (1ull << 30) /* 1 GiB of mapped pages */
+#define FM_PURGE_CHECK_TICKS 256u
+static _Atomic int fm_purge_mapped_high;
+
+static inline void fm_check_purge_highwater(void)
+{
+    if (atomic_load_explicit(&fm_purge_mapped_high, memory_order_relaxed))
+        return;
+    int fd = open("/proc/self/statm", O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return;
+    char buf[128];
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n <= 0)
+        return;
+    buf[n] = '\0';
+    char *end = NULL;
+    unsigned long long pages = strtoull(buf, &end, 10);
+    if (end != buf && pages * FM_PAGE_SIZE >= FM_PURGE_MAPPED_HIGHWATER)
+        atomic_store_explicit(&fm_purge_mapped_high, 1, memory_order_relaxed);
+}
+
 static inline void fm_large_free(FM_Span *sp, void *p)
 {
     fm_ltick++;
@@ -2210,12 +2245,18 @@ static inline void fm_large_free(FM_Span *sp, void *p)
             fm_lcache_bytes + ms <= fm_lcache_budget(b) &&
             fm_ltick - fm_lbucket_seen[b] <=
                 ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : FM_LCACHE_HOT_WINDOW)) {
-            if (FM_CFG()->lcache_cold_purge &&
-                !(fm_lcache_warm_mask & (1ULL << b))) {
-                uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
-                uintptr_t pend = (sp->map_base + sp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);
-                if (pend > pstart)
-                    (void)madvise((void *)pstart, pend - pstart, MADV_DONTNEED);
+            if (FM_CFG()->lcache_cold_purge) {
+                if (fm_ltick == 1u ||
+                    (fm_ltick & (FM_PURGE_CHECK_TICKS - 1u)) == 0u)
+                    fm_check_purge_highwater();
+                int pmin = atomic_load_explicit(&fm_purge_mapped_high,
+                                                memory_order_relaxed) ? 23 : 24;
+                if (b >= pmin && !(fm_lcache_warm_mask & (1ULL << b))) {
+                    uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
+                    uintptr_t pend = (sp->map_base + sp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);
+                    if (pend > pstart)
+                        (void)madvise((void *)pstart, pend - pstart, MADV_DONTNEED);
+                }
             }
             sp->lnext = (uintptr_t)fm_lcache_head[b];
             fm_lcache_head[b] = sp;

@@ -682,14 +682,21 @@ static char *fm_map_dense_span(void)
     return span;
 }
 
-/* Per-thread 4 MiB base-page slab for >4 KiB class spans and <=512 KiB
- * large allocations: amortizes mmap/trim syscalls without hinting THP on
+/* Per-thread base-page slab for >4 KiB class spans and <=512 KiB large
+ * allocations: amortizes mmap/trim syscalls without hinting THP on
  * potentially sparse allocations, and drains on malloc_trim / thread exit.
- * A 4 MiB slab holds twice as many 64 KiB carves as 2 MiB, so g++/jq/xz
- * medium-buffer churn crosses the mmap/munmap slow path half as often;
- * untouched tail pages stay non-resident, so RSS is unaffected. */
+ * It is 2 MiB in a single-thread process (N11: g++ RSS) and 4 MiB once a
+ * second thread maps a slab (ADR 0082: keep sort/jq/xz refill rates).
+ * Untouched tail pages stay non-resident, so RSS is unaffected by size. */
 static _Thread_local char *fm_lextent_cur __attribute__((tls_model("initial-exec")));
 static _Thread_local size_t fm_lextent_rem __attribute__((tls_model("initial-exec")));
+/* N11: adaptive slab geometry.  A single-thread process maps a 2 MiB slab;
+ * once a second thread has mapped one, new slabs grow to the ADR 0082 4 MiB
+ * size so multi-thread refill rates stay unchanged.  The count is taken on
+ * the slab-map slow path, once per thread, so no hot path pays for it. */
+static _Thread_local unsigned char fm_slab_tls_seen
+    __attribute__((tls_model("initial-exec")));
+static _Atomic unsigned fm_slab_thread_count;
 
 static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out)
 {
@@ -707,7 +714,13 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
         fm_lextent_cur = NULL;
         fm_lextent_rem = 0;
     }
-    size_t slab_len = (4u << 20) + SPAN_SIZE;
+    if (!fm_slab_tls_seen) {
+        fm_slab_tls_seen = 1;
+        atomic_fetch_add_explicit(&fm_slab_thread_count, 1, memory_order_relaxed);
+    }
+    unsigned slab_threads =
+        atomic_load_explicit(&fm_slab_thread_count, memory_order_relaxed);
+    size_t slab_len = ((slab_threads > 1 ? 4u : 2u) << 20) + SPAN_SIZE;
     char *raw = mmap(NULL, slab_len, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (raw == MAP_FAILED)
@@ -804,6 +817,11 @@ static inline uint32_t fm_local_limit(uint32_t cls)
      * acquisitions and batch round trips -- while retained bytes stay
      * bounded at 64 KiB per class.  The div override still scales it. */
     uint32_t budget = (uint32_t)((64u * 1024u) / kClassSize[cls]);
+    /* N25: classes >= 2 KiB get a 128 KiB byte budget.  Their generated
+     * block caps are far below 64 KiB worth of blocks, so the extra budget
+     * halves the flush rate for compiler/thread-buffer sized classes. */
+    if (kClassSize[cls] >= 2048)
+        budget <<= 1;
     if (budget > limit)
         limit = budget;
     uint32_t div = FM_CFG()->local_limit_div;

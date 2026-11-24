@@ -270,6 +270,13 @@ extern __thread uint64_t fm_lcache_warm_mask __attribute__((tls_model("initial-e
  * bucket is always cached, so seeding a cycle still works.  All state
  * is per-thread, so this is race-free. */
 #define FM_LCACHE_HOT_WINDOW 8u
+/* N44+N26: cc1plus cycles ~64 KiB obstack chunks (buckets 16-17) across
+ * function boundaries, so they need the 64-free window; the rest of the
+ * 64 KiB-1 MiB medium band (buckets 18-20) needs 16 frees to outlive a
+ * cycle.  Every other size band keeps the default 8, and warm buckets
+ * keep the wide 64.  Slow path only. */
+#define FM_LCACHE_OBSTACK_WINDOW 64u
+#define FM_LCACHE_MED_HOT_WINDOW 16u
 extern __thread uint32_t fm_ltick __attribute__((tls_model("initial-exec")));
 /* realloc -> large-miss hint (ADR 0075): the old user size of a buffer
  * being grown, or 0. Passed out of band so the shared cache-hit path
@@ -682,14 +689,43 @@ static char *fm_map_dense_span(void)
     return span;
 }
 
-/* Per-thread 4 MiB base-page slab for >4 KiB class spans and <=512 KiB
- * large allocations: amortizes mmap/trim syscalls without hinting THP on
+/* Per-thread base-page slab for >4 KiB class spans and <=512 KiB large
+ * allocations: amortizes mmap/trim syscalls without hinting THP on
  * potentially sparse allocations, and drains on malloc_trim / thread exit.
- * A 4 MiB slab holds twice as many 64 KiB carves as 2 MiB, so g++/jq/xz
- * medium-buffer churn crosses the mmap/munmap slow path half as often;
- * untouched tail pages stay non-resident, so RSS is unaffected. */
+ *
+ * N11 -- adaptive slab size.  A single-threaded (typically short-lived)
+ * process maps a 2 MiB slab; a process with two or more allocator-using
+ * threads keeps the accepted 4 MiB slab.  Rationale: a 4 MiB anonymous
+ * mapping is more likely to be collapsed by a system-wide `always` THP
+ * policy, and a sparse-touch single-thread workload (cc1plus's 64 KiB
+ * obstack cycle) then faults whole 2 MiB folios and inflates peak RSS even
+ * though the untouched *tail pages* of the slab are non-resident.  Halving
+ * the mapping for that case trades a higher refill rate for the smaller
+ * folio footprint.  Parallel workloads (sort/xz) still get 4 MiB once a
+ * second thread has touched the allocator, so their refill rate -- and
+ * therefore their time -- is unchanged.
+ *
+ * The thread count is a process-wide relaxed atomic with a per-thread
+ * "counted" flag.  It is consulted only when a *fresh* slab is mapped, so
+ * it adds no cost to carve-from-remainder hits and never touches a hot
+ * path.  The count only grows, so a process that becomes multithreaded
+ * upgrades to 4 MiB for all later slabs. */
 static _Thread_local char *fm_lextent_cur __attribute__((tls_model("initial-exec")));
 static _Thread_local size_t fm_lextent_rem __attribute__((tls_model("initial-exec")));
+static _Atomic unsigned fm_slab_threads;
+static __thread unsigned char fm_slab_thread_seen
+    __attribute__((tls_model("initial-exec")));
+
+static inline size_t fm_slab_len(void)
+{
+    if (!fm_slab_thread_seen) {
+        fm_slab_thread_seen = 1;
+        atomic_fetch_add_explicit(&fm_slab_threads, 1, memory_order_relaxed);
+    }
+    size_t slab = atomic_load_explicit(&fm_slab_threads, memory_order_relaxed) >= 2u
+                      ? (4u << 20) : (2u << 20);
+    return slab + SPAN_SIZE;
+}
 
 static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out)
 {
@@ -707,7 +743,7 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
         fm_lextent_cur = NULL;
         fm_lextent_rem = 0;
     }
-    size_t slab_len = (4u << 20) + SPAN_SIZE;
+    size_t slab_len = fm_slab_len();
     char *raw = mmap(NULL, slab_len, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (raw == MAP_FAILED)
@@ -802,8 +838,12 @@ static inline uint32_t fm_local_limit(uint32_t cls)
      * 16 B blocks, 32 KiB for 128 B blocks).  Spend the full budget: a
      * larger local limit means fewer flushes -- fewer central-lock
      * acquisitions and batch round trips -- while retained bytes stay
-     * bounded at 64 KiB per class.  The div override still scales it. */
-    uint32_t budget = (uint32_t)((64u * 1024u) / kClassSize[cls]);
+     * bounded at 64 KiB per class.  The div override still scales it.
+     * For classes >= 2 KiB the generated limit already follows that 64 KiB
+     * byte rule exactly, so doubling the budget to 128 KiB is what actually
+     * raises their limit; below 2 KiB the 256-block cap binds instead. */
+    uint32_t bs = kClassSize[cls];
+    uint32_t budget = (uint32_t)((bs >= 2048 ? 128u * 1024u : 64u * 1024u) / bs);
     if (budget > limit)
         limit = budget;
     uint32_t div = FM_CFG()->local_limit_div;
@@ -2210,10 +2250,14 @@ static inline void fm_large_free(FM_Span *sp, void *p)
     if (sp->align == 0 && (uintptr_t)p == (uintptr_t)sp + HEADER_SIZE) {
         size_t ms = sp->map_size;
         int b = 63 - __builtin_clzll(fm_large_usable(sp));
+        uint32_t hot_window =
+            (b >= 16 && b <= 17) ? FM_LCACHE_OBSTACK_WINDOW
+            : (b >= 18 && b <= 20) ? FM_LCACHE_MED_HOT_WINDOW
+                                   : FM_LCACHE_HOT_WINDOW;
         if (b < FM_LCACHE_BUCKETS &&
             fm_lcache_bytes + ms <= fm_lcache_budget(b) &&
             fm_ltick - fm_lbucket_seen[b] <=
-                ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : FM_LCACHE_HOT_WINDOW)) {
+                ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : hot_window)) {
             /* Only purge cold mappings large enough that the application is
              * unlikely to reuse them soon (bucket b covers usable sizes in
              * [2^b, 2^(b+1)), so b >= 24 means >= 16 MiB).  Medium buffers

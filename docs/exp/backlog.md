@@ -233,6 +233,20 @@ is *better* than glibc (709 vs 702 MB at 1M live), and simultaneous
 mixed-size packing is better (224 vs 237 MB), so the git gap is isolated
 to its pack/delta buffers, not the general small-object path.
 
+## Round 17: cross-class span recycling (2026-11-25)
+
+| id | branch | result | status |
+|---|---|---|---|
+| P1 | `exp/span-pool` | a fully free span keeps its 64 KiB mapping (pages `MADV_DONTNEED`-ed) in a per-thread pool and any class re-carves it.  `strace -c` on the Lua workload: munmap 204 -> 9, madvise 54 -> 222, mmap 57 -> 51, syscall time 2.63 -> 1.10 ms.  RSS: git 23.9 -> 23.9, lua 16.2 -> 15.9, sqlite speedtest1 11.5 -> 12.3 MiB; runtime unchanged on all three. | rejected (RSS neutral/worse, time within noise) |
+
+The mechanism works as designed, but the measured residual is **partially
+free** spans, not dead ones: the census page purge is a no-op on
+git/lua/sqlite, and peak live bytes (11.81 vs glibc's 11.65 MiB on git)
+are already within 1.4%.  A true 4 KiB cross-class page list would need a
+page map and still cannot reclaim a page that holds one live block, which
+is why mimalloc (26.9), jemalloc (27.0) and tcmalloc (30.0) all lose to
+glibc's 22.6 MiB on the same git row.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

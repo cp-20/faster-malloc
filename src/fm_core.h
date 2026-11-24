@@ -678,14 +678,43 @@ static char *fm_map_dense_span(void)
     return span;
 }
 
-/* Per-thread 4 MiB base-page slab for >4 KiB class spans and <=512 KiB
- * large allocations: amortizes mmap/trim syscalls without hinting THP on
+/* Per-thread base-page slab for >4 KiB class spans and <=512 KiB large
+ * allocations: amortizes mmap/trim syscalls without hinting THP on
  * potentially sparse allocations, and drains on malloc_trim / thread exit.
- * A 4 MiB slab holds twice as many 64 KiB carves as 2 MiB, so g++/jq/xz
- * medium-buffer churn crosses the mmap/munmap slow path half as often;
- * untouched tail pages stay non-resident, so RSS is unaffected. */
+ *
+ * N11 -- adaptive slab size.  A single-threaded (typically short-lived)
+ * process maps a 2 MiB slab; a process with two or more allocator-using
+ * threads keeps the accepted 4 MiB slab.  Rationale: a 4 MiB anonymous
+ * mapping is more likely to be collapsed by a system-wide `always` THP
+ * policy, and a sparse-touch single-thread workload (cc1plus's 64 KiB
+ * obstack cycle) then faults whole 2 MiB folios and inflates peak RSS even
+ * though the untouched *tail pages* of the slab are non-resident.  Halving
+ * the mapping for that case trades a higher refill rate for the smaller
+ * folio footprint.  Parallel workloads (sort/xz) still get 4 MiB once a
+ * second thread has touched the allocator, so their refill rate -- and
+ * therefore their time -- is unchanged.
+ *
+ * The thread count is a process-wide relaxed atomic with a per-thread
+ * "counted" flag.  It is consulted only when a *fresh* slab is mapped, so
+ * it adds no cost to carve-from-remainder hits and never touches a hot
+ * path.  The count only grows, so a process that becomes multithreaded
+ * upgrades to 4 MiB for all later slabs. */
 static _Thread_local char *fm_lextent_cur __attribute__((tls_model("initial-exec")));
 static _Thread_local size_t fm_lextent_rem __attribute__((tls_model("initial-exec")));
+static _Atomic unsigned fm_slab_threads;
+static __thread unsigned char fm_slab_thread_seen
+    __attribute__((tls_model("initial-exec")));
+
+static inline size_t fm_slab_len(void)
+{
+    if (!fm_slab_thread_seen) {
+        fm_slab_thread_seen = 1;
+        atomic_fetch_add_explicit(&fm_slab_threads, 1, memory_order_relaxed);
+    }
+    size_t slab = atomic_load_explicit(&fm_slab_threads, memory_order_relaxed) >= 2u
+                      ? (4u << 20) : (2u << 20);
+    return slab + SPAN_SIZE;
+}
 
 static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out)
 {
@@ -703,7 +732,7 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
         fm_lextent_cur = NULL;
         fm_lextent_rem = 0;
     }
-    size_t slab_len = (4u << 20) + SPAN_SIZE;
+    size_t slab_len = fm_slab_len();
     char *raw = mmap(NULL, slab_len, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (raw == MAP_FAILED)

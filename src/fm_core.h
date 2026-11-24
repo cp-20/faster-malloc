@@ -385,7 +385,11 @@ static void fm_config_init(void)
     c.idle_release = 0;
     c.realloc_cache_search = 0;
     c.local_limit_div = 1;
-    c.lcache_cold_purge = 0;
+    /* Drop resident pages of cold (not-recently-reused) large blocks on
+     * free, moving the balanced default partway toward the footprint
+     * profile.  The mapping stays cached, so warm reuse is unchanged;
+     * only the resident pages of teardown-shaped blocks are released. */
+    c.lcache_cold_purge = 1;
     c.lazy_bump = 1;
     c.locality_sort = 0;
 

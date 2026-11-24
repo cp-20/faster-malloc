@@ -777,6 +777,17 @@ static void fm_auto_release_tick(uint32_t flushed_cls);
  * expensive buying that walk back is.)
  */
 
+/* Bound the per-class local list of the tiniest classes by block count, not
+ * just bytes.  A full 64 KiB byte budget buys 4096 blocks at 16 B, so a flush
+ * can publish a single 4096-block batch; the census/regroup walks that batch
+ * and its tail latency shows up on real programs.  Capping 16/32 B at this
+ * many blocks keeps those batches small while still leaving a 4x headroom
+ * over the generated 256-block kClassLimit.  Classes of 48 B and above (the
+ * retain=64 B / cross=96 B paths that carry the micro win) keep the full
+ * 64 KiB budget exactly.  FM_LOCAL_LIMIT_DIV is applied after the cap, so
+ * the override still scales the result. */
+#define FM_TINY_CLASS_MAX_BLOCKS 1024u
+
 static inline uint32_t fm_local_limit(uint32_t cls)
 {
     uint32_t limit = kClassLimit[cls];
@@ -790,6 +801,8 @@ static inline uint32_t fm_local_limit(uint32_t cls)
     uint32_t budget = (uint32_t)((64u * 1024u) / kClassSize[cls]);
     if (budget > limit)
         limit = budget;
+    if (kClassSize[cls] <= 32 && limit > FM_TINY_CLASS_MAX_BLOCKS)
+        limit = FM_TINY_CLASS_MAX_BLOCKS;
     uint32_t div = FM_CFG()->local_limit_div;
     if (div > 1) {
         limit /= div;

@@ -66,6 +66,7 @@
 #include <stdatomic.h>
 #include <sched.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -2204,6 +2205,27 @@ static inline uint64_t fm_lcache_budget(int b)
     return budget;
 }
 
+/* N48 (combining N10 + N14): extend the cold large-cache purge one bucket
+ * lower -- from >=16 MiB (b >= 24) to the 8-16 MiB band (b == 23), where
+ * Node's V8 external buffers live -- but only once the process is actually
+ * under RSS pressure.  Purging that band unconditionally is what regressed
+ * jq/g++/Python medium-buffer churn in ADR 0058; gating on a *peak* RSS
+ * high-water keeps quiet workloads on the old behaviour.
+ *
+ * ru_maxrss is the monotonic peak RSS (KiB on Linux), so it is itself a
+ * high-water mark: a single syscall on this slow path, no /proc parsing and
+ * no shared state.  384 MiB separates Node (~531 MiB) from jq (~257), g++
+ * (~201) and Python (~146), so only the RSS-exposed workload crosses the
+ * gate.  Returning 0 when getrusage fails fails safe (old behaviour). */
+#define FM_LCACHE_RSS_HIGH_WATER_KIB (384ul << 10)
+static inline int fm_lcache_rss_high_water(void)
+{
+    struct rusage ru;
+    if (getrusage(RUSAGE_SELF, &ru) != 0)
+        return 0;
+    return (uint64_t)ru.ru_maxrss >= (uint64_t)FM_LCACHE_RSS_HIGH_WATER_KIB;
+}
+
 static inline void fm_large_free(FM_Span *sp, void *p)
 {
     fm_ltick++;
@@ -2214,14 +2236,18 @@ static inline void fm_large_free(FM_Span *sp, void *p)
             fm_lcache_bytes + ms <= fm_lcache_budget(b) &&
             fm_ltick - fm_lbucket_seen[b] <=
                 ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : FM_LCACHE_HOT_WINDOW)) {
-            /* Only purge cold mappings large enough that the application is
+            /* Purge cold mappings large enough that the application is
              * unlikely to reuse them soon (bucket b covers usable sizes in
-             * [2^b, 2^(b+1)), so b >= 24 means >= 16 MiB).  Medium buffers
-             * churned by jq/g++/Python stay resident when re-freed, while
-             * sort's one-shot merge buffers (>= 16 MiB) are still purged. */
+             * [2^b, 2^(b+1)), so b >= 24 means >= 16 MiB).  The >=16 MiB
+             * purge stays unconditional -- it is what wins sort and is
+             * independent of RSS pressure.  N48 adds the 8-16 MiB band
+             * (b == 23), which holds Node's V8 external buffers, but only
+             * when the process has crossed the RSS high-water; jq/g++/
+             * Python stay below it and keep their medium buffers resident.
+             * Warm buckets are never purged. */
             if (FM_CFG()->lcache_cold_purge &&
-                b >= 24 &&
-                !(fm_lcache_warm_mask & (1ULL << b))) {
+                !(fm_lcache_warm_mask & (1ULL << b)) &&
+                (b >= 24 || (b == 23 && fm_lcache_rss_high_water()))) {
                 uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
                 uintptr_t pend = (sp->map_base + sp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);
                 if (pend > pstart)

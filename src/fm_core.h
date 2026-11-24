@@ -2205,11 +2205,17 @@ static inline void fm_large_free(FM_Span *sp, void *p)
     fm_ltick++;
     if (sp->align == 0 && (uintptr_t)p == (uintptr_t)sp + HEADER_SIZE) {
         size_t ms = sp->map_size;
-        int b = 63 - __builtin_clzll(fm_large_usable(sp));
+        size_t usable = fm_large_usable(sp);
+        int b = 63 - __builtin_clzll(usable);
+        /* 64 KiB-1 MiB blocks (e.g. cc1plus obstack cycles) need a wider
+         * cold window to survive until their first cache hit warms the
+         * bucket; other sizes keep the teardown-safe 8-free window. */
+        uint32_t cold_window = (usable >= (64u << 10) && usable <= (1u << 20))
+                                   ? 16u : FM_LCACHE_HOT_WINDOW;
         if (b < FM_LCACHE_BUCKETS &&
             fm_lcache_bytes + ms <= fm_lcache_budget(b) &&
             fm_ltick - fm_lbucket_seen[b] <=
-                ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : FM_LCACHE_HOT_WINDOW)) {
+                ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : cold_window)) {
             if (FM_CFG()->lcache_cold_purge &&
                 !(fm_lcache_warm_mask & (1ULL << b))) {
                 uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;

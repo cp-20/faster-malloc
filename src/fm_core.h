@@ -231,6 +231,35 @@ extern __thread int fm_in_census __attribute__((tls_model("initial-exec")));
 extern __thread FM_Batch *fm_batch_pool __attribute__((tls_model("initial-exec")));
 static FM_Batch *fm_batch_global_head; /* protected by fm_central_lock */
 
+/* N16: small per-thread reserve of batch headers.  In a Larson-style
+ * transfer the producer recycles one header per refill while the
+ * consumer needs one per flush.  Today the first release stays in the
+ * local pool but the second already takes the fork-aware central lock,
+ * and the consumer takes it again for each header it fetches.  Keep a
+ * few headers aside so the second (and later) releases stay local and
+ * a grab from the global list amortises the lock over several headers. */
+#define FM_BATCH_RESERVE 8u
+static __thread FM_Batch *fm_batch_reserve[FM_BATCH_RESERVE]
+    __attribute__((tls_model("initial-exec")));
+static __thread unsigned fm_batch_reserve_head, fm_batch_reserve_n
+    __attribute__((tls_model("initial-exec")));
+
+/* Return the whole reserve to the global freelist under one lock. */
+static inline void fm_batch_spill_reserve(void)
+{
+    if (!fm_batch_reserve_n)
+        return;
+    pthread_mutex_lock(&fm_central_lock);
+    for (unsigned i = 0; i < fm_batch_reserve_n; i++) {
+        FM_Batch *r = fm_batch_reserve[
+            (fm_batch_reserve_head + i) & (FM_BATCH_RESERVE - 1u)];
+        r->next = fm_batch_global_head;
+        fm_batch_global_head = r;
+    }
+    pthread_mutex_unlock(&fm_central_lock);
+    fm_batch_reserve_n = 0;
+}
+
 /* Large-block cache (ADR 0011): per-thread cache of freed large blocks,
  * bucketed by the highest set bit of the mapping size, so a cached block
  * is never more than 2x the size of the request it can serve.  Without
@@ -517,15 +546,32 @@ static inline FM_Batch *fm_batch_alloc(void)
         b->next = NULL;
         return b;
     }
-    /* Try global freelist (cross-thread recycling). */
-    /* Recycled nodes can leave and re-enter the stack between a load and
-     * a CAS. Hold the same fork-aware lock as the central batch lists. */
+    if (__builtin_expect(fm_batch_reserve_n != 0, 0)) {
+        b = fm_batch_reserve[fm_batch_reserve_head];
+        fm_batch_reserve_head = (fm_batch_reserve_head + 1u) & (FM_BATCH_RESERVE - 1u);
+        fm_batch_reserve_n--;
+        b->next = NULL;
+        return b;
+    }
+    /* Try global freelist (cross-thread recycling).  Recycled nodes can
+     * leave and re-enter the stack between a load and a CAS, so hold the
+     * same fork-aware lock as the central batch lists.  Take a whole
+     * reserve's worth under that one lock: the peer hands headers back
+     * one at a time, so a single grab amortises the lock N16-style. */
     pthread_mutex_lock(&fm_central_lock);
     b = fm_batch_global_head;
-    if (b)
+    unsigned n = 0;
+    while (b && n < FM_BATCH_RESERVE) {
         fm_batch_global_head = b->next;
+        fm_batch_reserve[(fm_batch_reserve_head + n) & (FM_BATCH_RESERVE - 1u)] = b;
+        n++;
+        b = fm_batch_global_head;
+    }
     pthread_mutex_unlock(&fm_central_lock);
-    if (b) {
+    if (n) {
+        b = fm_batch_reserve[fm_batch_reserve_head];
+        fm_batch_reserve_head = (fm_batch_reserve_head + 1u) & (FM_BATCH_RESERVE - 1u);
+        fm_batch_reserve_n = n - 1;
         b->next = NULL;
         return b;
     }
@@ -554,10 +600,14 @@ static inline void fm_batch_release(FM_Batch *b)
         fm_batch_pool = b;
         return;
     }
-    pthread_mutex_lock(&fm_central_lock);
-    b->next = fm_batch_global_head;
-    fm_batch_global_head = b;
-    pthread_mutex_unlock(&fm_central_lock);
+    /* Second and later releases used to take the central lock right away.
+     * Park them in the reserve and cross that lock only once per batch. */
+    b->next = NULL;
+    fm_batch_reserve[(fm_batch_reserve_head + fm_batch_reserve_n) &
+                     (FM_BATCH_RESERVE - 1u)] = b;
+    if (++fm_batch_reserve_n < FM_BATCH_RESERVE)
+        return;
+    fm_batch_spill_reserve();
 }
 
 /* ------------------------------------------------------------------ */
@@ -2532,6 +2582,8 @@ static void fm_thread_exit_flush(void)
         }
     }
     fm_large_cache_drain();
+    /* Do not strand reserve headers in a dying thread. */
+    fm_batch_spill_reserve();
     if (fm_batch_pool) {
         FM_Batch *tail = fm_batch_pool;
         while (tail->next)
@@ -2662,8 +2714,47 @@ __attribute__((noinline)) static void fm_free_cnt_slow(uint32_t cls)
     fm_flush_bin(cls);
 }
 
+/* N37 experiment: FIFO hand-out for large size classes, LIFO for small.
+ *
+ * The local list is a singly linked head->...->tail chain.  free() pushes at
+ * head and malloc() pops at head, so the default is LIFO: the freshest freed
+ * block is reused first.  For large classes we instead append frees at the
+ * tail and keep popping at head, which makes the hand-out FIFO (oldest freed
+ * first).  A singly linked list cannot pop its tail in O(1), so changing the
+ * push side is the only way to get FIFO without a new pointer in every block.
+ *
+ * Emptiness in the FIFO push is detected from *head*, not tail: after the
+ * last pop head is NULL while tail still names the block just handed out.
+ * Checking head means the stale tail is never dereferenced (it is simply
+ * overwritten by the next push), which is what keeps the list from linking
+ * into handed-out memory (cf. ADR 0069).
+ *
+ * Small classes (below 1 KiB) keep the tuned LIFO assembly path unchanged;
+ * 1 KiB and above (class 64 .. CLASS_COUNT-1) use FIFO.
+ */
+#define FM_FIFO_CLASS_MIN 64u /* kClassSize[cls] >= 1024 bytes */
+
 static inline void fm_tls_push_free(void *p, size_t cls)
 {
+    if (__builtin_expect(cls >= FM_FIFO_CLASS_MIN, 0)) {
+        /* FIFO: append p as the new tail; the alloc paths pop from head. */
+        *(void **)p = NULL;
+#ifdef FM_DEBUG
+        ((uint64_t *)p)[1] = 0xDEADDEADDEADDEADull;
+#endif
+        void *h = fm_tls.head[cls];
+        if (__builtin_expect(h != NULL, 1)) {
+            *(void **)fm_tls.tail[cls] = p;
+            fm_tls.tail[cls] = p;
+        } else {
+            /* Also repairs a tail left stale by the previous last pop. */
+            fm_tls.head[cls] = p;
+            fm_tls.tail[cls] = p;
+        }
+        if (__builtin_expect(--fm_tls.cnt[cls] <= 0, 0))
+            fm_free_cnt_slow((uint32_t)cls);
+        return;
+    }
 #if defined(__x86_64__) && !defined(FM_DEBUG) && \
     !defined(__SANITIZE_ADDRESS__) && !defined(__SANITIZE_THREAD__) && \
     !defined(malloc)

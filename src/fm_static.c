@@ -9,7 +9,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-#define FM_SMALL_FIRST_SPAN /* ADR 0060; JIT guard rejected in ADR 0061. */
+/* v5: full 64 KiB first mapping, 4 KiB first carve in fm_refill_class. */
 #include "fm_core.h"
 
 FM_Config fm_cfg;

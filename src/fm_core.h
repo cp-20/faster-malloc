@@ -943,6 +943,18 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
         end = cur + (size_t)total * bs;
         uint32_t avail0 = (uint32_t)((end - cur) / bs);
         uint32_t keep0 = limit < avail0 ? limit : avail0;
+        /* First touch of a class: map the full 64 KiB span but link only
+         * the first 4 KiB of blocks.  The rest stays in this span's bump
+         * range, so a growing class reuses the same mapping instead of
+         * opening a second span (the ADR 0060 first-span cap mapped only
+         * 16 KiB and paid for a fresh span on the next refill). */
+        static _Thread_local uint8_t fm_first_carve[CLASS_COUNT];
+        if (!fm_first_carve[cls]) {
+            fm_first_carve[cls] = 1;
+            uint32_t cap = (uint32_t)((4096u + bs - 1) / bs);
+            if (cap && keep0 > cap)
+                keep0 = cap;
+        }
 
         void *head = cur;
         void *t = cur;

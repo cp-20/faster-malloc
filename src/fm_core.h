@@ -823,6 +823,8 @@ static inline uint32_t fm_local_limit(uint32_t cls)
     return limit;
 }
 
+static _Thread_local uint16_t fm_v3_refill[CLASS_COUNT];
+
 /* Group a mixed free-list batch by 64 KiB span so consecutive allocations
  * stay on the same span/pages and reduce D1/TLB misses (opt-in FM_LOCALITY_SORT=1). */
 static void *fm_regroup_by_span(void *head, void **tail_out)
@@ -948,11 +950,14 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
          * budget from up to 16 spans in one refill.  This keeps the refill
          * rate roughly at v2's level despite the smaller span. */
         enum { MAX_BATCH_SPANS = 16 };
+        uint32_t batch = 1 + (fm_v3_refill[cls] >> 2);
+        if (batch > MAX_BATCH_SPANS) batch = MAX_BATCH_SPANS;
+        if (fm_v3_refill[cls] < 0xFFFF) fm_v3_refill[cls]++;
         void *head = NULL;
         void *tail = NULL;
         uint32_t have = 0;
         uint32_t spans = 0;
-        while (have < limit && spans < MAX_BATCH_SPANS) {
+        while (have < limit && spans < batch) {
             uint32_t total = 0;
             char *base = fm_span_new(cls, &total);
             if (!base)

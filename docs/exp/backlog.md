@@ -154,6 +154,26 @@ These are deliberately smaller and self-contained so the local
 | N98 | git/sqlite | combine N58 + N2 + N12 | med |
 | N99 | python | confirm N67 + N86 at 11 reps | med |
 | N100 | redis | combine N43 + N9 + N59 | med |
+| N101 | startup | brk-based bootstrap arena for the first 1-2 MiB of small spans; switch to mmap after the threshold | high |
+| N102 | all | `madvise(MADV_DONTNEED)` fully-free spans instead of `munmap`; keep the VA slot | med |
+| N103 | redis | combine N82 + N91 + N100 (all Redis startup variants) | med |
+| N104 | git/sqlite | combine N98 + N85 + N88 (all startup mapping variants) | med |
+| N105 | node/xz/g++ | combine N92 + N95 + N84 (all large-buffer/obstack variants) | med |
+| N106 | python | combine N67 + N80 + N99 (all Python RSS variants) | med |
+| N107 | startup | 8 KiB first spans + N2 full-slot cap (avoid creating more spans) | med |
+| N108 | startup | 32 KiB first spans + N2 full-slot cap | med |
+| N109 | sort/xz | dense-extent THP hint only after 8 extents instead of 4 | low |
+| N110 | all | per-class large-cache budget for small classes (<=8 MiB buckets) | low |
+| N111 | all | keep the 64-byte span header on its own cache line without growing the header | low |
+| N112 | large/cross | hybrid LIFO for small classes and FIFO for large classes (N37 refined) | med |
+| N113 | sort | combine PR #3 cold purge + N76 128 KiB/64 KiB purge unit | med |
+| N114 | startup | combine N58 + N63 + N68 | med |
+| N115 | all | idle-release timer + cold purge on idle (N79 refined) | high |
+| N116 | all | RSS high-water adaptive per-class local limits | high |
+| N117 | startup | brk arena for the first 64 small spans, then the dense extent | high |
+| N118 | all | MADV_FREE for fully-free spans instead of MADV_DONTNEED | med |
+| N119 | all | malloc_trim-like pressure release every 64 large frees when RSS is above high-water | med |
+| N120 | all | combine the best measured RSS mechanisms into one branch, then run the legacy matrix | med |
 
 
 

@@ -83,6 +83,7 @@
 #define FM_ALIGN_UP(x, a) (((uintptr_t)(x) + (a)-1) & ~((uintptr_t)(a)-1))
 
 static inline void *fm_malloc(size_t size);
+static inline void *fm_malloc_class(size_t size);
 
 /* Hot thread-local free-list state grouped into one struct with parallel
  * arrays inside it: head sits at offset 0 so %fs:(base,cls,8) has zero
@@ -2431,7 +2432,7 @@ __attribute__((noinline)) static void *fm_aligned_alloc_impl(size_t align, size_
          * rounding up to 32 or 64 selects a class whose block size is a
          * multiple of `align`, so base + 64 + idx * bs is naturally aligned. */
         size_t req = FM_ALIGN_UP(size ? size : 1, align);
-        return fm_malloc(req);
+        return fm_malloc_class(req);
     }
     if (align < SPAN_SIZE) {
         size_t need = size + align + HEADER_SIZE;
@@ -2583,7 +2584,171 @@ static void fm_arm_thread_exit(void)
 /* exported entry points                                               */
 /* ------------------------------------------------------------------ */
 
-static inline void *fm_malloc(size_t size)
+
+#ifdef FM_PAGEHEAP
+/* ADR 0086: byte-granular page heap for the 257..2032 B band.
+ *
+ * The span allocator gives every size class its own 64 KiB slots, so a class
+ * that keeps a handful of blocks resident pins whole pages that no other
+ * class can use.  In this band the prototype measured git 20.4 vs 23.9 MiB
+ * and sqlite 8.5 vs 11.6 MiB at equal time.  Blocks here come from 4 KiB
+ * pages carved into variable-length chunks (8-byte header, forward
+ * coalescing, size-agnostic free buckets), with a small per-thread cache in
+ * front of the global heap.  Sizes below 257 B keep v2's bins (lua's small
+ * object churn is faster there); sizes above 2032 B keep the span path. */
+#define FM_PH_MIN 257u
+#define FM_PH_MAX 2032u
+#define FM_PH_HDR 16u
+#define FM_PH_MINCH 32u
+#define FM_PH_NB 256u
+#define FM_PH_TCAP 16u
+static pthread_mutex_t fm_ph_lock = PTHREAD_MUTEX_INITIALIZER;
+static char *fm_ph_base, *fm_ph_cur, *fm_ph_end;
+static uintptr_t fm_ph_bins[FM_PH_NB];
+static uint64_t fm_ph_bmap[4];
+static _Thread_local uintptr_t fm_ph_tc[FM_PH_NB]
+    __attribute__((tls_model("initial-exec")));
+static _Thread_local uint16_t fm_ph_tcn[FM_PH_NB]
+    __attribute__((tls_model("initial-exec")));
+
+static inline int fm_ph_owns(const void *p)
+{
+    return (const char *)p > fm_ph_base && (const char *)p < fm_ph_end;
+}
+static inline uint32_t *fm_ph_hdr(void *p) { return (uint32_t *)((char *)p - FM_PH_HDR); }
+static inline uint32_t fm_ph_sz(uint32_t *c) { return *c & ~1u; }
+static inline uintptr_t *fm_ph_next(uint32_t *c) { return (uintptr_t *)((char *)c + FM_PH_HDR); }
+static inline uintptr_t *fm_ph_prev(uint32_t *c) { return (uintptr_t *)((char *)c + FM_PH_HDR + 8); }
+static inline void fm_ph_bset(uint32_t b) { fm_ph_bmap[b >> 6] |= 1ull << (b & 63); }
+static inline void fm_ph_bclr(uint32_t b)
+{
+    if (!fm_ph_bins[b]) fm_ph_bmap[b >> 6] &= ~(1ull << (b & 63));
+}
+static int fm_ph_bnext(uint32_t b, uint32_t *out)
+{
+    for (uint32_t w = b >> 6; w < 4; w++) {
+        uint64_t m = fm_ph_bmap[w] & (~0ull << (b & 63));
+        if (m) { *out = w * 64 + (uint32_t)__builtin_ctzll(m); return 1; }
+        b = 0;
+    }
+    return 0;
+}
+static void fm_ph_push(uint32_t *c, uint32_t sz)
+{
+    uint32_t b = sz / 16;
+    *fm_ph_next(c) = fm_ph_bins[b];
+    *fm_ph_prev(c) = 0;
+    if (fm_ph_bins[b]) *fm_ph_prev((uint32_t *)fm_ph_bins[b]) = (uintptr_t)c;
+    fm_ph_bins[b] = (uintptr_t)c;
+    *c = sz | 1u;
+    fm_ph_bset(b);
+}
+static void fm_ph_unlink(uint32_t b, uint32_t *c)
+{
+    uintptr_t n = *fm_ph_next(c), pv = *fm_ph_prev(c);
+    if (pv) *fm_ph_next((uint32_t *)pv) = n; else fm_ph_bins[b] = n;
+    if (n) *fm_ph_prev((uint32_t *)n) = pv;
+}
+static int fm_ph_new_page(void)
+{
+    if (!fm_ph_base) {
+        size_t len = (size_t)1 << 30;
+        char *raw = mmap(NULL, len, PROT_NONE,
+                         MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+        if (raw == MAP_FAILED)
+            return 0;
+        fm_ph_base = fm_ph_cur = raw;
+        fm_ph_end = raw + len;
+    }
+    if (fm_ph_cur + FM_PAGE_SIZE > fm_ph_end)
+        return 0;
+    if (mprotect(fm_ph_cur, FM_PAGE_SIZE, PROT_READ | PROT_WRITE) != 0)
+        return 0;
+    fm_ph_cur += FM_PAGE_SIZE;
+    return 1;
+}
+static void *fm_ph_alloc(size_t n)
+{
+    uint32_t need = (uint32_t)((n + FM_PH_HDR + 15) & ~15u);
+    if (need < FM_PH_MINCH)
+        need = FM_PH_MINCH;
+    uint32_t b = need / 16;
+    if (fm_ph_tc[b]) {
+        uint32_t *c = (uint32_t *)fm_ph_tc[b];
+        fm_ph_tc[b] = (uintptr_t)*fm_ph_next(c);
+        fm_ph_tcn[b]--;
+        *c = b * 16;
+        return (char *)c + FM_PH_HDR;
+    }
+    pthread_mutex_lock(&fm_ph_lock);
+    for (uint32_t i = b; fm_ph_bnext(i, &i); ) {
+        uint32_t *c = (uint32_t *)fm_ph_bins[i];
+        uint32_t sz = fm_ph_sz(c);
+        fm_ph_bins[i] = (uintptr_t)*fm_ph_next(c);
+        if (fm_ph_bins[i]) *fm_ph_prev((uint32_t *)fm_ph_bins[i]) = 0;
+        fm_ph_bclr(i);
+        if (sz >= need + FM_PH_MINCH) {
+            fm_ph_push((uint32_t *)((char *)c + need), sz - need);
+            *c = need;
+        } else {
+            *c = sz;
+        }
+        pthread_mutex_unlock(&fm_ph_lock);
+        return (char *)c + FM_PH_HDR;
+    }
+    if (!fm_ph_new_page()) {
+        pthread_mutex_unlock(&fm_ph_lock);
+        return NULL;
+    }
+    char *pg = fm_ph_cur - FM_PAGE_SIZE;
+    uint32_t *c = (uint32_t *)(pg + 16);
+    uint32_t sz = FM_PAGE_SIZE - 16;
+    if (sz >= need + FM_PH_MINCH) {
+        fm_ph_push((uint32_t *)((char *)c + need), sz - need);
+        *c = need;
+    } else {
+        *c = sz;
+    }
+    pthread_mutex_unlock(&fm_ph_lock);
+    return (char *)c + FM_PH_HDR;
+}
+static void fm_ph_free(void *p)
+{
+    uint32_t *c = fm_ph_hdr(p);
+    uint32_t sz = fm_ph_sz(c);
+    uint32_t b = sz / 16;
+    if (fm_ph_tcn[b] < FM_PH_TCAP) {
+        *fm_ph_next(c) = fm_ph_tc[b];
+        fm_ph_tc[b] = (uintptr_t)c;
+        fm_ph_tcn[b]++;
+        *c = sz;
+        return;
+    }
+    pthread_mutex_lock(&fm_ph_lock);
+    for (;;) {
+        uintptr_t coff = (uintptr_t)((char *)c - fm_ph_base);
+        uintptr_t cend = (coff | (FM_PAGE_SIZE - 1)) + 1;
+        uintptr_t noff = coff + sz;
+        if (noff + FM_PH_HDR > cend)
+            break;
+        uint32_t *n = (uint32_t *)(fm_ph_base + noff);
+        if (!(*n & 1u))
+            break;
+        uint32_t nsz = fm_ph_sz(n);
+        if (!nsz || noff + nsz > cend)
+            break;
+        fm_ph_unlink(nsz / 16, n);
+        fm_ph_bclr(nsz / 16);
+        sz += nsz;
+        *c = sz | 1u;
+    }
+    fm_ph_push(c, sz);
+    pthread_mutex_unlock(&fm_ph_lock);
+}
+static size_t fm_ph_usable(void *p) { return fm_ph_sz(fm_ph_hdr(p)) - FM_PH_HDR; }
+#endif
+
+static inline void *fm_malloc_class(size_t size)
 {
     size_t cls = fm_class_of(size);
     if (__builtin_expect(cls != LARGE_CLASS, 1)) {
@@ -2706,8 +2871,23 @@ static inline void fm_tls_push_free(void *p, size_t cls)
 #endif
 }
 
+static inline void *fm_malloc(size_t size)
+{
+#ifdef FM_PAGEHEAP
+    if (__builtin_expect(size >= FM_PH_MIN && size <= FM_PH_MAX, 0))
+        return fm_ph_alloc(size);
+#endif
+    return fm_malloc_class(size);
+}
+
 static inline void fm_free(void *p)
 {
+#ifdef FM_PAGEHEAP
+    if (__builtin_expect(fm_ph_owns(p), 0)) {
+        fm_ph_free(p);
+        return;
+    }
+#endif
     /* NULL has low 16 bits == 0 too, so one branch handles both NULL and
      * 64 KiB-aligned over-aligned allocations off the hot path. */
     if (__builtin_expect(((uintptr_t)p & (SPAN_SIZE - 1)) == 0, 0)) {
@@ -2834,6 +3014,10 @@ __attribute__((noinline, cold)) static size_t fm_foreign_usable_size(void *p)
 
 static inline size_t fm_usable_size(void *p)
 {
+#ifdef FM_PAGEHEAP
+    if (__builtin_expect(fm_ph_owns(p), 0))
+        return fm_ph_usable(p);
+#endif
     uintptr_t u = (uintptr_t)p;
     if (__builtin_expect(u == 0, 0))
         return 0;
@@ -2919,6 +3103,21 @@ static inline void *fm_realloc(void *p, size_t size)
 {
     if (__builtin_expect(!p, 0))
         return fm_malloc(size);
+#ifdef FM_PAGEHEAP
+    if (__builtin_expect(fm_ph_owns(p), 0)) {
+        size_t old = fm_ph_usable(p);
+        if (size == 0) { fm_ph_free(p); return NULL; }
+        if (size <= old)
+            return p;
+        void *q = (size >= FM_PH_MIN && size <= FM_PH_MAX)
+                      ? fm_ph_alloc(size) : fm_malloc(size);
+        if (!q)
+            return NULL;
+        memcpy(q, p, old);
+        fm_ph_free(p);
+        return q;
+    }
+#endif
     if (__builtin_expect(((uintptr_t)p & (SPAN_SIZE - 1)) != 0 && size != 0, 1)) {
         FM_Span *sp = (FM_Span *)((uintptr_t)p & SPAN_MASK);
         uint32_t cls = sp->cls;

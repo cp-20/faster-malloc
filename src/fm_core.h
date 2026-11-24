@@ -2664,6 +2664,29 @@ __attribute__((noinline)) static void fm_free_cnt_slow(uint32_t cls)
 
 static inline void fm_tls_push_free(void *p, size_t cls)
 {
+    /* N112: hybrid hand-out order.  Small classes keep the LIFO path below
+     * (pop head, push head), which is the locality-critical hot path.  Large
+     * classes append at the tail instead, so malloc's unchanged head pop
+     * serves them FIFO: the block that has been cached longest goes back
+     * into service first.  Large blocks are few, so the extra tail load and
+     * store stay off the small-object fast path. */
+    if (__builtin_expect(kClassSize[cls] >= 4096, 0)) {
+        *(void **)p = NULL;
+#ifdef FM_DEBUG
+        ((uint64_t *)p)[1] = 0xDEADDEADDEADDEADull;
+#endif
+        void *h = fm_tls.head[cls];
+        /* A pop that empties the list leaves tail pointing at the handed
+         * out block, so the empty test must be on head, never on tail. */
+        if (__builtin_expect(h != NULL, 1))
+            *(void **)fm_tls.tail[cls] = p;
+        else
+            fm_tls.head[cls] = p;
+        fm_tls.tail[cls] = p;
+        if (__builtin_expect(--fm_tls.cnt[cls] <= 0, 0))
+            fm_free_cnt_slow((uint32_t)cls);
+        return;
+    }
 #if defined(__x86_64__) && !defined(FM_DEBUG) && \
     !defined(__SANITIZE_ADDRESS__) && !defined(__SANITIZE_THREAD__) && \
     !defined(malloc)

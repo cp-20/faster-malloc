@@ -251,6 +251,11 @@ static FM_Batch *fm_batch_global_head; /* protected by fm_central_lock */
  * throughput preset's 256 MiB and page purge stays on: this is a bounded
  * reuse boost, not the whole throughput profile. */
 #define FM_LCACHE_WARM_BUDGET_CAP (128ull << 20)
+/* Huge buckets (b >= 24 => usable size >= 16 MiB) are usually one-shot
+ * merge/parse buffers and dominate peak RSS.  Bound their share of the
+ * per-thread cache independently of the warm-bucket boost. */
+#define FM_LCACHE_HUGE_BUCKET 24
+#define FM_LCACHE_HUGE_BUDGET_CAP (32ull << 20)
 extern __thread void *fm_lcache_head[FM_LCACHE_BUCKETS]
     __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));
@@ -270,6 +275,15 @@ extern __thread uint64_t fm_lcache_warm_mask __attribute__((tls_model("initial-e
  * bucket is always cached, so seeding a cycle still works.  All state
  * is per-thread, so this is race-free. */
 #define FM_LCACHE_HOT_WINDOW 8u
+/* N44/N72: cc1plus cycles ~64 KiB obstack chunks (bucket 16, or 17 after an
+ * untrimmed slab carve) across function boundaries; the default 8-free
+ * window evicts them before the next function searches the bucket.  Give
+ * just these two buckets a 64-free window.  The rest of the 64 KiB-1 MiB
+ * medium band (buckets 18-20) needs 16 frees to outlive a cycle.  Every
+ * other size band keeps the default 8, and warm buckets keep the wide 64.
+ * Slow path only. */
+#define FM_LCACHE_OBSTACK_WINDOW 64u
+#define FM_LCACHE_MED_HOT_WINDOW 16u
 extern __thread uint32_t fm_ltick __attribute__((tls_model("initial-exec")));
 /* realloc -> large-miss hint (ADR 0075): the old user size of a buffer
  * being grown, or 0. Passed out of band so the shared cache-hit path
@@ -683,13 +697,21 @@ static char *fm_map_dense_span(void)
 }
 
 /* Per-thread 4 MiB base-page slab for >4 KiB class spans and <=512 KiB
- * large allocations: amortizes mmap/trim syscalls without hinting THP on
- * potentially sparse allocations, and drains on malloc_trim / thread exit.
- * A 4 MiB slab holds twice as many 64 KiB carves as 2 MiB, so g++/jq/xz
- * medium-buffer churn crosses the mmap/munmap slow path half as often;
- * untouched tail pages stay non-resident, so RSS is unaffected. */
+ * large allocations: amortizes mmap/trim syscalls and drains on
+ * malloc_trim / thread exit.  First slabs stay base-page to avoid faulting
+ * huge folios for sparse use; once a thread has refilled the slab twice,
+ * THP is hinted for subsequent slabs.  A 4 MiB slab holds twice as many
+ * 64 KiB carves as 2 MiB, so g++/jq/xz medium-buffer churn crosses the
+ * mmap/munmap slow path half as often; untouched tail pages stay
+ * non-resident, so RSS is unaffected. */
 static _Thread_local char *fm_lextent_cur __attribute__((tls_model("initial-exec")));
 static _Thread_local size_t fm_lextent_rem __attribute__((tls_model("initial-exec")));
+#ifdef MADV_HUGEPAGE
+/* Number of slabs this thread has mapped.  The first slab is the initial
+ * one and the next is the first refill; only after the second refill has
+ * the thread proven sustained slab demand do we hint THP (see ADR 0077). */
+static _Thread_local unsigned fm_lextent_maps __attribute__((tls_model("initial-exec")));
+#endif
 
 static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out)
 {
@@ -716,6 +738,14 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
     size_t head_slack = (size_t)(aligned - raw);
     if (head_slack)
         munmap(raw, head_slack);
+#ifdef MADV_HUGEPAGE
+    /* Sparse first slabs must stay base-page (ADR 0077: a single touched
+     * page faults a whole 2 MiB folio).  Hint only once two refills show
+     * the thread keeps consuming slabs, so sort/xz medium-buffer churn
+     * gets huge-page faults without the startup/pareto RSS blowup. */
+    if (++fm_lextent_maps > 2)
+        (void)madvise(aligned, slab_len - head_slack, MADV_HUGEPAGE);
+#endif
     *raw_out = (uintptr_t)aligned;
     *len_out = need;
     fm_lextent_cur = aligned + need;
@@ -2201,6 +2231,10 @@ static inline uint64_t fm_lcache_budget(int b)
         if (budget > FM_LCACHE_WARM_BUDGET_CAP)
             budget = FM_LCACHE_WARM_BUDGET_CAP;
     }
+    /* Large mappings are the RSS tail; retain fewer of them while leaving
+     * the medium-buffer budget untouched for time-sensitive workloads. */
+    if (b >= FM_LCACHE_HUGE_BUCKET && budget > FM_LCACHE_HUGE_BUDGET_CAP)
+        budget = FM_LCACHE_HUGE_BUDGET_CAP;
     return budget;
 }
 
@@ -2210,22 +2244,35 @@ static inline void fm_large_free(FM_Span *sp, void *p)
     if (sp->align == 0 && (uintptr_t)p == (uintptr_t)sp + HEADER_SIZE) {
         size_t ms = sp->map_size;
         int b = 63 - __builtin_clzll(fm_large_usable(sp));
+        uint32_t hot_window =
+            (b >= 16 && b <= 17) ? FM_LCACHE_OBSTACK_WINDOW
+            : (b >= 18 && b <= 20) ? FM_LCACHE_MED_HOT_WINDOW
+                                   : FM_LCACHE_HOT_WINDOW;
         if (b < FM_LCACHE_BUCKETS &&
             fm_lcache_bytes + ms <= fm_lcache_budget(b) &&
             fm_ltick - fm_lbucket_seen[b] <=
-                ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : FM_LCACHE_HOT_WINDOW)) {
-            /* Only purge cold mappings large enough that the application is
-             * unlikely to reuse them soon (bucket b covers usable sizes in
-             * [2^b, 2^(b+1)), so b >= 24 means >= 16 MiB).  Medium buffers
-             * churned by jq/g++/Python stay resident when re-freed, while
-             * sort's one-shot merge buffers (>= 16 MiB) are still purged. */
+                ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : hot_window)) {
+            /* Purge mappings large enough that their resident pages are
+             * unlikely to be reused soon: >= 16 MiB (b >= 24) even while
+             * warm -- V8 external/Buffer churn and sort/xz merge buffers
+             * cycle many distinct mappings through a bucket marked warm on
+             * its first reuse -- and the 8-16 MiB band (b == 23) while still
+             * cold, provided the thread's budget is above 32 MiB (N45).
+             * Smaller medium buffers churned by jq/g++/Python stay resident.
+             * N28: lazily free the cold payload with MADV_FREE so the pages
+             * stay mapped and reusable, falling back to MADV_DONTNEED on
+             * kernels without MADV_FREE so the discard still happens. */
             if (FM_CFG()->lcache_cold_purge &&
-                b >= 24 &&
-                !(fm_lcache_warm_mask & (1ULL << b))) {
+                (b >= FM_LCACHE_HUGE_BUCKET ||
+                 (b == 23 && !(fm_lcache_warm_mask & (1ULL << b)) &&
+                  fm_lcache_budget(b) > (32ull << 20)))) {
                 uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
                 uintptr_t pend = (sp->map_base + sp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);
-                if (pend > pstart)
-                    (void)madvise((void *)pstart, pend - pstart, MADV_DONTNEED);
+                if (pend > pstart) {
+                    if (madvise((void *)pstart, pend - pstart, MADV_FREE) != 0)
+                        (void)madvise((void *)pstart, pend - pstart,
+                                      MADV_DONTNEED);
+                }
             }
             sp->lnext = (uintptr_t)fm_lcache_head[b];
             fm_lcache_head[b] = sp;

@@ -649,7 +649,17 @@ static char *fm_map_dense_span(void)
 {
     enum { extent_size = 2 * 1024 * 1024, map_len = 2 * extent_size - FM_PAGE_SIZE };
     enum { burst_ms = 100, warmup_extents = 4 };
+    /* N32: open the dense extent lazily.  The very first small span gets a
+     * standalone 64 KiB mapping from fm_map_aligned instead of reserving a
+     * 2 MiB extent, so a start-up heap that never needs dense carves pays
+     * neither the 4 MiB alignment window nor a mostly-empty 2 MiB mapping.
+     * Every later span switches to the shared dense extent as before. */
+    static _Atomic int dense_started;
     fm_stack_exclusive();
+    if (!atomic_exchange_explicit(&dense_started, 1, memory_order_relaxed)) {
+        fm_stack_resume();
+        return fm_map_aligned(SPAN_SIZE - HEADER_SIZE);
+    }
     if (!fm_dense_extent.remaining) {
         char *raw = mmap(NULL, map_len, PROT_READ | PROT_WRITE,
                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);

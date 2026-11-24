@@ -270,6 +270,13 @@ extern __thread uint64_t fm_lcache_warm_mask __attribute__((tls_model("initial-e
  * bucket is always cached, so seeding a cycle still works.  All state
  * is per-thread, so this is race-free. */
 #define FM_LCACHE_HOT_WINDOW 8u
+/* N52: wider cold hot window for the 64 KiB-1 MiB band (buckets 16..20).
+ * cc1plus obstack cycles free ~20 chunks before re-stamping the bucket with
+ * an allocation, so the default 8 evicts these medium mappings too early;
+ * 16 keeps them cached through a full cycle. Warm buckets keep 64 and other
+ * bands keep 8. Combined here with warm-huge (>=16 MiB cold-purge applies
+ * even to warm buckets) so both halves are measured against main together. */
+#define FM_LCACHE_MED_HOT_WINDOW 16u
 extern __thread uint32_t fm_ltick __attribute__((tls_model("initial-exec")));
 /* realloc -> large-miss hint (ADR 0075): the old user size of a buffer
  * being grown, or 0. Passed out of band so the shared cache-hit path
@@ -2213,15 +2220,18 @@ static inline void fm_large_free(FM_Span *sp, void *p)
         if (b < FM_LCACHE_BUCKETS &&
             fm_lcache_bytes + ms <= fm_lcache_budget(b) &&
             fm_ltick - fm_lbucket_seen[b] <=
-                ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : FM_LCACHE_HOT_WINDOW)) {
-            /* Only purge cold mappings large enough that the application is
-             * unlikely to reuse them soon (bucket b covers usable sizes in
-             * [2^b, 2^(b+1)), so b >= 24 means >= 16 MiB).  Medium buffers
-             * churned by jq/g++/Python stay resident when re-freed, while
-             * sort's one-shot merge buffers (>= 16 MiB) are still purged. */
-            if (FM_CFG()->lcache_cold_purge &&
-                b >= 24 &&
-                !(fm_lcache_warm_mask & (1ULL << b))) {
+                ((fm_lcache_warm_mask & (1ULL << b))
+                     ? 64u
+                     : ((b >= 16 && b <= 20) ? FM_LCACHE_MED_HOT_WINDOW
+                                             : FM_LCACHE_HOT_WINDOW))) {
+            /* Purge mappings large enough that the application is unlikely
+             * to reuse their resident pages soon (>= 16 MiB, bucket b >= 24).
+             * Warm-huge: a >=16 MiB payload is worth dropping even on a warm
+             * bucket, because V8 external/Buffer churn cycles many distinct
+             * huge buffers through a bucket marked warm on its first reuse;
+             * the warm exemption otherwise keeps the whole warm budget
+             * resident. Below 16 MiB the medium buffers stay resident. */
+            if (FM_CFG()->lcache_cold_purge && b >= 24) {
                 uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
                 uintptr_t pend = (sp->map_base + sp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);
                 if (pend > pstart)

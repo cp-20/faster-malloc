@@ -397,9 +397,11 @@ tuning problem.
 Node's only time loss under the selective cache is its 27 MiB JSON payload
 (bucket 24), which the warm cap of 4 MiB refuses to keep.  A variant
 exempts buckets >= 24 from the warm/cold rule entirely, leaving the 16 MiB
-base budget as the only bound.  Locally it is a no-op on jq, sort and xz
-(RSS and time unchanged), so it is effectively a node-only knob.  11-rep
-exp-bench and exp-legacy are running.
+base budget as the only bound.  Locally it is a no-op on jq, sort and xz.
+11-rep exp-bench: micro 1.0002, jq RSS 252, real paired 0.9932 -- i.e.
+identical to the selective build, as the 16 MiB base still rejects the
+28.3 MiB block; exp-legacy is running.  The variant that actually lets it
+in is `exp/selective6` (huge buckets get a 32 MiB budget).
 
 ## Rejected (do not repeat without a materially different mechanism)
 

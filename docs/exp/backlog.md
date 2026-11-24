@@ -193,6 +193,40 @@ These are deliberately smaller and self-contained so the local
 
 
 
+## Round 16: large-cache budget and span geometry (2026-11-25)
+
+| id | branch | result | status |
+|---|---|---|---|
+| L2 | `exp/lcache16b` | balanced large-cache budget 64 -> 16 MiB (warm cap 32): legacy node RSS 527 -> 468 MiB, python 458 -> 457, gcc/redis flat; 11-rep exp-bench micro 1.0000, paired 0.9972, worst 1.0000 | **accepted** |
+| L3 | `exp/lcache32b` | same at 32 MiB: node 476 MiB; 11-rep micro 1.0000, paired 1.0013, worst 1.0075 | alternative |
+| L4 | `exp/lcache8b` | same at 8 MiB: node 463 MiB; 11-rep paired 1.0048, sort +1.7%, sqlite +2.2% | rejected (last 5 MiB costs time) |
+| B1 | `exp/first-batch` | first refill takes 1 block, then 4, then the limit: git 8.43 -> 8.36 MiB, no micro change | rejected |
+| T1 | `v7/slab-thp` | adaptive THP on the >4 KiB slab, 2 MiB-aligned extent: 11-rep neutral (micro 1.0000, RSS flat); THP never fires in the real apps | rejected |
+| T2 | `v6/c` | 4 KiB cold spans in 64 KiB slots + always-THP hot chunks: jq tied, git/sqlite 13 -> 16 MiB | rejected |
+| G1 | `v6/slot-hybrid` | 4 KiB spans in 64 KiB slots + 8-refill promotion: micro 0.9996, jq +10%, git 14 MiB | rejected |
+| R1 | `exp/mremap-grow` | in-place `mremap` on large realloc: correct, RSS flat (adjacent VA occupied); `MREMAP_MAYMOVE` moves the block off the 64 KiB span mask | rejected |
+| D1 | div2 screen | `FM_LOCAL_LIMIT_DIV=2`: git/sqlite 13 -> 12 MiB but micro 1.0239 and jq +2.5% | rejected as default |
+
+Two measurements that correct earlier conclusions:
+
+* the large-cache **byte cap is** the dominant RSS lever for Node.  The RSS
+  wave 1 apps (jq, sort, g++, Python, xz) never exercised the multi-MiB
+  free-and-forget band, so the knob looked inert.  Node's legacy row moved
+  527 -> 468 MiB with a 16 MiB budget at zero time cost.
+* v3's 4 KiB-span time losses were an artefact: `size_classes3.h` set
+  `SMALL_MAX` to 3968 while keeping 145 classes, so every 3969..32768 B
+  request fell into the large path.  Live 4-24 KiB allocation measured
+  4.4-4.8 s against v2's 0.04-0.57 s.  Span geometry experiments on that
+  header (v3, v4, v6) are therefore not evidence about 4 KiB spans.
+
+Still open from this round: a phase-reuse test (`mixpack` mode 1) shows v2
+retaining freed spans across a size-phase change (166 MB vs glibc 119 MB)
+until `FM_RELEASE_AGE_MS=0` releases them (118 MB); git does not respond to
+the same knob, so its +4 MiB is not dead spans.  Fragmentation under churn
+is *better* than glibc (709 vs 702 MB at 1M live), and simultaneous
+mixed-size packing is better (224 vs 237 MB), so the git gap is isolated
+to its pack/delta buffers, not the general small-object path.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |
@@ -224,9 +258,10 @@ These are deliberately smaller and self-contained so the local
 | RSS7 | `exp/rss-close` | jq is within noise (tied); xz +0.68% is structural, every one-line knob is a no-op | jq tied, xz needs RSS8 |
 | FIX1 | `fix/foreign-mus` | Redis 8 + jemalloc crash in `malloc_usable_size`; magic-check + `dlsym(RTLD_NEXT)` fallback; merged as PR #2 | **merged** |
 
-The lesson so far: the RSS gap is **not** the large-cache byte cap.  It is
-resident pages of cold/huge mappings (cold purge works), plus structural
-startup mappings (smaller spans made it worse).  `RSS8` (per-app
+The lesson so far: for these apps the RSS gap is **not** the large-cache
+byte cap (Node later falsified this; see Round 16).  It is resident pages
+of cold/huge mappings (cold purge works), plus structural startup
+mappings (smaller spans made it worse).  `RSS8` (per-app
 smaps/massif decomposition) is the next measurement, and the size-band
 threshold on RSS0 is the next code step.
 

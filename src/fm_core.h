@@ -237,19 +237,19 @@ static FM_Batch *fm_batch_global_head; /* protected by fm_central_lock */
  * it every large allocation is a fresh mmap and every free an munmap,
  * which measured ~9000 ns/op against glibc's 28 on this host. */
 #define FM_LCACHE_BUCKETS 48
-/* Byte budget for the per-thread large-block cache.  64 MiB: the round-3
- * sweep (ADR 0019) found the old 4 GiB budget was the main driver of the
- * allocator's peak-RSS excess in real apps; 64 MiB keeps every measured
- * churn workload at full speed while cutting most of that excess. */
+/* Byte budget for the per-thread large-block cache.  ADR 0019 found the old
+ * 4 GiB budget was the main driver of peak-RSS excess and settled on
+ * 64 MiB; ADR 0083 measured Node's JSON/Buffer churn, which frees multi-MiB
+ * buffers and never reuses them, at 527 MiB with 64 MiB against glibc's
+ * 448, and 468 with 16 MiB at no time cost on the real-app matrix. */
 #define FM_LCACHE_MAX_BYTES (16ull << 20)
 /* Adaptive budget (large-cache slow path only): a bucket already proven to
  * reuse cached blocks (fm_lcache_warm_mask, set on a cache hit) may retain
- * twice the configured per-thread budget, capped here at 128 MiB.  Cold
+ * twice the configured per-thread budget, capped here at 32 MiB.  Cold
  * buckets keep the configured budget exactly, so a teardown-shaped bucket
  * still stops retaining after FM_LCACHE_HOT_WINDOW frees and the footprint /
- * shortlived profiles keep their small (or zero) cache.  The cap is half the
- * throughput preset's 256 MiB and page purge stays on: this is a bounded
- * reuse boost, not the whole throughput profile. */
+ * shortlived profiles keep their small (or zero) cache.  Page purge stays on:
+ * this is a bounded reuse boost, not the whole throughput profile. */
 #define FM_LCACHE_WARM_BUDGET_CAP (32ull << 20)
 extern __thread void *fm_lcache_head[FM_LCACHE_BUCKETS]
     __attribute__((tls_model("initial-exec")));

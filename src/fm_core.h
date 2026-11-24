@@ -71,9 +71,10 @@
 #include <pthread.h>
 #include <signal.h>
 #include <dlfcn.h>
-#ifdef FM_DEBUG
+/* stdio is needed by the FM_DIAG_RSS diagnostic dump (see below).  It is
+ * included unconditionally but used only on the off-by-default slow path,
+ * so it has no effect on the measured malloc/free fast paths. */
 #include <stdio.h>
-#endif
 
 #include "size_classes2.h"
 
@@ -336,6 +337,10 @@ extern __thread uint32_t fm_lbucket_seen[FM_LCACHE_BUCKETS]
 /*   FM_PURGE_MIN_PAGES    minimum new purge pages per span         */
 /*   FM_REALLOC_CACHE_SEARCH  widen plain large realloc search      */
 /*   FM_IDLE_RELEASE       opt-in maintenance thread (0036)         */
+/*   FM_DIAG_RSS           off-by-default diagnostic: classify the   */
+/*                         allocator's own mappings with mincore and */
+/*                         /proc/self/smaps and dump residency        */
+/*                         counters at exit (no bench edits)          */
 /*                                                                     */
 /* Individual FM_* variables override the profile.  Values are       */
 /* parsed once, lazily, on the first slow path (pthread_once), so    */
@@ -362,11 +367,16 @@ typedef struct FM_Config {
     uint32_t lcache_cold_purge;
     uint32_t lazy_bump;
     uint32_t locality_sort;
+    uint32_t diag_rss;
 } FM_Config;
 
 extern FM_Config fm_cfg;
 extern pthread_once_t fm_cfg_once;
 extern _Atomic int fm_cfg_ready;
+/* Plain static mirror of cfg.diag_rss, set once at config init.  Read on
+ * diagnostic slow paths only; zero until init, so early allocations are
+ * simply not registered. */
+static int fm_diag_on;
 
 static void fm_config_init(void)
 {
@@ -392,6 +402,7 @@ static void fm_config_init(void)
     c.lcache_cold_purge = 1;
     c.lazy_bump = 1;
     c.locality_sort = 0;
+    c.diag_rss = 0;
 
     const char *prof = getenv("FM_PROFILE");
     if (prof) {
@@ -444,6 +455,7 @@ static void fm_config_init(void)
         { "FM_LCACHE_COLD_PURGE", &c.lcache_cold_purge, 0, 1 },
         { "FM_LAZY_BUMP", &c.lazy_bump, 0, 1 },
         { "FM_LOCALITY_SORT", &c.locality_sort, 0, 1 },
+        { "FM_DIAG_RSS", &c.diag_rss, 0, 1 },
     };
     for (size_t i = 0; i < sizeof(num) / sizeof(num[0]); i++) {
         const char *v = getenv(num[i].name);
@@ -473,6 +485,7 @@ static void fm_config_init(void)
         c.release_max_interval_ms = c.release_interval_ms;
 
     fm_cfg = c;
+    fm_diag_on = (int)c.diag_rss;
     atomic_store_explicit(&fm_cfg_ready, 1, memory_order_release);
 }
 
@@ -486,6 +499,239 @@ static inline const FM_Config *fm_get_cfg(void)
     return &fm_cfg;
 }
 #define FM_CFG() fm_get_cfg()
+
+/* ------------------------------------------------------------------ */
+/* FM_DIAG_RSS diagnostic: residency counters for our own mappings      */
+/*                                                                     */
+/* Off by default; no malloc/free fast path reads any of this.  Every   */
+/* mmap/munmap in the allocator goes through the tiny wrappers below,   */
+/* which register the live mapping range with a category when (and only */
+/* when) FM_DIAG_RSS=1.  At exit (or when fm_diag_rss_dump() is called)  */
+/* /proc/self/smaps is walked once: each VMA that starts inside a        */
+/* registered range is attributed to that category and mincore gives    */
+/* its resident-page count.  The result is a per-category breakdown of  */
+/* mapped VA, residency and smaps clean/dirty state for the allocator's  */
+/* own mappings only -- the RSS8 decomposition input.                   */
+/* ------------------------------------------------------------------ */
+
+enum {
+    FM_DIAG_CAT_SPAN = 0, /* small-class backing mappings */
+    FM_DIAG_CAT_LARGE,    /* large allocation mappings    */
+    FM_DIAG_CAT_META,     /* batch/census/regroup metadata */
+    FM_DIAG_CAT_COUNT
+};
+
+typedef struct FM_DiagMap {
+    uintptr_t base;
+    uintptr_t end;
+    uint32_t cat;
+} FM_DiagMap;
+
+typedef struct FM_DiagRssStat {
+    size_t maps;              /* live registered VMAs */
+    size_t mapped_kb;         /* mapped VA (smaps range) */
+    size_t mincore_kb;        /* resident pages via mincore */
+    size_t rss_kb, pss_kb;    /* smaps Rss / Pss */
+    size_t private_clean_kb, private_dirty_kb;
+    size_t shared_clean_kb, shared_dirty_kb;
+} FM_DiagRssStat;
+
+static FM_DiagMap *fm_diag_maps;      /* mmap'd, grown on demand */
+static size_t fm_diag_nmaps, fm_diag_capmaps;
+static size_t fm_diag_overflow;       /* registrations dropped at the cap */
+static pthread_mutex_t fm_diag_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void fm_diag_map_add(uintptr_t base, size_t len, uint32_t cat)
+{
+    if (!__builtin_expect(fm_diag_on, 0) || !base || !len)
+        return;
+    pthread_mutex_lock(&fm_diag_lock);
+    /* A trimmed mapping may be re-registered once its aligned region is
+     * known (fm_map_aligned and friends): update in place, never duplicate. */
+    for (size_t i = 0; i < fm_diag_nmaps; i++) {
+        if (fm_diag_maps[i].base == base) {
+            fm_diag_maps[i].end = base + len;
+            fm_diag_maps[i].cat = cat;
+            pthread_mutex_unlock(&fm_diag_lock);
+            return;
+        }
+    }
+    if (fm_diag_nmaps == fm_diag_capmaps) {
+        size_t nc = fm_diag_capmaps ? fm_diag_capmaps * 2 : 64;
+        if (nc > 65536) {
+            fm_diag_overflow++;
+            pthread_mutex_unlock(&fm_diag_lock);
+            return;
+        }
+        FM_DiagMap *nm = mmap(NULL, nc * sizeof(*nm), PROT_READ | PROT_WRITE,
+                              MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (nm == MAP_FAILED) {
+            fm_diag_overflow++;
+            pthread_mutex_unlock(&fm_diag_lock);
+            return;
+        }
+        if (fm_diag_maps) {
+            memcpy(nm, fm_diag_maps, fm_diag_nmaps * sizeof(*nm));
+            munmap(fm_diag_maps, fm_diag_capmaps * sizeof(*nm));
+        }
+        fm_diag_maps = nm;
+        fm_diag_capmaps = nc;
+    }
+    fm_diag_maps[fm_diag_nmaps].base = base;
+    fm_diag_maps[fm_diag_nmaps].end = base + len;
+    fm_diag_maps[fm_diag_nmaps].cat = cat;
+    fm_diag_nmaps++;
+    pthread_mutex_unlock(&fm_diag_lock);
+}
+
+static void fm_diag_map_del(uintptr_t base)
+{
+    if (!base)
+        return;
+    pthread_mutex_lock(&fm_diag_lock);
+    for (size_t i = 0; i < fm_diag_nmaps; i++) {
+        if (fm_diag_maps[i].base == base) {
+            fm_diag_maps[i] = fm_diag_maps[fm_diag_nmaps - 1];
+            fm_diag_nmaps--;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&fm_diag_lock);
+}
+
+/* All allocator mappings use this exact flag set.  Routing them through
+ * one wrapper keeps registration complete without touching each site's
+ * error handling: a failed mmap is never registered. */
+static inline void *fm_diag_mmap(size_t len, uint32_t cat)
+{
+    void *p = mmap(NULL, len, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (p != MAP_FAILED && __builtin_expect(fm_diag_on, 0))
+        fm_diag_map_add((uintptr_t)p, len, cat);
+    return p;
+}
+
+static inline void fm_diag_munmap(void *p, size_t len)
+{
+    if (__builtin_expect(fm_diag_on, 0))
+        fm_diag_map_del((uintptr_t)p);
+    munmap(p, len);
+}
+
+/* Fill per-category residency counters.  The registry is snapshotted
+ * under the lock and released before fopen/mincore (both may re-enter
+ * the allocator through libc internals).  Returns 0 on success. */
+int fm_diag_rss_collect(FM_DiagRssStat out[FM_DIAG_CAT_COUNT])
+{
+    if (!out)
+        return -1;
+    memset(out, 0, FM_DIAG_CAT_COUNT * sizeof(out[0]));
+    if (!fm_diag_on)
+        return 0;
+
+    pthread_mutex_lock(&fm_diag_lock);
+    size_t n = fm_diag_nmaps;
+    FM_DiagMap *snap = NULL;
+    if (n) {
+        snap = mmap(NULL, n * sizeof(*snap), PROT_READ | PROT_WRITE,
+                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (snap != MAP_FAILED)
+            memcpy(snap, fm_diag_maps, n * sizeof(*snap));
+        else
+            snap = NULL;
+    }
+    pthread_mutex_unlock(&fm_diag_lock);
+    if (!snap)
+        return -1;
+
+    FILE *f = fopen("/proc/self/smaps", "r");
+    if (f) {
+        char line[512];
+        unsigned long va_lo = 0, va_hi = 0;
+        int have_range = 0;
+        FM_DiagRssStat *st = NULL;
+        while (fgets(line, sizeof(line), f)) {
+            if (strchr(line, '-') &&
+                sscanf(line, "%lx-%lx", &va_lo, &va_hi) == 2) {
+                have_range = 1;
+                st = NULL;
+                for (size_t i = 0; i < n; i++) {
+                    if (va_lo >= snap[i].base && va_lo < snap[i].end) {
+                        st = &out[snap[i].cat];
+                        st->maps++;
+                        st->mapped_kb += (size_t)((va_hi - va_lo) >> 10);
+                        /* mincore residency for this exact VMA.  Cap the
+                         * vector at 16 MiB of pages; larger VMAs still get
+                         * their smaps Rss counted above. */
+                        size_t pages = (size_t)((va_hi - va_lo) / FM_PAGE_SIZE);
+                        if (pages && pages <= (16u << 10)) {
+                            unsigned char *vec =
+                                mmap(NULL, pages, PROT_READ | PROT_WRITE,
+                                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+                            if (vec != MAP_FAILED) {
+                                if (mincore((void *)(uintptr_t)va_lo,
+                                            (size_t)(va_hi - va_lo), vec) == 0) {
+                                    size_t res = 0;
+                                    for (size_t k = 0; k < pages; k++)
+                                        res += (size_t)(vec[k] & 1u);
+                                    st->mincore_kb += res * (FM_PAGE_SIZE / 1024u);
+                                }
+                                munmap(vec, pages);
+                            }
+                        }
+                        break;
+                    }
+                }
+                continue;
+            }
+            if (!have_range || !st)
+                continue;
+            unsigned long kb;
+            if (sscanf(line, "Rss: %lu kB", &kb) == 1)
+                st->rss_kb += (size_t)kb;
+            else if (sscanf(line, "Pss: %lu kB", &kb) == 1)
+                st->pss_kb += (size_t)kb;
+            else if (sscanf(line, "Private_Clean: %lu kB", &kb) == 1)
+                st->private_clean_kb += (size_t)kb;
+            else if (sscanf(line, "Private_Dirty: %lu kB", &kb) == 1)
+                st->private_dirty_kb += (size_t)kb;
+            else if (sscanf(line, "Shared_Clean: %lu kB", &kb) == 1)
+                st->shared_clean_kb += (size_t)kb;
+            else if (sscanf(line, "Shared_Dirty: %lu kB", &kb) == 1)
+                st->shared_dirty_kb += (size_t)kb;
+        }
+        fclose(f);
+    }
+    munmap(snap, n * sizeof(*snap));
+    return 0;
+}
+
+/* Human-readable dump to stderr.  Also exported so a harness can call it
+ * at a point of interest via dlsym. */
+void fm_diag_rss_dump(void)
+{
+    FM_DiagRssStat st[FM_DIAG_CAT_COUNT];
+    if (fm_diag_rss_collect(st) != 0)
+        return;
+    static const char *names[FM_DIAG_CAT_COUNT] = { "span", "large", "meta" };
+    fprintf(stderr, "[fm-diag-rss] registrations_overflow=%zu\n", fm_diag_overflow);
+    for (int i = 0; i < FM_DIAG_CAT_COUNT; i++)
+        fprintf(stderr,
+                "[fm-diag-rss] %-5s maps=%zu mapped=%zukB mincore=%zukB "
+                "Rss=%zukB Pss=%zukB priv_cl=%zukB priv_dt=%zukB "
+                "sh_cl=%zukB sh_dt=%zukB\n",
+                names[i], st[i].maps, st[i].mapped_kb, st[i].mincore_kb,
+                st[i].rss_kb, st[i].pss_kb, st[i].private_clean_kb,
+                st[i].private_dirty_kb, st[i].shared_clean_kb,
+                st[i].shared_dirty_kb);
+}
+
+__attribute__((destructor)) static void fm_diag_exit_dump(void)
+{
+    if (fm_diag_on)
+        fm_diag_rss_dump();
+}
+
 /* The automatic census sets the class's next interval from how
  * many blocks it had to walk (one ms per 100 walked blocks,
  * doubling when it finds nothing, capped at 5 s): the walk is the
@@ -529,8 +775,7 @@ static inline FM_Batch *fm_batch_alloc(void)
         b->next = NULL;
         return b;
     }
-    char *page = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
-                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    char *page = fm_diag_mmap(4096, FM_DIAG_CAT_META);
     if (page == MAP_FAILED)
         return NULL;
 
@@ -620,18 +865,19 @@ static inline char *fm_map_aligned(size_t bytes)
 {
     size_t need = bytes + HEADER_SIZE;
     size_t map_len = need + SPAN_SIZE + FM_PAGE_SIZE;
-    char *raw = mmap(NULL, map_len, PROT_READ | PROT_WRITE,
-                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    char *raw = fm_diag_mmap(map_len, FM_DIAG_CAT_SPAN);
     if (raw == MAP_FAILED)
         return NULL;
     uintptr_t base = FM_ALIGN_UP((uintptr_t)raw, SPAN_SIZE);
     if (base != (uintptr_t)raw)
-        munmap(raw, (size_t)(base - (uintptr_t)raw));
+        fm_diag_munmap(raw, (size_t)(base - (uintptr_t)raw));
     size_t keep = FM_ALIGN_UP(need, FM_PAGE_SIZE);
     size_t tail_start = base + keep;
     size_t map_end = (size_t)FM_ALIGN_UP((uintptr_t)raw + map_len, FM_PAGE_SIZE);
     if (tail_start < map_end)
-        munmap((void *)tail_start, map_end - tail_start);
+        fm_diag_munmap((void *)tail_start, map_end - tail_start);
+    /* Register the aligned, trimmed range (the raw one was removed above). */
+    fm_diag_map_add(base, keep, FM_DIAG_CAT_SPAN);
     return (char *)base;
 }
 
@@ -651,8 +897,7 @@ static char *fm_map_dense_span(void)
     enum { burst_ms = 100, warmup_extents = 4 };
     fm_stack_exclusive();
     if (!fm_dense_extent.remaining) {
-        char *raw = mmap(NULL, map_len, PROT_READ | PROT_WRITE,
-                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        char *raw = fm_diag_mmap(map_len, FM_DIAG_CAT_SPAN);
         if (raw == MAP_FAILED) {
             fm_stack_resume();
             return fm_map_aligned(SPAN_SIZE - HEADER_SIZE);
@@ -661,9 +906,10 @@ static char *fm_map_dense_span(void)
         size_t prefix = (size_t)(base - raw);
         size_t suffix = map_len - prefix - extent_size;
         if (prefix)
-            munmap(raw, prefix);
+            fm_diag_munmap(raw, prefix);
         if (suffix)
-            munmap(base + extent_size, suffix);
+            fm_diag_munmap(base + extent_size, suffix);
+        fm_diag_map_add((uintptr_t)base, extent_size, FM_DIAG_CAT_SPAN);
         /* A rapidly consumed extent predicts dense demand for the next.
          * Sparse/startup heaps get demand-paged base pages. */
         uint32_t now = fm_now_ms();
@@ -703,19 +949,19 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
         return base;
     }
     if (fm_lextent_rem) {
-        munmap(fm_lextent_cur, fm_lextent_rem);
+        fm_diag_munmap(fm_lextent_cur, fm_lextent_rem);
         fm_lextent_cur = NULL;
         fm_lextent_rem = 0;
     }
     size_t slab_len = (4u << 20) + SPAN_SIZE;
-    char *raw = mmap(NULL, slab_len, PROT_READ | PROT_WRITE,
-                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    char *raw = fm_diag_mmap(slab_len, FM_DIAG_CAT_SPAN);
     if (raw == MAP_FAILED)
         return NULL;
     char *aligned = (char *)FM_ALIGN_UP((uintptr_t)raw, SPAN_SIZE);
     size_t head_slack = (size_t)(aligned - raw);
     if (head_slack)
-        munmap(raw, head_slack);
+        fm_diag_munmap(raw, head_slack);
+    fm_diag_map_add((uintptr_t)aligned, slab_len - head_slack, FM_DIAG_CAT_SPAN);
     *raw_out = (uintptr_t)aligned;
     *len_out = need;
     fm_lextent_cur = aligned + need;
@@ -1129,9 +1375,8 @@ static int fm_census_acquire(FM_Census *c)
     if (!fm_shared_census.ents) {
         fm_shared_census.cap = 256;
         fm_shared_census.used = 0;
-        FM_CensusEnt *ents = mmap(NULL, 256 * sizeof(FM_CensusEnt),
-                                  PROT_READ | PROT_WRITE,
-                                  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        FM_CensusEnt *ents = fm_diag_mmap(256 * sizeof(FM_CensusEnt),
+                                          FM_DIAG_CAT_META);
         if (ents == MAP_FAILED)
             return 0;
         fm_shared_census.ents = ents;
@@ -1155,7 +1400,7 @@ static void fm_census_reset(FM_Census *c)
 static void fm_census_destroy(FM_Census *c)
 {
     if (c->ents && c->ents != MAP_FAILED)
-        munmap(c->ents, c->cap * sizeof(FM_CensusEnt));
+        fm_diag_munmap(c->ents, c->cap * sizeof(FM_CensusEnt));
     c->ents = NULL;
     c->cap = 0;
     c->used = 0;
@@ -1174,9 +1419,8 @@ static int fm_census_grow(FM_Census *c)
 {
     FM_CensusEnt *old = c->ents;
     size_t oldcap = c->cap;
-    FM_CensusEnt *nw = mmap(NULL, oldcap * 2 * sizeof(FM_CensusEnt),
-                            PROT_READ | PROT_WRITE,
-                            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    FM_CensusEnt *nw = fm_diag_mmap(oldcap * 2 * sizeof(FM_CensusEnt),
+                                    FM_DIAG_CAT_META);
     if (nw == MAP_FAILED)
         return 0;
     c->ents = nw;
@@ -1203,7 +1447,7 @@ static int fm_census_grow(FM_Census *c)
             c->used++;
         }
     }
-    munmap(old, oldcap * sizeof(FM_CensusEnt));
+    fm_diag_munmap(old, oldcap * sizeof(FM_CensusEnt));
     return 1;
 }
 
@@ -1812,7 +2056,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             uintptr_t base = sp->map_base;
             size_t len = sp->map_size;
             released += len;
-            munmap((void *)base, len);
+            fm_diag_munmap((void *)base, len);
         }
     }
 
@@ -1834,9 +2078,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
     if (cen.used <= 256) {
         order = order_stk;
     } else {
-        order = mmap(NULL, cen.used * sizeof(FM_Batch *),
-                     PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,
-                     -1, 0);
+        order = fm_diag_mmap(cen.used * sizeof(FM_Batch *), FM_DIAG_CAT_META);
         if (order == MAP_FAILED)
             order = NULL;
         else
@@ -1895,7 +2137,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
         for (size_t i = norder; i-- > 0;)
             fm_central_push(cls, order[i]);
         if (order_mapped)
-            munmap(order, cen.used * sizeof(FM_Batch *));
+            fm_diag_munmap(order, cen.used * sizeof(FM_Batch *));
     }
     /* Rewalking the entire retained pool every 128 flushes grows costly
      * during bulk free. Scale only the early regroup prompt with the supply
@@ -2161,8 +2403,7 @@ static inline size_t fm_class_of(size_t size)
 static inline char *fm_map_large(size_t bytes, uintptr_t *raw_out, size_t *len_out)
 {
     size_t map_len = FM_ALIGN_UP(bytes + HEADER_SIZE + SPAN_SIZE, FM_PAGE_SIZE);
-    char *raw = mmap(NULL, map_len, PROT_READ | PROT_WRITE,
-                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    char *raw = fm_diag_mmap(map_len, FM_DIAG_CAT_LARGE);
     if (raw == MAP_FAILED)
         return NULL;
     *raw_out = (uintptr_t)raw;
@@ -2233,7 +2474,7 @@ static inline void fm_large_free(FM_Span *sp, void *p)
             return;
         }
     }
-    munmap((void *)sp->map_base, sp->map_size);
+    fm_diag_munmap((void *)sp->map_base, sp->map_size);
 }
 
 /* Release every cached large block of this thread to the OS.
@@ -2248,7 +2489,7 @@ static inline size_t fm_large_cache_drain(void)
         while (sp) {
             FM_Span *next = (FM_Span *)sp->lnext;
             released += sp->map_size;
-            munmap((void *)sp->map_base, sp->map_size);
+            fm_diag_munmap((void *)sp->map_base, sp->map_size);
             sp = next;
         }
     }
@@ -2436,23 +2677,23 @@ __attribute__((noinline)) static void *fm_aligned_alloc_impl(size_t align, size_
     if (align < SPAN_SIZE) {
         size_t need = size + align + HEADER_SIZE;
         size_t map_len = need + SPAN_SIZE + FM_PAGE_SIZE;
-        char *raw = mmap(NULL, map_len, PROT_READ | PROT_WRITE,
-                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        char *raw = fm_diag_mmap(map_len, FM_DIAG_CAT_LARGE);
         if (raw == MAP_FAILED)
             return NULL;
         uintptr_t base = FM_ALIGN_UP((uintptr_t)raw, SPAN_SIZE);
         if (base != (uintptr_t)raw)
-            munmap(raw, (size_t)(base - (uintptr_t)raw));
+            fm_diag_munmap(raw, (size_t)(base - (uintptr_t)raw));
         uintptr_t user = FM_ALIGN_UP(base + HEADER_SIZE, align);
         size_t keep = FM_ALIGN_UP(need, FM_PAGE_SIZE);
         if (user + size > base + keep) {
-            munmap((void *)base, keep);
+            fm_diag_munmap((void *)base, keep);
             return NULL;
         }
         size_t tail_start = base + keep;
         size_t map_end = (size_t)FM_ALIGN_UP((uintptr_t)raw + map_len, FM_PAGE_SIZE);
         if (tail_start < map_end)
-            munmap((void *)tail_start, map_end - tail_start);
+            fm_diag_munmap((void *)tail_start, map_end - tail_start);
+        fm_diag_map_add(base, keep, FM_DIAG_CAT_LARGE);
 
         FM_Span *sp = (FM_Span *)base;
         sp->cls = LARGE_CLASS;
@@ -2469,13 +2710,12 @@ __attribute__((noinline)) static void *fm_aligned_alloc_impl(size_t align, size_
      * pointer and tag it with a magic number. */
     size_t need = size + align + HEADER_SIZE;
     size_t map_len = need + FM_PAGE_SIZE;
-    char *raw = mmap(NULL, map_len, PROT_READ | PROT_WRITE,
-                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    char *raw = fm_diag_mmap(map_len, FM_DIAG_CAT_LARGE);
     if (raw == MAP_FAILED)
         return NULL;
     uintptr_t user = FM_ALIGN_UP((uintptr_t)raw + HEADER_SIZE, align);
     if (user + size > (uintptr_t)raw + map_len) {
-        munmap(raw, map_len);
+        fm_diag_munmap(raw, map_len);
         return NULL;
     }
     FM_Span *sp = (FM_Span *)(user - HEADER_SIZE);
@@ -2645,7 +2885,7 @@ __attribute__((noinline, cold)) static void fm_free_slow_large(FM_Span *sp, void
 __attribute__((noinline, cold)) static void fm_free_aligned(const void *p)
 {
     const FM_Span *sp = (const FM_Span *)((const char *)p - HEADER_SIZE);
-    munmap((void *)sp->map_base, sp->map_size);
+    fm_diag_munmap((void *)sp->map_base, sp->map_size);
 }
 
 __attribute__((noinline)) static void fm_free_cnt_slow(uint32_t cls)
@@ -2869,7 +3109,7 @@ __attribute__((noinline)) static void *fm_realloc_slow(void *p, size_t size)
         if (!q)
             return NULL;
         memcpy(q, p, sp->user_size);
-        munmap((void *)sp->map_base, sp->map_size);
+        fm_diag_munmap((void *)sp->map_base, sp->map_size);
         return q;
     }
     FM_Span *sp = (FM_Span *)((uintptr_t)p & SPAN_MASK);

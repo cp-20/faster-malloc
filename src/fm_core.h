@@ -943,6 +943,25 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
         end = cur + (size_t)total * bs;
         uint32_t avail0 = (uint32_t)((end - cur) / bs);
         uint32_t keep0 = limit < avail0 ? limit : avail0;
+        int lazy = FM_CFG()->lazy_bump;
+        if (lazy) {
+            /* Linking a fresh span used to write a next pointer into every
+             * one of its blocks, faulting the whole first span (16 KiB for
+             * the ADR 0060 startup classes, 64 KiB for later spans) into
+             * RSS before a single allocation was made.  A sparsely used
+             * startup class -- the common case in a single-threaded server
+             * such as Redis -- therefore paid pages it never touched again.
+             * With lazy bump the unlinked tail stays reachable through
+             * fm_bump_ptr, so link only the first page worth of blocks and
+             * fault the rest in on demand.  Span geometry and nblocks are
+             * unchanged: unlike ADR 0060's smaller-first-span attempt this
+             * creates no extra spans, only fewer resident pages. */
+            uint32_t warm = (uint32_t)(FM_PAGE_SIZE / bs);
+            if (warm < 1)
+                warm = 1;
+            if (keep0 > warm)
+                keep0 = warm;
+        }
 
         void *head = cur;
         void *t = cur;
@@ -961,7 +980,7 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
         fm_tls.cnt[cls] = (int32_t)limit;
 
         char *rest_cur = cur + (size_t)keep0 * bs;
-        if (FM_CFG()->lazy_bump) {
+        if (lazy) {
             /* Defer touching/linking the remainder of the span until needed
              * so L1D is not polluted by unused blocks. */
             fm_bump_ptr[cls] = rest_cur;

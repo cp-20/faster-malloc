@@ -682,6 +682,58 @@ static char *fm_map_dense_span(void)
     return span;
 }
 
+/* Brk bootstrap arena (N117).  The first FM_BRK_ARENA_SPANS small spans
+ * are carved from one contiguous sbrk-grown heap instead of opening a
+ * 2 MiB dense extent.  A short-lived process touches only a handful of
+ * spans, so a single growing heap keeps the mapping count at one and
+ * leaves the untouched pages non-resident; the dense extent is opened
+ * only when demand outgrows the bootstrap budget.  The arena is grown
+ * once, under the central lock (also the fork-quiescence lock), and is
+ * never shrunk. */
+#define FM_BRK_ARENA_SPANS 64u
+
+static struct {
+    uintptr_t lo;       /* first carved slot (arena base) */
+    uintptr_t hi;       /* one past the last slot */
+    char *cursor;       /* next free 64 KiB slot */
+    unsigned remaining;
+} fm_brk_arena;
+
+/* True for a span whose backing store belongs to the brk arena.  Such
+ * spans must not be munmapped by the census: brk memory is not an mmap,
+ * and unmapping part of the heap would split the process's [heap] VMA. */
+static inline int fm_is_brk_span(uintptr_t base)
+{
+    return fm_brk_arena.lo && base >= fm_brk_arena.lo &&
+           base < fm_brk_arena.hi;
+}
+
+static char *fm_map_brk_span(void)
+{
+    fm_stack_exclusive();
+    if (!fm_brk_arena.hi) {
+        /* Grow atomically and align inside the grown region: the tail
+         * slack (< SPAN_SIZE) stays mapped but is never touched. */
+        size_t bytes = (size_t)FM_BRK_ARENA_SPANS * SPAN_SIZE;
+        char *cur = (char *)sbrk(bytes + SPAN_SIZE);
+        if (cur != (void *)-1) {
+            uintptr_t base = FM_ALIGN_UP((uintptr_t)cur, SPAN_SIZE);
+            fm_brk_arena.lo = base;
+            fm_brk_arena.hi = base + bytes;
+            fm_brk_arena.cursor = (char *)base;
+            fm_brk_arena.remaining = FM_BRK_ARENA_SPANS;
+        }
+    }
+    char *span = NULL;
+    if (fm_brk_arena.remaining) {
+        span = fm_brk_arena.cursor;
+        fm_brk_arena.cursor += SPAN_SIZE;
+        fm_brk_arena.remaining--;
+    }
+    fm_stack_resume();
+    return span;
+}
+
 /* Per-thread 4 MiB base-page slab for >4 KiB class spans and <=512 KiB
  * large allocations: amortizes mmap/trim syscalls without hinting THP on
  * potentially sparse allocations, and drains on malloc_trim / thread exit.
@@ -742,7 +794,9 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
     size_t raw_len = SPAN_SIZE;
     char *base;
     if (bs <= FM_PAGE_SIZE) {
-        base = fm_map_dense_span();
+        base = fm_map_brk_span();
+        if (!base)
+            base = fm_map_dense_span();
         raw_base = (uintptr_t)base;
     } else {
         base = fm_map_large_slab(SPAN_SIZE - HEADER_SIZE, &raw_base, &raw_len);
@@ -1811,8 +1865,10 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             FM_Span *sp = (FM_Span *)e->span;
             uintptr_t base = sp->map_base;
             size_t len = sp->map_size;
-            released += len;
-            munmap((void *)base, len);
+            if (!fm_is_brk_span(base)) {
+                released += len;
+                munmap((void *)base, len);
+            }
         }
     }
 

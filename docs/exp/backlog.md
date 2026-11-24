@@ -193,6 +193,17 @@ These are deliberately smaller and self-contained so the local
 
 
 
+## Round 19: byte-granular page heap integration (2026-11-25)
+
+| id | branch | result | status |
+|---|---|---|---|
+| P3 | `exp/pageheap` | page heap for 257-2032 B behind `FM_PAGEHEAP` (ADR 0086): local git 23.9 -> 21.1 MiB at equal time, sqlite speedtest1 11.6 -> 10.9 MiB at equal time (interleaved), lua unchanged at 16.3 MiB / 0.33 s; `test_basic`, `stress`, `rtest`, `valgrind`, `mtrepeat` clean; 11-rep exp-bench and exp-legacy in flight | **candidate** |
+
+The band split matters: applying the page heap to every size <= 2032 B
+made lua 26% slower (its small-object churn prefers v2's bins), while
+restricting it to 257 B and above keeps lua neutral and still recovers
+2.7 MiB on git.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

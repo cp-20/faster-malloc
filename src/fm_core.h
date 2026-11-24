@@ -686,6 +686,63 @@ static struct {
     uint32_t opened_ms;
 } fm_dense_extent;
 
+/* ------------------------------------------------------------------ */
+/* N123 (Stage 2): released-extent hash and class reuse                  */
+/*                                                                     */
+/* Stage 1's decay returns the resident pages of dead extents with      */
+/* MADV_DONTNEED but then munmaps their VA.  That VA is lost to the      */
+/* dense allocator (its cursor only moves forward), so the next span of */
+/* ANY class needs a fresh mmap -- the VMA count grows and a whole run   */
+/* of adjacent dead spans becomes a row of 64 KiB holes.                 */
+/*                                                                     */
+/* Keep the VA instead: record each released 64 KiB span in this small  */
+/* open-addressed hash keyed by span>>16.  A later fm_span_new() pops a  */
+/* slot and re-carves it for whatever class now needs it (class reuse)  */
+/* instead of mapping new memory.  Adjacent dead extents are coalesced  */
+/* into one MADV_DONTNEED run before they are published here.            */
+/*                                                                     */
+/* All operations run under fm_central_lock, which the fork hooks        */
+/* already take, so the hash is fork-safe and needs no new lock.  Nothing */
+/* in this section is reachable from malloc/free's fast path.            */
+#define FM_EXT_HASH_CAP 4096u /* 4096 slots = 256 MiB of retained spans */
+static uintptr_t fm_ext_hash[FM_EXT_HASH_CAP]; /* 0 = empty; slot = span VA */
+static unsigned fm_ext_hash_cursor;
+
+static inline size_t fm_ext_hash_idx(uintptr_t span)
+{
+    return (size_t)((span >> 16) & (FM_EXT_HASH_CAP - 1));
+}
+
+/* Insert a released span.  Returns 0 if the table is full. */
+static inline int fm_ext_hash_insert(uintptr_t span)
+{
+    size_t i = fm_ext_hash_idx(span);
+    for (unsigned probe = 0; probe < FM_EXT_HASH_CAP; probe++) {
+        uintptr_t v = fm_ext_hash[i];
+        if (v == 0 || v == span) {
+            fm_ext_hash[i] = span;
+            return 1;
+        }
+        i = (i + 1) & (FM_EXT_HASH_CAP - 1);
+    }
+    return 0;
+}
+
+/* Take any retained slot for reuse (round-robin so short runs spread). */
+static inline uintptr_t fm_ext_hash_take(void)
+{
+    for (unsigned probe = 0; probe < FM_EXT_HASH_CAP; probe++) {
+        size_t i = (fm_ext_hash_cursor + probe) & (FM_EXT_HASH_CAP - 1);
+        uintptr_t v = fm_ext_hash[i];
+        if (v) {
+            fm_ext_hash[i] = 0;
+            fm_ext_hash_cursor = (unsigned)((i + 1) & (FM_EXT_HASH_CAP - 1));
+            return v;
+        }
+    }
+    return 0;
+}
+
 static char *fm_map_dense_span(void)
 {
     enum { extent_size = 2 * 1024 * 1024, map_len = 2 * extent_size - FM_PAGE_SIZE };
@@ -782,7 +839,15 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
     uintptr_t raw_base = 0;
     size_t raw_len = SPAN_SIZE;
     char *base;
-    if (bs <= FM_PAGE_SIZE) {
+    /* N123: a decayed/released extent can serve ANY class -- re-carve its
+     * VA here rather than opening a new 2 MiB dense extent or 4 MiB slab. */
+    fm_stack_exclusive();
+    uintptr_t recycled = fm_ext_hash_take();
+    fm_stack_resume();
+    if (recycled) {
+        base = (char *)recycled;
+        raw_base = recycled;
+    } else if (bs <= FM_PAGE_SIZE) {
         base = fm_map_dense_span();
         raw_base = (uintptr_t)base;
     } else {
@@ -1385,6 +1450,19 @@ static int fm_batch_count_desc(const void *a, const void *b)
  * decisions on purge_mark exactly like dead-span marks; instant
  * (trim) mode purges immediately.  A span whose circulating supply
  * runs out gets its withheld blocks re-carved (reclaim) instead. */
+/* N123 + Stage 1: is `addr` a RELEASABLE dead extent in this census?
+ * Newly-muzzy spans (FM_PG_MUZZY_NEW) are dead in the census but still
+ * own their VA for the rest of the muzzy window, so they must never be
+ * absorbed into a coalesced run and released early. */
+static inline int fm_census_dead_at(FM_Census *c, uintptr_t addr)
+{
+    for (size_t i = 0; i < c->cap; i++)
+        if (c->ents[i].span == addr && c->ents[i].dead &&
+            !(c->ents[i].pg_flags & FM_PG_MUZZY_NEW))
+            return 1;
+    return 0;
+}
+
 __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t keep,
                                                       int instant,
                                                       uint32_t span_budget)
@@ -1936,20 +2014,63 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             (void)madvise((void *)start, end - start, MADV_DONTNEED);
     }
 
-    /* Unmap the dead spans (once each, from the census).  A span already
-     * in the muzzy queue is released by the sweep, not here. */
+    /* N123 + Stage 1: release dead extents with coalescing + class reuse.
+     * A run of address-adjacent fully-free spans gets ONE MADV_DONTNEED
+     * (fewer syscalls, no row of split VMAs) instead of one munmap per span.
+     * The resident pages are returned to the OS exactly as before, so peak
+     * RSS still falls; only the VA is kept so it can be re-carved for
+     * another class.  Newly-muzzy spans are excluded from runs (they still
+     * own their VA for the muzzy window) and a muzzy span that does get
+     * released here is unlinked and clear-marked before it can be reused.
+     * Spans whose mapping is not a standalone 64 KiB slot keep the munmap
+     * path (large/aligned blocks never reach this census). */
     size_t released = 0;
     for (size_t i = 0; i < cen.cap; i++) {
         FM_CensusEnt *e = &cen.ents[i];
-        if (e->span && e->dead && !(e->pg_flags & FM_PG_MUZZY_NEW)) {
-            FM_Span *sp = (FM_Span *)e->span;
-            uintptr_t base = sp->map_base;
-            size_t len = sp->map_size;
-            if (FM_MUZZY(sp))
-                fm_muzzy_unlink(sp);
-            released += len;
-            munmap((void *)base, len);
+        if (!e->span || !e->dead || (e->pg_flags & FM_PG_MUZZY_NEW))
+            continue;
+        uintptr_t sp = e->span;
+        if (fm_census_dead_at(&cen, sp - SPAN_SIZE))
+            continue; /* not a run head: the predecessor handled it */
+        uintptr_t end = sp + SPAN_SIZE;
+        while (fm_census_dead_at(&cen, end))
+            end += SPAN_SIZE;
+
+        int coalescible = 1;
+        for (uintptr_t a = sp; a < end; a += SPAN_SIZE) {
+            FM_Span *s = (FM_Span *)a;
+            if (s->map_base != a || s->map_size != SPAN_SIZE) {
+                coalescible = 0;
+                break;
+            }
         }
+        if (!coalescible) {
+            for (uintptr_t a = sp; a < end; a += SPAN_SIZE) {
+                FM_Span *s = (FM_Span *)a;
+                if (FM_MUZZY(s)) {
+                    fm_muzzy_unlink(s);
+                    FM_MUZZY(s) = 0;
+                }
+                released += s->map_size;
+                munmap((void *)s->map_base, s->map_size);
+            }
+            continue;
+        }
+
+        size_t run_len = (size_t)(end - sp);
+        (void)madvise((void *)sp, run_len, MADV_DONTNEED);
+        released += run_len;
+        fm_stack_exclusive();
+        for (uintptr_t a = sp; a < end; a += SPAN_SIZE) {
+            FM_Span *s = (FM_Span *)a;
+            if (FM_MUZZY(s)) {
+                fm_muzzy_unlink(s);
+                FM_MUZZY(s) = 0;
+            }
+            if (!fm_ext_hash_insert(a))
+                munmap((void *)a, SPAN_SIZE); /* table full: give VA back */
+        }
+        fm_stack_resume();
     }
 
     /* Form the new stack: one span-pure batch per surviving span
@@ -2182,7 +2303,10 @@ static void fm_idle_after_fork_child(void)
 
 /* MUZZY -> release.  Muzzy spans have no blocks in any free list, so a
  * census can never revisit them; the queue is swept directly.  all != 0
- * makes malloc_trim release every muzzy extent immediately. */
+ * makes malloc_trim release every muzzy extent immediately.  N123: a
+ * standalone 64 KiB extent keeps its VA in the reuse hash (all resident
+ * pages, including the header page, are dropped first); a non-standalone
+ * mapping falls back to munmap. */
 static void fm_muzzy_sweep(uint32_t now, int all)
 {
     const FM_Config *cfg = FM_CFG();
@@ -2198,7 +2322,16 @@ static void fm_muzzy_sweep(uint32_t now, int all)
             *link = next;
             sp->lnext = 0;
             FM_MUZZY(sp) = 0;
-            munmap((void *)base, len);
+            if (base == (uintptr_t)sp && len == SPAN_SIZE) {
+                uintptr_t va = (uintptr_t)sp;
+                (void)madvise((void *)va, SPAN_SIZE, MADV_DONTNEED);
+                fm_stack_exclusive();
+                if (!fm_ext_hash_insert(va))
+                    munmap((void *)va, SPAN_SIZE); /* table full */
+                fm_stack_resume();
+            } else {
+                munmap((void *)base, len);
+            }
         } else {
             link = (FM_Span **)&sp->lnext;
         }

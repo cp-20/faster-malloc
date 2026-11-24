@@ -186,6 +186,10 @@ These are deliberately smaller and self-contained so the local
 | N130 | all | combine N121 (decay) + N123 (extent hash / VA slot reuse) | med |
 | N131 | all | N121 with a mapped-bytes high-water instead of cumulative large frees | med |
 | N132 | all | use N125 `FM_DIAG_RSS=1` decomposition on redis/node/gcc/python to pick the next decay target | low |
+| N133 | all | aggressive decay for benchmark-length runs: high-water 16 MiB, dirty 10 ms, muzzy 100 ms, pulse 64 | high |
+| N134 | all | flush-triggered decay: purge DIRTY spans on the next flush after 10 ms, no idle thread | high |
+| N135 | all | page-map/segment rewrite spike only if decay tuning fails; measure the free-path Ir cost first | high |
+| N136 | all | dedicated CI run of N125 `FM_DIAG_RSS=1` on redis/node/gcc/python to attribute the resident pages | low |
 
 
 
@@ -239,6 +243,7 @@ threshold on RSS0 is the next code step.
 | `exp/auto-n91` legacy | no RSS gain; sqlite 13.4 -> 15.1 MiB, redis 6.4 -> 6.6 | rejected |
 | `exp/auto-n101` | 11-rep correctness: `mtrepeat cross` rc=1 (brk arena vs glibc brk) | rejected |
 | `exp/auto-n106` | 11-rep paired 0.9984, RSS flat, micro worst +1.49% | rejected |
+| `exp/auto-n121` | 11-rep time neutral, micro 1.0011; legacy RSS unchanged (node 531, redis 6.4, gcc 374) | rejected as default; tuning N128/N131/N133 |
 
 The lesson from round 14: 3-rep real-app wins are noise; adopt only
 11-rep or full legacy evidence.  Startup mapping variants (N2/N12/N31/

@@ -205,6 +205,7 @@ These are deliberately smaller and self-contained so the local
 | T2 | `v6/c` | 4 KiB cold spans in 64 KiB slots + always-THP hot chunks: jq tied, git/sqlite 13 -> 16 MiB | rejected |
 | G1 | `v6/slot-hybrid` | 4 KiB spans in 64 KiB slots + 8-refill promotion: micro 0.9996, jq +10%, git 14 MiB | rejected |
 | R1 | `exp/mremap-grow` | in-place `mremap` on large realloc: correct, RSS flat (adjacent VA occupied); `MREMAP_MAYMOVE` moves the block off the 64 KiB span mask | rejected |
+| R2 | `exp/mremap-fixed` | reserve a 64 KiB-aligned destination, then `mremap(MREMAP_FIXED|MAYMOVE)`: RSS `grow` 139.7 -> 132.8 MiB and python JSON 142.0 -> 138.0 MiB, but python is **+15% locally and +2.2% at 11-rep CI**; sort +6.1% | rejected (time) |
 | D1 | div2 screen | `FM_LOCAL_LIMIT_DIV=2`: git/sqlite 13 -> 12 MiB but micro 1.0239 and jq +2.5% | rejected as default |
 
 Two measurements that correct earlier conclusions:

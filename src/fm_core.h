@@ -270,6 +270,11 @@ extern __thread uint64_t fm_lcache_warm_mask __attribute__((tls_model("initial-e
  * bucket is always cached, so seeding a cycle still works.  All state
  * is per-thread, so this is race-free. */
 #define FM_LCACHE_HOT_WINDOW 8u
+/* N44: cc1plus cycles ~64 KiB obstack chunks (bucket 16, or 17 after an
+ * untrimmed slab carve) across function boundaries; the default 8-free
+ * window evicts them before the next function searches the bucket.  Give
+ * just these two buckets a 64-free window.  Slow path only. */
+#define FM_LCACHE_OBSTACK_WINDOW 64u
 extern __thread uint32_t fm_ltick __attribute__((tls_model("initial-exec")));
 /* realloc -> large-miss hint (ADR 0075): the old user size of a buffer
  * being grown, or 0. Passed out of band so the shared cache-hit path
@@ -2210,18 +2215,21 @@ static inline void fm_large_free(FM_Span *sp, void *p)
     if (sp->align == 0 && (uintptr_t)p == (uintptr_t)sp + HEADER_SIZE) {
         size_t ms = sp->map_size;
         int b = 63 - __builtin_clzll(fm_large_usable(sp));
+        uint32_t hot_window =
+            (b >= 16 && b <= 17) ? FM_LCACHE_OBSTACK_WINDOW : FM_LCACHE_HOT_WINDOW;
         if (b < FM_LCACHE_BUCKETS &&
             fm_lcache_bytes + ms <= fm_lcache_budget(b) &&
             fm_ltick - fm_lbucket_seen[b] <=
-                ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : FM_LCACHE_HOT_WINDOW)) {
-            /* Only purge cold mappings large enough that the application is
-             * unlikely to reuse them soon (bucket b covers usable sizes in
-             * [2^b, 2^(b+1)), so b >= 24 means >= 16 MiB).  Medium buffers
-             * churned by jq/g++/Python stay resident when re-freed, while
-             * sort's one-shot merge buffers (>= 16 MiB) are still purged. */
+                ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : hot_window)) {
+            /* Purge mappings large enough that their resident pages are
+             * unlikely to be reused soon: >= 16 MiB (b >= 24) even when the
+             * bucket is warm -- V8 external/Buffer churn cycles many distinct
+             * huge buffers through a bucket marked warm on its first reuse --
+             * and the 8-16 MiB band (b == 23) while still cold, so Node's
+             * external buffers do not pin a whole warm budget.  Smaller
+             * medium buffers churned by jq/g++/Python stay resident. */
             if (FM_CFG()->lcache_cold_purge &&
-                b >= 24 &&
-                !(fm_lcache_warm_mask & (1ULL << b))) {
+                (b >= 24 || (b == 23 && !(fm_lcache_warm_mask & (1ULL << b))))) {
                 uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
                 uintptr_t pend = (sp->map_base + sp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);
                 if (pend > pstart)

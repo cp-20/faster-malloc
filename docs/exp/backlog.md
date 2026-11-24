@@ -197,9 +197,9 @@ These are deliberately smaller and self-contained so the local
 
 | id | branch | result | status |
 |---|---|---|---|
-| L2 | `exp/lcache16b` | balanced large-cache budget 64 -> 16 MiB (warm cap 32): legacy node RSS 527* -> 468* KiB-scaled: 515 -> 460 MiB, python 458 -> 457, gcc/redis flat; 11-rep exp-bench micro 1.0000, paired 0.9972, worst 1.0000 | **accepted** |
+| L2 | `exp/lcache16b` | balanced large-cache budget 64 -> 16 MiB (warm cap 32): legacy node RSS 515 -> 460 MiB, python 447 -> 447, gcc 365 -> 365, redis 6.2 -> 6.2; 11-rep exp-bench micro 1.0000, paired 0.9972, worst 1.0000 | **accepted** |
 | L3 | `exp/lcache32b` | same at 32 MiB: node 470 MiB; 11-rep micro 1.0000, paired 1.0013, worst 1.0075 | alternative |
-| L4 | `exp/lcache8b` | same at 8 MiB: node 455 MiB; 11-rep paired 1.0048, sort +1.7%, sqlite +2.2% | rejected (last 5 MiB costs time) |
+| L4 | `exp/lcache8b` | same at 8 MiB: node 455 MiB; two 11-rep runs pair sqlite at 1.0168 / 1.0224 while 16 MiB is neutral | rejected (time) |
 | B1 | `exp/first-batch` | first refill takes 1 block, then 4, then the limit: git 8.43 -> 8.36 MiB, no micro change | rejected |
 | T1 | `v7/slab-thp` | adaptive THP on the >4 KiB slab, 2 MiB-aligned extent: 11-rep neutral (micro 1.0000, RSS flat); THP never fires in the real apps | rejected |
 | T2 | `v6/c` | 4 KiB cold spans in 64 KiB slots + always-THP hot chunks: jq tied, git/sqlite 13 -> 16 MiB | rejected |

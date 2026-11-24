@@ -251,6 +251,11 @@ static FM_Batch *fm_batch_global_head; /* protected by fm_central_lock */
  * throughput preset's 256 MiB and page purge stays on: this is a bounded
  * reuse boost, not the whole throughput profile. */
 #define FM_LCACHE_WARM_BUDGET_CAP (128ull << 20)
+/* Huge buckets (b >= 24 => usable size >= 16 MiB) are usually one-shot
+ * merge/parse buffers and dominate peak RSS.  Bound their share of the
+ * per-thread cache independently of the warm-bucket boost. */
+#define FM_LCACHE_HUGE_BUCKET 24
+#define FM_LCACHE_HUGE_BUDGET_CAP (32ull << 20)
 extern __thread void *fm_lcache_head[FM_LCACHE_BUCKETS]
     __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));
@@ -2201,6 +2206,10 @@ static inline uint64_t fm_lcache_budget(int b)
         if (budget > FM_LCACHE_WARM_BUDGET_CAP)
             budget = FM_LCACHE_WARM_BUDGET_CAP;
     }
+    /* Large mappings are the RSS tail; retain fewer of them while leaving
+     * the medium-buffer budget untouched for time-sensitive workloads. */
+    if (b >= FM_LCACHE_HUGE_BUCKET && budget > FM_LCACHE_HUGE_BUDGET_CAP)
+        budget = FM_LCACHE_HUGE_BUDGET_CAP;
     return budget;
 }
 

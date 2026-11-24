@@ -67,6 +67,7 @@
 #include <sched.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <pthread.h>
 #include <signal.h>
@@ -306,6 +307,22 @@ extern __thread uint32_t fm_lbucket_seen[FM_LCACHE_BUCKETS]
 #define FM_RELEASE_INTERVAL_MS 10u
 #define FM_RELEASE_MAX_INTERVAL_MS 5000u
 
+/* N21: RSS-gated aggressiveness for the ADR 0030 partial-span page purge.
+ * Above FM_PURGE_RSS_HW_MB of resident memory, the census uses the
+ * footprint profile's smaller page minimum (FM_PURGE_RSS_AGGR_PAGES)
+ * instead of the balanced default's FM_PURGE_MIN_PAGES, so spans with only
+ * a couple of wholly-free pages also give those pages back.  Below the mark
+ * the balanced behaviour is unchanged: the large-footprint apps (g++,
+ * Python) get the footprint win, while small working sets keep the
+ * re-fault-avoiding 4-page minimum.  The signal is read from
+ * /proc/self/statm on the census path only, never on a malloc/free hot path.
+ */
+#ifndef FM_PURGE_RSS_HW_MB
+#define FM_PURGE_RSS_HW_MB 128u
+#endif
+#define FM_PURGE_RSS_AGGR_PAGES 2u
+#define FM_RSS_SAMPLE_MS 100u
+
 /* ADR 0024: in the census rebuild, a span needs at least this many
  * blocks in central to earn its own span-pure batch; smaller
  * fragments merge into one mixed residue batch.  Bounds the batch
@@ -503,6 +520,45 @@ static inline uint32_t fm_now_ms(void)
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
+}
+
+/* N21: RSS high-water gate for the partial-span page purge.
+ *
+ * Read the process's resident page count from /proc/self/statm (field 2)
+ * and cache the verdict briefly: one release tick runs a census for every
+ * size class, so sampling at most once per FM_RSS_SAMPLE_MS keeps this off
+ * the hot paths and costs one file read per interval at most.  A failed
+ * read (or a platform without procfs) returns the conservative "below the
+ * mark" verdict, so behaviour is unchanged where the signal is absent.
+ * open/read/close/strtoul are allocation-free and signal-safe. */
+static int fm_rss_above_highwater(void)
+{
+    static _Atomic uint32_t sample_ms;
+    static _Atomic int above;
+    uint32_t now = fm_now_ms();
+    uint32_t last = atomic_load_explicit(&sample_ms, memory_order_relaxed);
+    if (last && (uint32_t)(now - last) < FM_RSS_SAMPLE_MS)
+        return atomic_load_explicit(&above, memory_order_relaxed);
+
+    int high = 0;
+    int fd = open("/proc/self/statm", O_RDONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        char buf[128];
+        ssize_t n = read(fd, buf, sizeof(buf) - 1);
+        close(fd);
+        if (n > 0) {
+            buf[n] = '\0';
+            char *p = buf;
+            (void)strtoul(p, &p, 10);            /* total program pages */
+            unsigned long resident = strtoul(p, &p, 10);
+            if (resident)
+                high = ((uint64_t)resident * FM_PAGE_SIZE) >=
+                       ((uint64_t)FM_PURGE_RSS_HW_MB << 20);
+        }
+    }
+    atomic_store_explicit(&above, high, memory_order_relaxed);
+    atomic_store_explicit(&sample_ms, now ? now : 1, memory_order_release);
+    return high;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1316,7 +1372,9 @@ static int fm_batch_count_desc(const void *a, const void *b)
  * the dead-span proof above is unaffected.  Auto mode ages purge
  * decisions on purge_mark exactly like dead-span marks; instant
  * (trim) mode purges immediately.  A span whose circulating supply
- * runs out gets its withheld blocks re-carved (reclaim) instead. */
+ * runs out gets its withheld blocks re-carved (reclaim) instead.
+ * In auto mode, if the process is above the RSS high-water mark, the
+ * page minimum drops to FM_PURGE_RSS_AGGR_PAGES (N21). */
 __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t keep,
                                                       int instant)
 {
@@ -1406,6 +1464,15 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
     const FM_Config *cfg = FM_CFG();
     const size_t bs = kClassSize[cls];
     uint32_t now = instant ? 0 : fm_now_ms();
+    /* N21: when the process is above the RSS high-water mark, lower the
+     * partial-span purge minimum to the footprint profile's value so a
+     * span with only two wholly-free resident pages also gives them back.
+     * Explicit trim keeps the configured minimum: its job is already to
+     * release, and the gate exists to avoid re-fault cost on normal runs. */
+    uint32_t min_pages = cfg->purge_min_pages;
+    if (!instant && cfg->page_purge &&
+        min_pages > FM_PURGE_RSS_AGGR_PAGES && fm_rss_above_highwater())
+        min_pages = FM_PURGE_RSS_AGGR_PAGES;
     fm_census_marked = 0;
     fm_census_waiting = 0;
     fm_census_purged = 0;
@@ -1458,7 +1525,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
          * minimum-size purge run could exist.  The coverage pass
          * decides whether it really does. */
         if (e->cnt && (uint64_t)e->cnt * bs >=
-                          (uint64_t)(cfg->purge_min_pages - 1) * FM_PAGE_SIZE) {
+                          (uint64_t)(min_pages - 1) * FM_PAGE_SIZE) {
             memset(e->page_free, 0, sizeof(e->page_free));
             memset(e->page_tot, 0, sizeof(e->page_tot));
             memset(e->page_sfree, 0, sizeof(e->page_sfree));
@@ -1567,7 +1634,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             }
             uint16_t new_mask = 0;
             uint32_t new_pages = 0;
-            if (cand_pages >= cfg->purge_min_pages) {
+            if (cand_pages >= min_pages) {
                 unsigned char vec[16];
                 int have_vec = mincore((void *)e->span, sp->map_size, vec) == 0;
                 for (uint32_t pg = 1; pg < 16; pg++) {
@@ -1577,7 +1644,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
                         new_pages++;
                     }
                 }
-                if (new_pages < cfg->purge_min_pages)
+                if (new_pages < min_pages)
                     new_mask = 0, new_pages = 0;
             }
             uint16_t new_withheld = 0;

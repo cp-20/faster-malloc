@@ -2272,7 +2272,10 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
         size_t need_map = FM_ALIGN_UP(size + HEADER_SIZE, FM_PAGE_SIZE);
         int nb = 63 - __builtin_clzll(need_map);
         size_t want = size;
-        if (growing_from && size - growing_from < growing_from)
+        /* Any growth -- including a 1.5x/2x geometric step -- gets one
+         * extra request of bounded headroom, so the carved block can serve
+         * the next step without a copy. */
+        if (growing_from)
             want += size;
         size_t carve = FM_ALIGN_UP(want + HEADER_SIZE, SPAN_SIZE);
         for (int b = nb + 2; b <= 22 && b < FM_LCACHE_BUCKETS; b++) {
@@ -2313,12 +2316,17 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
     }
     uintptr_t raw = 0;
     size_t raw_len = 0;
-    /* A buffer growing in sub-doubling steps would otherwise copy and
-     * fault a new mapping at almost every step. Reserve untouched VA on
-     * a miss. Cache lookup and user_size still use the actual request. */
+    /* A growing buffer would otherwise copy and fault a new mapping at
+     * every step. ADR 0075 only reserved headroom for sub-doubling growth,
+     * so geometric (1.5x/2x) growth -- what parsers and builders use --
+     * copied on every step. Reserve one extra request (bounded at 8 MiB)
+     * for ANY growth so the next growth fits in place. Untouched reserve
+     * pages cost VA, not RSS; if the larger mapping cannot be made we
+     * retry the exact request below. Cache lookup and user_size still use
+     * the actual request, so malloc_usable_size stays honest. */
     size_t capacity = size;
     const size_t huge_page = 2u << 20;
-    if (growing_from && size - growing_from < growing_from) {
+    if (growing_from) {
         size_t extra = size < (8u << 20) ? size : (8u << 20);
         capacity += extra;
         if (capacity >= huge_page / 2)

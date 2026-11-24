@@ -193,6 +193,18 @@ These are deliberately smaller and self-contained so the local
 
 
 
+## Round 28: the dense-extent THP hint was inflating RSS (2026-11-25)
+
+| id | branch | result | status |
+|---|---|---|---|
+| T3 | `exp/no-dense-thp` | remove the `MADV_HUGEPAGE` hint that `fm_map_dense_span` applied after four warm extents: local git 23.9-24.0 -> **21.9-22.0 MiB (-8.4%)**, lua 16.5-16.6 -> **15.8-15.9**, gcc/sqlite/python unchanged, time unchanged on all five; 11-rep matrices running | **candidate** |
+
+The hint commits 2 MiB on first touch, so a sparse or partly-filled
+extent pays up to 2 MiB of RSS for a few pages.  The instruction-count
+micro set is blind to the change by construction (THP does not alter the
+instruction stream), which is why this is the first RSS mechanism in the
+campaign that cannot move the micro at all.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

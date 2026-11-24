@@ -249,6 +249,24 @@ page map and still cannot reclaim a page that holds one live block, which
 is why mimalloc (26.9), jemalloc (27.0) and tcmalloc (30.0) all lose to
 glibc's 22.6 MiB on the same git row.
 
+## Round 18: byte-granular shared-page prototype (2026-11-25)
+
+The residual RSS gap is page fragmentation **between size classes**, so a
+size-agnostic page heap was prototyped and measured against the same
+local workloads (lua churn, git rev-list, sqlite speedtest1).
+
+| id | what | result |
+|---|---|---|
+| S1 | trace simulation: ideal byte-granular packing of the recorded lua and git allocation traces (16 B units, 8 B headers, perfect coalescing) | ceiling is **9.04 MB (lua)** and **12.04 MB (git)** against glibc heaps of 9.18 and 11.1 MB: the best possible shared-page design is glibc-level RSS, not lower |
+| S2 | `/tmp/pm.c` prototype: 4 KiB pages, 8-byte chunk headers, size-agnostic free buckets with a non-empty bitmap, forward coalescing, glibc forwarding above 2032 B, tcache only for chunks <= 256 B | passes `test_basic`, `stress`, `rtest`, `valgrind`. **git 20.4 vs glibc 19.6 / v2 23.9 MiB at equal time; sqlite 8.5 vs 8.35 / 11.6 MiB at equal time; lua 11.9 vs 11.4 / 16.2 MiB but 0.72 s vs v2's 0.36 s** |
+| S3 | tcache size sweep on lua | no tcache 11.8 MB / 0.78 s; 8/bucket 15.8 / 0.81; 16/bucket 20.0 / 0.77; 32/bucket 27.6 / 1.03; restricted to chunks <= 256 B 11.9 / 0.72 |
+
+Conclusion: the shared-page design reaches glibc-level RSS on these apps
+and, on git and sqlite, does so at v2-equivalent time.  Lua needs the hot
+path optimised (its string churn hits the page heap 2x harder than v2's
+bins).  The next cycle should integrate S2's small path into v2 behind a
+flag and re-run the 11-rep matrices.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

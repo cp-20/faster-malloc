@@ -270,12 +270,27 @@ extern __thread uint64_t fm_lcache_warm_mask __attribute__((tls_model("initial-e
  * bucket is always cached, so seeding a cycle still works.  All state
  * is per-thread, so this is race-free. */
 #define FM_LCACHE_HOT_WINDOW 8u
+/* Bounded cold-payload purge (sort RSS).  A bucket that no allocation has
+ * touched for more than the warm window (64 large frees) is stale: the
+ * blocks already in its cache bucket will not be reused this phase, yet
+ * their payload pages stay resident until trim/exit.  Drop those pages
+ * once per cold episode, bounded to FM_LCACHE_PURGE_MAX blocks per trigger,
+ * while keeping the header page, the mapping and the cache links.  Hot
+ * buckets are never purged. */
+#define FM_LCACHE_COLD_PURGE_AGE 64u
+#define FM_LCACHE_PURGE_MAX 32u
 extern __thread uint32_t fm_ltick __attribute__((tls_model("initial-exec")));
 /* realloc -> large-miss hint (ADR 0075): the old user size of a buffer
  * being grown, or 0. Passed out of band so the shared cache-hit path
  * carries no extra argument. Read and cleared only on a miss. */
 extern __thread size_t fm_grow_from __attribute__((tls_model("initial-exec")));
 extern __thread uint32_t fm_lbucket_seen[FM_LCACHE_BUCKETS]
+    __attribute__((tls_model("initial-exec")));
+/* Bit b: bucket b's cached payloads have already been purged in this cold
+ * episode.  Re-armed when an allocation re-stamps the bucket's seen tick.
+ * TLS-local like the large-slab cursor (fm_lextent_cur), so the header
+ * needs no corresponding definition in fm_static.c / fm_jit.c. */
+static _Thread_local uint64_t fm_lcache_purged_mask
     __attribute__((tls_model("initial-exec")));
 
 /* Batch count field: block count in the low bits; the top bit marks a
@@ -2206,21 +2221,41 @@ static inline void fm_large_free(FM_Span *sp, void *p)
     if (sp->align == 0 && (uintptr_t)p == (uintptr_t)sp + HEADER_SIZE) {
         size_t ms = sp->map_size;
         int b = 63 - __builtin_clzll(fm_large_usable(sp));
-        if (b < FM_LCACHE_BUCKETS &&
-            fm_lcache_bytes + ms <= fm_lcache_budget(b) &&
-            fm_ltick - fm_lbucket_seen[b] <=
-                ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : FM_LCACHE_HOT_WINDOW)) {
-            if (FM_CFG()->lcache_cold_purge &&
-                !(fm_lcache_warm_mask & (1ULL << b))) {
-                uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
-                uintptr_t pend = (sp->map_base + sp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);
-                if (pend > pstart)
-                    (void)madvise((void *)pstart, pend - pstart, MADV_DONTNEED);
+        if (b < FM_LCACHE_BUCKETS) {
+            uint64_t bit = 1ULL << b;
+            uint32_t age = fm_ltick - fm_lbucket_seen[b];
+            if (fm_lcache_bytes + ms <= fm_lcache_budget(b) &&
+                age <= ((fm_lcache_warm_mask & bit) ? FM_LCACHE_COLD_PURGE_AGE
+                                                    : FM_LCACHE_HOT_WINDOW)) {
+                if (FM_CFG()->lcache_cold_purge && !(fm_lcache_warm_mask & bit)) {
+                    uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
+                    uintptr_t pend = (sp->map_base + sp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);
+                    if (pend > pstart)
+                        (void)madvise((void *)pstart, pend - pstart, MADV_DONTNEED);
+                }
+                sp->lnext = (uintptr_t)fm_lcache_head[b];
+                fm_lcache_head[b] = sp;
+                fm_lcache_bytes += ms;
+                return;
             }
-            sp->lnext = (uintptr_t)fm_lcache_head[b];
-            fm_lcache_head[b] = sp;
-            fm_lcache_bytes += ms;
-            return;
+            /* Stale bucket: no allocation has touched it for more than the
+             * warm window.  The blocks already cached here will not be
+             * reused before trim; drop their resident payload once.  The
+             * header page and cache links stay, so a later allocation can
+             * still reuse the mapping (at the cost of refaulting it).  The
+             * per-bucket latch and block bound keep this off the hot path. */
+            if (age > FM_LCACHE_COLD_PURGE_AGE &&
+                fm_lcache_head[b] && !(fm_lcache_purged_mask & bit)) {
+                fm_lcache_purged_mask |= bit;
+                FM_Span *cp = (FM_Span *)fm_lcache_head[b];
+                for (unsigned i = 0; i < FM_LCACHE_PURGE_MAX && cp;
+                     i++, cp = (FM_Span *)cp->lnext) {
+                    uintptr_t pstart = (uintptr_t)cp + FM_PAGE_SIZE;
+                    uintptr_t pend = (cp->map_base + cp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);
+                    if (pend > pstart)
+                        (void)madvise((void *)pstart, pend - pstart, MADV_DONTNEED);
+                }
+            }
         }
     }
     munmap((void *)sp->map_base, sp->map_size);
@@ -2267,10 +2302,14 @@ __attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *z
     fm_arm_thread_exit();
     size_t need_map = FM_ALIGN_UP(size + HEADER_SIZE, FM_PAGE_SIZE);
     int nb = 63 - __builtin_clzll(need_map);
-    if (nb < FM_LCACHE_BUCKETS)
+    if (nb < FM_LCACHE_BUCKETS) {
         fm_lbucket_seen[nb] = fm_ltick;
-    if (nb + 1 < FM_LCACHE_BUCKETS)
+        fm_lcache_purged_mask &= ~(1ULL << nb);
+    }
+    if (nb + 1 < FM_LCACHE_BUCKETS) {
         fm_lbucket_seen[nb + 1] = fm_ltick;
+        fm_lcache_purged_mask &= ~(1ULL << (nb + 1));
+    }
     /* Search the need's own bucket, then the next one up: a block's
      * usable length can spill one bucket above its request size
      * because of the untrimmed head slack. Opt-in realloc growth
@@ -2342,6 +2381,7 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
                         fm_lcache_head[rb] = rem;
                         fm_lcache_bytes += rem->map_size;
                         fm_lbucket_seen[rb] = fm_ltick;
+                        fm_lcache_purged_mask &= ~(1ULL << rb);
                         sp->map_size = rem_addr - sp->map_base;
                     }
                     sp->user_size = size;

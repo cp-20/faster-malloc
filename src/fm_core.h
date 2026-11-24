@@ -780,6 +780,16 @@ static void fm_auto_release_tick(uint32_t flushed_cls);
 static inline uint32_t fm_local_limit(uint32_t cls)
 {
     uint32_t limit = kClassLimit[cls];
+    /* The generated kClassLimit caps every class at 256 blocks.  For the
+     * small classes that dominate parsing/compiler bursts that leaves most
+     * of the intended 64 KiB per-class byte budget unused (only 4 KiB for
+     * 16 B blocks, 32 KiB for 128 B blocks).  Spend the full budget: a
+     * larger local limit means fewer flushes -- fewer central-lock
+     * acquisitions and batch round trips -- while retained bytes stay
+     * bounded at 64 KiB per class.  The div override still scales it. */
+    uint32_t budget = (uint32_t)((64u * 1024u) / kClassSize[cls]);
+    if (budget > limit)
+        limit = budget;
     uint32_t div = FM_CFG()->local_limit_div;
     if (div > 1) {
         limit /= div;

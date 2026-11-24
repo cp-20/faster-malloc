@@ -2329,9 +2329,20 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
     if (growing_from) {
         size_t extra = size < (8u << 20) ? size : (8u << 20);
         capacity += extra;
-        if (capacity >= huge_page / 2)
-            capacity = FM_ALIGN_UP(capacity + HEADER_SIZE + SPAN_SIZE, huge_page)
-                     - HEADER_SIZE - SPAN_SIZE;
+        if (capacity >= huge_page / 2) {
+            size_t rounded = FM_ALIGN_UP(capacity + HEADER_SIZE + SPAN_SIZE, huge_page)
+                           - HEADER_SIZE - SPAN_SIZE;
+            /* Keep the full one-request reserve -- it is exactly what lets
+             * the next geometric step fit in place -- but only pay for
+             * huge-page alignment when it is nearly free.  A capacity far
+             * from a 2 MiB boundary would otherwise waste up to 2 MiB of
+             * VA, and that inflation is charged against the 64 MiB large-
+             * cache budget on free, evicting resident mappings.  The
+             * fits-in-mapping check and the MADV_HUGEPAGE hint still use
+             * the unmodified requested size. */
+            if (rounded - capacity <= FM_PAGE_SIZE)
+                capacity = rounded;
+        }
     }
     char *base = NULL;
     if (capacity + HEADER_SIZE <= 8 * SPAN_SIZE)

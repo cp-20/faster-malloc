@@ -237,6 +237,7 @@ to its pack/delta buffers, not the general small-object path.
 
 | id | branch | result | status |
 |---|---|---|---|
+| P2 | `exp/adaptive-cache` | shrink the large-cache budget to 2 MiB when the observed hit rate is below 1/8 (`fm_lc_hits`/`fm_lc_misses`): legacy node 468164 KB, python 457608, gcc 374360, redis 6416 -- identical to the plain 16 MiB budget, so the branch never fires on these apps | rejected (no effect) |
 | P1 | `exp/span-pool` | a fully free span keeps its 64 KiB mapping (pages `MADV_DONTNEED`-ed) in a per-thread pool and any class re-carves it.  `strace -c` on the Lua workload: munmap 204 -> 9, madvise 54 -> 222, mmap 57 -> 51, syscall time 2.63 -> 1.10 ms.  RSS: git 23.9 -> 23.9, lua 16.2 -> 15.9, sqlite speedtest1 11.5 -> 12.3 MiB; runtime unchanged on all three. | rejected (RSS neutral/worse, time within noise) |
 
 The mechanism works as designed, but the measured residual is **partially

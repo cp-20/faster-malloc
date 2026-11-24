@@ -2216,11 +2216,11 @@ static inline void fm_large_free(FM_Span *sp, void *p)
                 ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : FM_LCACHE_HOT_WINDOW)) {
             /* Only purge cold mappings large enough that the application is
              * unlikely to reuse them soon (bucket b covers usable sizes in
-             * [2^b, 2^(b+1)), so b >= 22 means >= 4 MiB).  Medium buffers
+             * [2^b, 2^(b+1)), so b >= 24 means >= 16 MiB).  Medium buffers
              * churned by jq/g++/Python stay resident when re-freed, while
-             * sort's one-shot merge buffers (multi-MiB) are still purged. */
+             * sort's one-shot merge buffers (>= 16 MiB) are still purged. */
             if (FM_CFG()->lcache_cold_purge &&
-                b >= 22 &&
+                b >= 24 &&
                 !(fm_lcache_warm_mask & (1ULL << b))) {
                 uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
                 uintptr_t pend = (sp->map_base + sp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);

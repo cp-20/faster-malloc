@@ -66,6 +66,7 @@
 #include <stdatomic.h>
 #include <sched.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -2186,12 +2187,49 @@ static inline size_t fm_large_usable(const FM_Span *sp)
     return sp->map_size - ((uintptr_t)sp - sp->map_base);
 }
 
+/* N97: derive the large-cache byte budget from the process RSS high-water
+ * mark instead of leaving it a fixed number of mapped bytes.  The fixed
+ * 64 MiB budget (ADR 0019) is a large fraction of a small-footprint app's
+ * whole RSS -- sort/git/sqlite sit at 13-46 MiB, exactly where v2's gap to
+ * glibc is widest -- so those apps keep far more resident memory than they
+ * need.  Capping the budget at a fraction of the RSS high-water lets a
+ * low-HWM app release cached large blocks sooner while a high-HWM app
+ * (jq/Python) keeps the full cache and its throughput.  HWM is monotonic,
+ * so the cap steps down once and stays stable; a floor keeps the cache
+ * usable for the reuse ladder and the small-buffer path.  getrusage() is a
+ * syscall, so the value is sampled process-wide on a cadence and cached in
+ * one atomic, keeping the large-free slow path off the syscall in the common
+ * case. */
+#define FM_LCACHE_RSS_CAP_DIV 2u
+#define FM_LCACHE_RSS_CAP_FLOOR (8ull << 20)
+#define FM_LCACHE_RSS_REFRESH 256u
+static _Atomic uint64_t fm_lcache_rss_cap = 0; /* 0 = not sampled yet */
+
+static inline uint64_t fm_lcache_rss_cap_bytes(void)
+{
+    uint64_t cap = atomic_load_explicit(&fm_lcache_rss_cap,
+                                        memory_order_relaxed);
+    if (cap == 0 || (fm_ltick & (FM_LCACHE_RSS_REFRESH - 1u)) == 0) {
+        struct rusage ru;
+        if (getrusage(RUSAGE_SELF, &ru) == 0 && ru.ru_maxrss > 0) {
+            /* Linux reports ru_maxrss in KiB; convert to bytes. */
+            cap = ((uint64_t)ru.ru_maxrss << 10) / FM_LCACHE_RSS_CAP_DIV;
+            if (cap < FM_LCACHE_RSS_CAP_FLOOR)
+                cap = FM_LCACHE_RSS_CAP_FLOOR;
+            atomic_store_explicit(&fm_lcache_rss_cap, cap,
+                                  memory_order_relaxed);
+        }
+    }
+    return cap;
+}
+
 /* Adaptive per-bucket budget: a bucket that has actually served a cache hit
  * (fm_lcache_warm_mask) may retain twice the configured per-thread budget,
  * capped at 128 MiB; cold buckets keep the configured cap.  Doubling keeps
  * the footprint profile's 8 MiB small, shortlived's 0 off, and leaves the
- * throughput preset's 256 MiB untouched.  Called only on the large-free
- * slow path, after the bucket-range check. */
+ * throughput preset's 256 MiB untouched.  The RSS-high-water cap (N97)
+ * further bounds the result for small-footprint apps.  Called only on the
+ * large-free slow path, after the bucket-range check. */
 static inline uint64_t fm_lcache_budget(int b)
 {
     uint64_t budget = FM_CFG()->lcache_max_bytes;
@@ -2201,6 +2239,9 @@ static inline uint64_t fm_lcache_budget(int b)
         if (budget > FM_LCACHE_WARM_BUDGET_CAP)
             budget = FM_LCACHE_WARM_BUDGET_CAP;
     }
+    uint64_t rss_cap = fm_lcache_rss_cap_bytes();
+    if (rss_cap && budget > rss_cap)
+        budget = rss_cap;
     return budget;
 }
 

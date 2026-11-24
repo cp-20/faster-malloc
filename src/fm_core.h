@@ -2662,8 +2662,47 @@ __attribute__((noinline)) static void fm_free_cnt_slow(uint32_t cls)
     fm_flush_bin(cls);
 }
 
+/* N37 experiment: FIFO hand-out for large size classes, LIFO for small.
+ *
+ * The local list is a singly linked head->...->tail chain.  free() pushes at
+ * head and malloc() pops at head, so the default is LIFO: the freshest freed
+ * block is reused first.  For large classes we instead append frees at the
+ * tail and keep popping at head, which makes the hand-out FIFO (oldest freed
+ * first).  A singly linked list cannot pop its tail in O(1), so changing the
+ * push side is the only way to get FIFO without a new pointer in every block.
+ *
+ * Emptiness in the FIFO push is detected from *head*, not tail: after the
+ * last pop head is NULL while tail still names the block just handed out.
+ * Checking head means the stale tail is never dereferenced (it is simply
+ * overwritten by the next push), which is what keeps the list from linking
+ * into handed-out memory (cf. ADR 0069).
+ *
+ * Small classes (below 1 KiB) keep the tuned LIFO assembly path unchanged;
+ * 1 KiB and above (class 64 .. CLASS_COUNT-1) use FIFO.
+ */
+#define FM_FIFO_CLASS_MIN 64u /* kClassSize[cls] >= 1024 bytes */
+
 static inline void fm_tls_push_free(void *p, size_t cls)
 {
+    if (__builtin_expect(cls >= FM_FIFO_CLASS_MIN, 0)) {
+        /* FIFO: append p as the new tail; the alloc paths pop from head. */
+        *(void **)p = NULL;
+#ifdef FM_DEBUG
+        ((uint64_t *)p)[1] = 0xDEADDEADDEADDEADull;
+#endif
+        void *h = fm_tls.head[cls];
+        if (__builtin_expect(h != NULL, 1)) {
+            *(void **)fm_tls.tail[cls] = p;
+            fm_tls.tail[cls] = p;
+        } else {
+            /* Also repairs a tail left stale by the previous last pop. */
+            fm_tls.head[cls] = p;
+            fm_tls.tail[cls] = p;
+        }
+        if (__builtin_expect(--fm_tls.cnt[cls] <= 0, 0))
+            fm_free_cnt_slow((uint32_t)cls);
+        return;
+    }
 #if defined(__x86_64__) && !defined(FM_DEBUG) && \
     !defined(__SANITIZE_ADDRESS__) && !defined(__SANITIZE_THREAD__) && \
     !defined(malloc)

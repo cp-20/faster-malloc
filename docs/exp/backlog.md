@@ -225,12 +225,16 @@ threshold on RSS0 is the next code step.
 | `exp/auto-n10` | 11-rep sort +1.04%, same sort RSS as PR #3 | rejected |
 | `exp/auto-n85` legacy | no RSS gain; sqlite 13.4 -> 15.1 MiB, git 29.7 -> 28.5 | rejected |
 | `exp/auto-n91` legacy | no RSS gain; sqlite 13.4 -> 15.1 MiB, redis 6.4 -> 6.6 | rejected |
+| `exp/auto-n101` | 11-rep correctness: `mtrepeat cross` rc=1 (brk arena vs glibc brk) | rejected |
+| `exp/auto-n106` | 11-rep paired 0.9984, RSS flat, micro worst +1.49% | rejected |
 
 The lesson from round 14: 3-rep real-app wins are noise; adopt only
 11-rep or full legacy evidence.  Startup mapping variants (N2/N12/N31/
 N58/N85/N88/N91/N98) do **not** close the short-process RSS gap and can
-make sqlite worse.  The remaining short-process gap is the glibc `brk`
-heap; the brk-arena tasks N101/N117 are the structural bet.
+make sqlite worse.  The brk-arena attempt (N101) is not safe with glibc's
+own brk use and fails the multithreaded cross test; N117 is blocked for
+the same reason.  Node/Redis large-buffer legacy measurements (N105/N103)
+are the remaining RSS lead.
 
 ## Open hypotheses
 

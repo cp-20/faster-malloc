@@ -678,9 +678,12 @@ static char *fm_map_dense_span(void)
     return span;
 }
 
-/* Per-thread 2 MiB base-page slab for >4 KiB class spans and <=512 KiB
+/* Per-thread 4 MiB base-page slab for >4 KiB class spans and <=512 KiB
  * large allocations: amortizes mmap/trim syscalls without hinting THP on
- * potentially sparse allocations, and drains on malloc_trim / thread exit. */
+ * potentially sparse allocations, and drains on malloc_trim / thread exit.
+ * A 4 MiB slab holds twice as many 64 KiB carves as 2 MiB, so g++/jq/xz
+ * medium-buffer churn crosses the mmap/munmap slow path half as often;
+ * untouched tail pages stay non-resident, so RSS is unaffected. */
 static _Thread_local char *fm_lextent_cur __attribute__((tls_model("initial-exec")));
 static _Thread_local size_t fm_lextent_rem __attribute__((tls_model("initial-exec")));
 
@@ -700,7 +703,7 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
         fm_lextent_cur = NULL;
         fm_lextent_rem = 0;
     }
-    size_t slab_len = (2u << 20) + SPAN_SIZE;
+    size_t slab_len = (4u << 20) + SPAN_SIZE;
     char *raw = mmap(NULL, slab_len, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (raw == MAP_FAILED)

@@ -71,6 +71,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <dlfcn.h>
+#include <sys/resource.h>
 #ifdef FM_DEBUG
 #include <stdio.h>
 #endif
@@ -277,6 +278,32 @@ extern __thread uint32_t fm_ltick __attribute__((tls_model("initial-exec")));
 extern __thread size_t fm_grow_from __attribute__((tls_model("initial-exec")));
 extern __thread uint32_t fm_lbucket_seen[FM_LCACHE_BUCKETS]
     __attribute__((tls_model("initial-exec")));
+
+/* Adaptive cold-purge size cut (N27).  The conservative default purges
+ * only cold mappings >= 16 MiB (bucket >= 24) so medium-buffer churn
+ * stays resident.  Once the process peak RSS -- the high-water mark --
+ * has crossed 128 MiB, drop the cut to 8 MiB (bucket >= 23) and reclaim
+ * those mappings too.  Peak RSS never decreases, so the flag is sticky;
+ * before it flips the getrusage call is throttled to one in 64 large
+ * frees.  A failed query keeps the conservative cut. */
+#define FM_COLD_PURGE_HWM_KB (128u * 1024u)
+static _Atomic int fm_cold_purge_hwm;
+
+static inline int fm_cold_purge_low_cut(void)
+{
+    if (atomic_load_explicit(&fm_cold_purge_hwm, memory_order_relaxed))
+        return 1;
+    if ((fm_ltick & 63u) != 0)
+        return 0;
+    struct rusage ru;
+    if (getrusage(RUSAGE_SELF, &ru) != 0)
+        return 0;
+    if ((uint64_t)ru.ru_maxrss >= FM_COLD_PURGE_HWM_KB) {
+        atomic_store_explicit(&fm_cold_purge_hwm, 1, memory_order_relaxed);
+        return 1;
+    }
+    return 0;
+}
 
 /* Batch count field: block count in the low bits; the top bit marks a
  * span-pure batch (every block from one span).  A count of 0 means
@@ -2216,11 +2243,12 @@ static inline void fm_large_free(FM_Span *sp, void *p)
                 ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : FM_LCACHE_HOT_WINDOW)) {
             /* Only purge cold mappings large enough that the application is
              * unlikely to reuse them soon (bucket b covers usable sizes in
-             * [2^b, 2^(b+1)), so b >= 24 means >= 16 MiB).  Medium buffers
-             * churned by jq/g++/Python stay resident when re-freed, while
-             * sort's one-shot merge buffers (>= 16 MiB) are still purged. */
+             * [2^b, 2^(b+1))).  The normal cut is b >= 24 (>= 16 MiB), which
+             * keeps jq/g++/Python medium-buffer churn resident; once peak
+             * RSS has crossed the 128 MiB high-water, b >= 23 (>= 8 MiB)
+             * reclaims sort's one-shot merge buffers as well. */
             if (FM_CFG()->lcache_cold_purge &&
-                b >= 24 &&
+                b >= (fm_cold_purge_low_cut() ? 23 : 24) &&
                 !(fm_lcache_warm_mask & (1ULL << b))) {
                 uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
                 uintptr_t pend = (sp->map_base + sp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);

@@ -466,6 +466,15 @@ is exhausted by ~128 such slices long before the churn's thousands of
 frees.  Neither a wider window nor a wider cap changes that.  Rejected;
 node's time remains a payload/budget trade.
 
+## Round 30: coarser 17-32 KiB classes (2026-11-25)
+
+| id | branch | result | status |
+|---|---|---|---|
+| G2 | `exp/coarse-large` | last class segment 17408..32768 step 1024 -> 18432..32768 step 2048 (145 -> 137 classes): git 23.9-24.0 -> 23.9-24.0 MiB, gcc 370.1 -> 369.1 (noise), sqlite unchanged; tests pass; the micro set never allocates above 1024 B so it is unaffected by construction | rejected (no RSS effect) |
+
+Size-class granularity in the 17-32 KiB band is not where gcc/node/sqlite
+lose their pages; the classes there are few and their spans are dense.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

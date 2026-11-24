@@ -378,7 +378,10 @@ static void fm_config_init(void)
     c.local_limit_div = 1;
     c.lcache_cold_purge = 0;
     c.lazy_bump = 1;
-    c.locality_sort = 0;
+    /* exp/locality-on: default span-grouped refill batches on.  Concentrates
+     * reuse on one span (real-app D1/TLB win) at an extra walk cost on mixed/
+     * churn micro loads; FM_LOCALITY_SORT=0 restores the old default. */
+    c.locality_sort = 1;
 
     const char *prof = getenv("FM_PROFILE");
     if (prof) {

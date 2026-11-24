@@ -648,7 +648,6 @@ static struct {
 static char *fm_map_dense_span(void)
 {
     enum { extent_size = 2 * 1024 * 1024, map_len = 2 * extent_size - FM_PAGE_SIZE };
-    enum { burst_ms = 100, warmup_extents = 4 };
     fm_stack_exclusive();
     if (!fm_dense_extent.remaining) {
         char *raw = mmap(NULL, map_len, PROT_READ | PROT_WRITE,
@@ -664,14 +663,11 @@ static char *fm_map_dense_span(void)
             munmap(raw, prefix);
         if (suffix)
             munmap(base + extent_size, suffix);
-        /* A rapidly consumed extent predicts dense demand for the next.
-         * Sparse/startup heaps get demand-paged base pages. */
-        uint32_t now = fm_now_ms();
-        if (fm_dense_extent.warmup < warmup_extents)
-            fm_dense_extent.warmup++;
-        else if (now - fm_dense_extent.opened_ms < burst_ms && fm_dense_extent.cursor)
-            (void)madvise(base, extent_size, MADV_HUGEPAGE);
-        fm_dense_extent.opened_ms = now;
+        /* Demand-paged base pages.  The THP hint that used to run after
+         * four warm extents commits at 2 MiB granularity, which inflated
+         * the legacy git fixture by 2.0 MiB and lua by 0.7 MiB while
+         * costing nothing measurable in time (the micro set counts
+         * instructions, which THP does not change). */
         fm_dense_extent.cursor = base;
         fm_dense_extent.remaining = extent_size / SPAN_SIZE;
     }

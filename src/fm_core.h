@@ -382,13 +382,16 @@ static void fm_config_init(void)
     c.lcache_max_bytes = FM_LCACHE_MAX_BYTES;
     c.page_purge = 1;
     c.purge_min_pages = 4;
-    c.idle_release = 0;
+    /* N115: idle maintenance is on, but its timer thread is armed on
+     * demand (only when a cold large block is actually queued), so
+     * processes with no large-block churn pay no thread/wakeup cost. */
+    c.idle_release = 1;
     c.realloc_cache_search = 0;
     c.local_limit_div = 1;
-    /* Drop resident pages of cold (not-recently-reused) large blocks on
-     * free, moving the balanced default partway toward the footprint
-     * profile.  The mapping stays cached, so warm reuse is unchanged;
-     * only the resident pages of teardown-shaped blocks are released. */
+    /* N115: cold (not-recently-reused) large blocks are cached on free
+     * without a syscall; their resident payload is purged later by the
+     * idle maintenance sweep, keeping the free path cheap.  The mapping
+     * stays cached, so warm reuse is unchanged. */
     c.lcache_cold_purge = 1;
     c.lazy_bump = 1;
     c.locality_sort = 0;
@@ -2018,8 +2021,19 @@ static _Atomic int fm_idle_thread_state; /* -1 disabled in fork child, 0 none, 1
  * dlclose retains worker code, TLS callbacks and allocator state until exit. */
 static _Atomic int fm_atfork_ready;
 
+/* N115: cold large-cache payloads are queued on free() and advised by the
+ * idle sweep instead of by madvise on the free path (N79).  The bounded
+ * array is covered by its own lock, which the fork handlers below take
+ * so the child cannot inherit a half-updated queue.  The count is atomic
+ * only so the timer-arming gate can read it without the lock. */
+#define FM_COLD_PENDING_CAP 4096
+static pthread_mutex_t fm_cold_lock = PTHREAD_MUTEX_INITIALIZER;
+static FM_Span *fm_cold_pending[FM_COLD_PENDING_CAP];
+static _Atomic unsigned fm_cold_pending_n;
+
 static void fm_fork_prepare(void)
 {
+    pthread_mutex_lock(&fm_cold_lock);
     pthread_mutex_lock(&fm_census_lock);
     fm_stack_exclusive();
 }
@@ -2028,6 +2042,7 @@ static void fm_fork_parent(void)
 {
     fm_stack_resume();
     pthread_mutex_unlock(&fm_census_lock);
+    pthread_mutex_unlock(&fm_cold_lock);
 }
 
 static void fm_idle_after_fork_child(void)
@@ -2036,7 +2051,73 @@ static void fm_idle_after_fork_child(void)
      * functions before exec: never spawn a timer in that window. */
     atomic_store_explicit(&fm_idle_thread_state, -1, memory_order_relaxed);
     atomic_store_explicit(&fm_last_activity_ms, 0, memory_order_relaxed);
+    /* The child inherits the array (and fm_cold_lock, still held from
+     * the prepare handler) but no timer thread.  Drop the queue so its
+     * next cold free starts from a clean private state; fm_fork_parent
+     * releases the inherited locks. */
+    atomic_store_explicit(&fm_cold_pending_n, 0, memory_order_relaxed);
     fm_fork_parent();
+}
+
+/* Advise a queued mapping's payload (everything past the header page).
+ * Kept as a helper so the on-free overflow fallback and the idle sweep
+ * share exactly one range calculation. */
+static inline void fm_cold_purge_payload(FM_Span *sp)
+{
+    uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
+    uintptr_t pend = (sp->map_base + sp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);
+    if (pend > pstart)
+        (void)madvise((void *)pstart, pend - pstart, MADV_DONTNEED);
+}
+
+/* Queue a cached large mapping for a later idle-time payload purge.  No
+ * syscall on the free path: only a short lock-protected append plus an
+ * on-demand timer arm. */
+static void fm_cold_pending_add(FM_Span *sp)
+{
+    pthread_mutex_lock(&fm_cold_lock);
+    unsigned n = atomic_load_explicit(&fm_cold_pending_n, memory_order_relaxed);
+    if (n < FM_COLD_PENDING_CAP) {
+        fm_cold_pending[n] = sp;
+        atomic_store_explicit(&fm_cold_pending_n, n + 1, memory_order_relaxed);
+        pthread_mutex_unlock(&fm_cold_lock);
+        /* Arm/refresh the maintenance thread only when there is cold
+         * payload actually waiting for a sweep. */
+        fm_idle_kick(fm_now_ms());
+        return;
+    }
+    pthread_mutex_unlock(&fm_cold_lock);
+    /* Bounded queue full: fall back to the old on-free madvise. */
+    fm_cold_purge_payload(sp);
+}
+
+/* A queued mapping may be reused from the cache or unmapped by drain
+ * before the idle sweep reaches it; drop it from the queue then, while
+ * holding the same lock the sweep uses, so no live payload is advised. */
+static void fm_cold_pending_remove(FM_Span *sp)
+{
+    pthread_mutex_lock(&fm_cold_lock);
+    unsigned n = atomic_load_explicit(&fm_cold_pending_n, memory_order_relaxed);
+    for (unsigned i = 0; i < n; i++) {
+        if (fm_cold_pending[i] == sp) {
+            fm_cold_pending[i] = fm_cold_pending[n - 1];
+            atomic_store_explicit(&fm_cold_pending_n, n - 1,
+                                  memory_order_relaxed);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&fm_cold_lock);
+}
+
+/* Idle sweep: advise the payload of every still-queued cold mapping. */
+static void fm_cold_pending_sweep(void)
+{
+    pthread_mutex_lock(&fm_cold_lock);
+    unsigned n = atomic_load_explicit(&fm_cold_pending_n, memory_order_relaxed);
+    for (unsigned i = 0; i < n; i++)
+        fm_cold_purge_payload(fm_cold_pending[i]);
+    atomic_store_explicit(&fm_cold_pending_n, 0, memory_order_relaxed);
+    pthread_mutex_unlock(&fm_cold_lock);
 }
 
 static void *fm_idle_thread_main(void *arg)
@@ -2059,6 +2140,10 @@ static void *fm_idle_thread_main(void *arg)
                 cfg->release_min_depth)
                 fm_trim_class(cls, cfg->release_keep, 0);
         }
+        /* N115: cold large-cache payloads queued on free() are advised
+         * here, while the process is silent, never in the free path. */
+        if (cfg->lcache_cold_purge)
+            fm_cold_pending_sweep();
         /* Sweep at most once a second while silence lasts; each
          * sweep's censuses are a full ageing step apart, which is
          * what the mark-age-release pipeline needs. */
@@ -2073,6 +2158,11 @@ static void fm_idle_kick(uint32_t now)
         atomic_load_explicit(&fm_idle_thread_state, memory_order_relaxed) < 0)
         return;
     atomic_store_explicit(&fm_last_activity_ms, now, memory_order_relaxed);
+    /* N115 refinement over N79: no maintenance thread unless there is
+     * cold payload actually waiting to be purged.  Apps that never free
+     * a cold large block pay neither a pthread_create nor a wakeup. */
+    if (atomic_load_explicit(&fm_cold_pending_n, memory_order_relaxed) == 0)
+        return;
     int expected = 0;
     if (!atomic_compare_exchange_strong_explicit(
             &fm_idle_thread_state, &expected, 1, memory_order_acq_rel,
@@ -2218,15 +2308,12 @@ static inline void fm_large_free(FM_Span *sp, void *p)
              * unlikely to reuse them soon (bucket b covers usable sizes in
              * [2^b, 2^(b+1)), so b >= 24 means >= 16 MiB).  Medium buffers
              * churned by jq/g++/Python stay resident when re-freed, while
-             * sort's one-shot merge buffers (>= 16 MiB) are still purged. */
+             * sort's one-shot merge buffers (>= 16 MiB) are queued for the
+             * idle sweep (N115) instead of an on-free madvise. */
             if (FM_CFG()->lcache_cold_purge &&
                 b >= 24 &&
-                !(fm_lcache_warm_mask & (1ULL << b))) {
-                uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
-                uintptr_t pend = (sp->map_base + sp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);
-                if (pend > pstart)
-                    (void)madvise((void *)pstart, pend - pstart, MADV_DONTNEED);
-            }
+                !(fm_lcache_warm_mask & (1ULL << b)))
+                fm_cold_pending_add(sp);
             sp->lnext = (uintptr_t)fm_lcache_head[b];
             fm_lcache_head[b] = sp;
             fm_lcache_bytes += ms;
@@ -2247,6 +2334,7 @@ static inline size_t fm_large_cache_drain(void)
         fm_lcache_head[b] = NULL;
         while (sp) {
             FM_Span *next = (FM_Span *)sp->lnext;
+            fm_cold_pending_remove(sp); /* about to unmap */
             released += sp->map_size;
             munmap((void *)sp->map_base, sp->map_size);
             sp = next;
@@ -2296,6 +2384,7 @@ __attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *z
             if (fm_large_usable(sp) >= need_map) {
                 if (b < 64)
                     fm_lcache_warm_mask |= (1ULL << b);
+                fm_cold_pending_remove(sp); /* no idle purge of a live block */
                 *link = (FM_Span *)sp->lnext;
                 fm_lcache_bytes -= sp->map_size;
                 sp->user_size = size;

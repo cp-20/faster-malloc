@@ -241,7 +241,7 @@ static FM_Batch *fm_batch_global_head; /* protected by fm_central_lock */
  * sweep (ADR 0019) found the old 4 GiB budget was the main driver of the
  * allocator's peak-RSS excess in real apps; 64 MiB keeps every measured
  * churn workload at full speed while cutting most of that excess. */
-#define FM_LCACHE_MAX_BYTES (64ull << 20)
+#define FM_LCACHE_MAX_BYTES (8ull << 20)
 /* Adaptive budget (large-cache slow path only): a bucket already proven to
  * reuse cached blocks (fm_lcache_warm_mask, set on a cache hit) may retain
  * twice the configured per-thread budget, capped here at 128 MiB.  Cold
@@ -250,7 +250,7 @@ static FM_Batch *fm_batch_global_head; /* protected by fm_central_lock */
  * shortlived profiles keep their small (or zero) cache.  The cap is half the
  * throughput preset's 256 MiB and page purge stays on: this is a bounded
  * reuse boost, not the whole throughput profile. */
-#define FM_LCACHE_WARM_BUDGET_CAP (128ull << 20)
+#define FM_LCACHE_WARM_BUDGET_CAP (16ull << 20)
 extern __thread void *fm_lcache_head[FM_LCACHE_BUCKETS]
     __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));

@@ -447,6 +447,25 @@ jq's pointer chasing, and losing them costs 8-12% of jq's time for 1 MiB
 of RSS.  Rejected; PR #5 keeps the selective cache with THP intact.
 The legacy runs were cancelled once the time cells were decisive.
 
+## Round 29: size-aware retention for Buffer-sized blocks (2026-11-25)
+
+The last node idea was to keep only the 16-512 KiB band (node's Buffer
+sizes) by widening its hot window from 8 to 64 large frees and its cold
+cap to 512 KiB, leaving the 27 MiB payload on the cold rule.
+
+| case | selective | size-aware |
+|---|---:|---:|
+| node munmap (strace) | 7139 | 7019 |
+| node RSS / time | 402-405 MB / 1.03-1.08 s | 404-405 / 1.03-1.04 |
+
+The munmap count barely moves, so node's freed buffers do not reach the
+cache insertion at all: the block's stored bucket is one above the
+allocation's search bucket (the slab rounds `bytes + header` up to 64 KiB,
+so a 64 KiB request lives in a 128 KiB slice), and the 16 MiB base budget
+is exhausted by ~128 such slices long before the churn's thousands of
+frees.  Neither a wider window nor a wider cap changes that.  Rejected;
+node's time remains a payload/budget trade.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

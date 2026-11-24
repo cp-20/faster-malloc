@@ -93,6 +93,10 @@ typedef struct FM_HotTls {
     void *head[CLASS_COUNT];
     int32_t cnt[CLASS_COUNT];
     void *tail[CLASS_COUNT];
+    /* N34/M2: appended after tail so the inline-asm head/cnt/tail offsets
+     * are unchanged. Set once when this thread maps its private first
+     * batch-header page. */
+    uint32_t batch_page_seeded;
 } FM_HotTls;
 
 extern __thread FM_HotTls fm_tls __attribute__((tls_model("initial-exec")));
@@ -509,26 +513,10 @@ static inline uint32_t fm_now_ms(void)
 /* batch pool                                                          */
 /* ------------------------------------------------------------------ */
 
-static inline FM_Batch *fm_batch_alloc(void)
+/* Map a fresh 4 KiB page of 128 batch headers and chain every spare header
+ * into this thread's local pool. No central lock is taken. */
+static FM_Batch *fm_batch_new_page(void)
 {
-    FM_Batch *b = fm_batch_pool;
-    if (__builtin_expect(b != NULL, 1)) {
-        fm_batch_pool = b->next;
-        b->next = NULL;
-        return b;
-    }
-    /* Try global freelist (cross-thread recycling). */
-    /* Recycled nodes can leave and re-enter the stack between a load and
-     * a CAS. Hold the same fork-aware lock as the central batch lists. */
-    pthread_mutex_lock(&fm_central_lock);
-    b = fm_batch_global_head;
-    if (b)
-        fm_batch_global_head = b->next;
-    pthread_mutex_unlock(&fm_central_lock);
-    if (b) {
-        b->next = NULL;
-        return b;
-    }
     char *page = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (page == MAP_FAILED)
@@ -544,6 +532,39 @@ static inline FM_Batch *fm_batch_alloc(void)
      * splitting does in pure-free churn. */
     fm_batch_pool = &first[1];
     return &first[0];
+}
+
+static inline FM_Batch *fm_batch_alloc(void)
+{
+    FM_Batch *b = fm_batch_pool;
+    if (__builtin_expect(b != NULL, 1)) {
+        fm_batch_pool = b->next;
+        b->next = NULL;
+        return b;
+    }
+    /* N34/M2: a thread's first batch comes from its own header page, so
+     * the first-use path never touches the global freelist lock. */
+    if (!fm_tls.batch_page_seeded) {
+        b = fm_batch_new_page();
+        if (b) {
+            fm_tls.batch_page_seeded = 1;
+            b->next = NULL;
+        }
+        return b;
+    }
+    /* Try global freelist (cross-thread recycling). */
+    /* Recycled nodes can leave and re-enter the stack between a load and
+     * a CAS. Hold the same fork-aware lock as the central batch lists. */
+    pthread_mutex_lock(&fm_central_lock);
+    b = fm_batch_global_head;
+    if (b)
+        fm_batch_global_head = b->next;
+    pthread_mutex_unlock(&fm_central_lock);
+    if (b) {
+        b->next = NULL;
+        return b;
+    }
+    return fm_batch_new_page();
 }
 
 static inline void fm_batch_release(FM_Batch *b)

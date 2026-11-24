@@ -250,7 +250,7 @@ def main() -> int:
         if not Path(lib).exists():
             print(f"{label} library missing: {lib}", file=sys.stderr)
             return 2
-    if not (ROOT / "bench" / "instr").exists():
+    if not args.skip_micro and not (ROOT / "bench" / "instr").exists():
         print("bench/instr missing; run make first", file=sys.stderr)
         return 2
 

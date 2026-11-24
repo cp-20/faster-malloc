@@ -403,8 +403,11 @@ identical to the selective build, as the 16 MiB base still rejects the
 28.3 MiB block.  Legacy 11 reps: node 456.4 MiB / +7.3% time, i.e. the
 same as the selective build (454.6 / +8.3%), and the other apps unchanged.
 The variant that actually lets the payload in is `exp/selective6` (huge
-buckets get a 32 MiB budget); its exp-bench is flat (micro 1.0005, jq 252,
-paired 0.9958) and its legacy is running.
+buckets get a 32 MiB budget): exp-bench flat (micro 1.0005, jq 252, paired
+0.9958), but its legacy is **worse than the selective build** -- node
+462.9 MiB / **+10.0%** time against 454.6 / +8.3%.  Keeping the 27 MiB
+payload buys 8 MiB of RSS and does not recover the time, so both huge-bucket
+variants are rejected and PR #5 keeps the selective build.
 
 ## Rejected (do not repeat without a materially different mechanism)
 

@@ -214,6 +214,24 @@ startup mappings (smaller spans made it worse).  `RSS8` (per-app
 smaps/massif decomposition) is the next measurement, and the size-band
 threshold on RSS0 is the next code step.
 
+## Round 14 confirmations (11 reps and legacy)
+
+| branch | result | status |
+|---|---|---|
+| `perf/warm-huge` (N3) | 11-rep paired 0.9979, sort +1.2%, no extra RSS | rejected |
+| `exp/auto-n54` | 11-rep paired 0.9995, RSS flat | rejected |
+| `exp/auto-n58` | 11-rep paired 1.0040, xz +2.1%, sqlite +0.8% | rejected |
+| `exp/auto-g3` | 11-rep paired 1.0031, xz/Python +1.7% | rejected |
+| `exp/auto-n10` | 11-rep sort +1.04%, same sort RSS as PR #3 | rejected |
+| `exp/auto-n85` legacy | no RSS gain; sqlite 13.4 -> 15.1 MiB, git 29.7 -> 28.5 | rejected |
+| `exp/auto-n91` legacy | no RSS gain; sqlite 13.4 -> 15.1 MiB, redis 6.4 -> 6.6 | rejected |
+
+The lesson from round 14: 3-rep real-app wins are noise; adopt only
+11-rep or full legacy evidence.  Startup mapping variants (N2/N12/N31/
+N58/N85/N88/N91/N98) do **not** close the short-process RSS gap and can
+make sqlite worse.  The remaining short-process gap is the glibc `brk`
+heap; the brk-arena tasks N101/N117 are the structural bet.
+
 ## Open hypotheses
 
 | id | area | hypothesis | risk |

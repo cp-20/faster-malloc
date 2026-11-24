@@ -379,6 +379,15 @@ moving live blocks is impossible without breaking user pointers.  The
 only architectural answer is byte-granular pages, which the 11-rep matrix
 rejected on the micro (Round 20).
 
+## Round 26: exempting >= 16 MiB buckets from the caps (2026-11-25)
+
+Node's only time loss under the selective cache is its 27 MiB JSON payload
+(bucket 24), which the warm cap of 4 MiB refuses to keep.  A variant
+exempts buckets >= 24 from the warm/cold rule entirely, leaving the 16 MiB
+base budget as the only bound.  Locally it is a no-op on jq, sort and xz
+(RSS and time unchanged), so it is effectively a node-only knob.  11-rep
+exp-bench and exp-legacy are running.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

@@ -2897,6 +2897,39 @@ __attribute__((noinline)) static void *fm_realloc_slow(void *p, size_t size)
             sp->user_size = size;
             return p;
         }
+#if defined(MREMAP_FIXED) && defined(MREMAP_MAYMOVE)
+        /* Grow a large block without copying.  The destination is reserved
+         * and trimmed to a 64 KiB-aligned base so the span mask still finds
+         * the header; mremap then moves the page tables, so the old and new
+         * buffers are never resident at the same time.  A parser or builder
+         * doubling its buffer would otherwise double its peak footprint at
+         * every step.  The copy below is the fallback. */
+        {
+            size_t need = FM_ALIGN_UP(off + size + HEADER_SIZE, FM_PAGE_SIZE);
+            size_t resv = need + SPAN_SIZE;
+            char *raw = mmap(NULL, resv, PROT_NONE,
+                             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            if (raw != MAP_FAILED) {
+                char *dst = (char *)FM_ALIGN_UP((uintptr_t)raw, SPAN_SIZE);
+                size_t head = (size_t)(dst - raw);
+                size_t tail = resv - head - need;
+                if (head)
+                    munmap(raw, head);
+                if (tail)
+                    munmap(dst + need, tail);
+                void *moved = mremap((void *)sp->map_base, sp->map_size, need,
+                                     MREMAP_MAYMOVE | MREMAP_FIXED, dst);
+                if (moved != MAP_FAILED) {
+                    FM_Span *ns = (FM_Span *)moved;
+                    ns->map_base = (uintptr_t)moved;
+                    ns->map_size = need;
+                    ns->user_size = size;
+                    return (void *)((char *)moved + off);
+                }
+                munmap(dst, need);
+            }
+        }
+#endif
     } else if (size <= sp->user_size) {
         return p;
     }

@@ -204,7 +204,9 @@ These are deliberately smaller and self-contained so the local
 | T1 | `v7/slab-thp` | adaptive THP on the >4 KiB slab, 2 MiB-aligned extent: 11-rep neutral (micro 1.0000, RSS flat); THP never fires in the real apps | rejected |
 | T2 | `v6/c` | 4 KiB cold spans in 64 KiB slots + always-THP hot chunks: jq tied, git/sqlite 13 -> 16 MiB | rejected |
 | G1 | `v6/slot-hybrid` | 4 KiB spans in 64 KiB slots + 8-refill promotion: micro 0.9996, jq +10%, git 14 MiB | rejected |
-| R1 | `exp/mremap-grow` | in-place `mremap` on large realloc: correct, RSS flat (adjacent VA occupied); `MREMAP_MAYMOVE` moves the block off the 64 KiB span mask | rejected |
+| R1 | `exp/mremap-grow` | in-place `mremap` on large realloc: correct, RSS flat (adjacent VA occupied); plain `MREMAP_MAYMOVE` moves the block off the 64 KiB span mask | rejected |
+| R2 | `exp/mremap-fixed` | reserve a 64 KiB-aligned destination, then `mremap(MREMAP_FIXED|MAYMOVE)`: `grow` 139.7 -> 132.8 MiB, python JSON 142.0 -> 138.0 MiB, git flat; `rtest`, valgrind and `mtrepeat` clean | **accepted** |
+| C1 | `exp/rss-combo` | ADR 0083 + ADR 0084 together: node 468 MiB, python JSON -4 MiB, everything else flat | **PR candidate** |
 | D1 | div2 screen | `FM_LOCAL_LIMIT_DIV=2`: git/sqlite 13 -> 12 MiB but micro 1.0239 and jq +2.5% | rejected as default |
 
 Two measurements that correct earlier conclusions:

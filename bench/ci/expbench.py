@@ -227,6 +227,10 @@ def main() -> int:
     ap.add_argument("--candidate", required=True)
     ap.add_argument("--runtime-env", action="append", default=[],
                     help="KEY=VALUE applied to both libraries (repeatable)")
+    ap.add_argument("--baseline-env", action="append", default=[],
+                    help="KEY=VALUE applied only to the baseline (repeatable)")
+    ap.add_argument("--candidate-env", action="append", default=[],
+                    help="KEY=VALUE applied only to the candidate (repeatable)")
     ap.add_argument("--reps", type=int, default=3)
     ap.add_argument("--apps", default=DEFAULT_APPS)
     ap.add_argument("--skip-micro", action="store_true")
@@ -236,6 +240,10 @@ def main() -> int:
     args = ap.parse_args()
 
     runtime_env = parse_env(args.runtime_env)
+    baseline_env = dict(runtime_env)
+    baseline_env.update(parse_env(args.baseline_env))
+    candidate_env = dict(runtime_env)
+    candidate_env.update(parse_env(args.candidate_env))
     baseline = str(Path(args.baseline).resolve())
     candidate = str(Path(args.candidate).resolve())
     for label, lib in (("baseline", baseline), ("candidate", candidate)):
@@ -260,6 +268,8 @@ def main() -> int:
         "baseline": baseline,
         "candidate": candidate,
         "runtime_env": runtime_env,
+        "baseline_env": baseline_env,
+        "candidate_env": candidate_env,
         "reps": args.reps,
         "micro": {},
         "real": {},
@@ -271,8 +281,8 @@ def main() -> int:
         ratios = []
         for mode, n, size in MICRO:
             label = f"{mode} {n}" + (f" {size}" if size is not None else "")
-            b = micro_instr(baseline, mode, n, size, runtime_env)
-            c = micro_instr(candidate, mode, n, size, runtime_env)
+            b = micro_instr(baseline, mode, n, size, baseline_env)
+            c = micro_instr(candidate, mode, n, size, candidate_env)
             ratio = c / b
             ratios.append(ratio)
             result["micro"][label] = {"baseline": b, "candidate": c, "ratio": ratio}
@@ -296,7 +306,8 @@ def main() -> int:
                 order = ("baseline", "candidate") if rep % 2 == 0 else ("candidate", "baseline")
                 for who in order:
                     lib = baseline if who == "baseline" else candidate
-                    elapsed, rss, digest = run_real(spec, lib, runtime_env)
+                    env_for_lib = baseline_env if who == "baseline" else candidate_env
+                    elapsed, rss, digest = run_real(spec, lib, env_for_lib)
                     if ref_digest is None:
                         ref_digest = digest
                     elif digest != ref_digest:

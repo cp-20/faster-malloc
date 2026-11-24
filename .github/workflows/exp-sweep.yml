@@ -1,0 +1,74 @@
+name: exp-sweep
+
+# Autonomous runtime-policy sweep.  No rebuild per config: the baseline is
+# main's library with defaults and the candidate is the same library with
+# FM_* overrides, measured interleaved in one job.  Results are ranked by
+# time and RSS so the campaign can promote the best policy as a default.
+
+on:
+  workflow_dispatch:
+    inputs:
+      reps:
+        description: "Repetitions per app"
+        required: false
+        default: "3"
+      only:
+        description: "Comma-separated config names (empty = all)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "17 */6 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: exp-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential jq sqlite3 xz-utils python3 git
+
+      - name: Restore real-app fixtures
+        uses: actions/cache@v4
+        with:
+          path: bench/apps/work/real_suite
+          key: exp-fixtures-v1
+          restore-keys: |
+            exp-fixtures-v1
+
+      - name: Build and sweep
+        env:
+          REPS: ${{ inputs.reps || '3' }}
+          ONLY: ${{ inputs.only || '' }}
+        run: |
+          set -o pipefail
+          make -j"$(nproc)" libfastmalloc2.so
+          python3 bench/ci/sweep.py --lib "$PWD/libfastmalloc2.so" \
+            --reps "$REPS" --only "$ONLY" --out sweep.json | tee sweep.txt
+          {
+            echo "## exp-sweep: ${GITHUB_REF_NAME}"
+            echo '```'
+            tail -40 sweep.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload sweep
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exp-sweep-${{ github.run_id }}
+          path: |
+            sweep.json
+            sweep.txt
+          if-no-files-found: ignore

@@ -242,6 +242,15 @@ static FM_Batch *fm_batch_global_head; /* protected by fm_central_lock */
  * allocator's peak-RSS excess in real apps; 64 MiB keeps every measured
  * churn workload at full speed while cutting most of that excess. */
 #define FM_LCACHE_MAX_BYTES (64ull << 20)
+/* Adaptive budget (large-cache slow path only): a bucket already proven to
+ * reuse cached blocks (fm_lcache_warm_mask, set on a cache hit) may retain
+ * twice the configured per-thread budget, capped here at 128 MiB.  Cold
+ * buckets keep the configured budget exactly, so a teardown-shaped bucket
+ * still stops retaining after FM_LCACHE_HOT_WINDOW frees and the footprint /
+ * shortlived profiles keep their small (or zero) cache.  The cap is half the
+ * throughput preset's 256 MiB and page purge stays on: this is a bounded
+ * reuse boost, not the whole throughput profile. */
+#define FM_LCACHE_WARM_BUDGET_CAP (128ull << 20)
 extern __thread void *fm_lcache_head[FM_LCACHE_BUCKETS]
     __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));
@@ -669,9 +678,12 @@ static char *fm_map_dense_span(void)
     return span;
 }
 
-/* Per-thread 2 MiB base-page slab for >4 KiB class spans and <=512 KiB
+/* Per-thread 4 MiB base-page slab for >4 KiB class spans and <=512 KiB
  * large allocations: amortizes mmap/trim syscalls without hinting THP on
- * potentially sparse allocations, and drains on malloc_trim / thread exit. */
+ * potentially sparse allocations, and drains on malloc_trim / thread exit.
+ * A 4 MiB slab holds twice as many 64 KiB carves as 2 MiB, so g++/jq/xz
+ * medium-buffer churn crosses the mmap/munmap slow path half as often;
+ * untouched tail pages stay non-resident, so RSS is unaffected. */
 static _Thread_local char *fm_lextent_cur __attribute__((tls_model("initial-exec")));
 static _Thread_local size_t fm_lextent_rem __attribute__((tls_model("initial-exec")));
 
@@ -691,7 +703,7 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
         fm_lextent_cur = NULL;
         fm_lextent_rem = 0;
     }
-    size_t slab_len = (2u << 20) + SPAN_SIZE;
+    size_t slab_len = (4u << 20) + SPAN_SIZE;
     char *raw = mmap(NULL, slab_len, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (raw == MAP_FAILED)
@@ -780,6 +792,16 @@ static void fm_auto_release_tick(uint32_t flushed_cls);
 static inline uint32_t fm_local_limit(uint32_t cls)
 {
     uint32_t limit = kClassLimit[cls];
+    /* The generated kClassLimit caps every class at 256 blocks.  For the
+     * small classes that dominate parsing/compiler bursts that leaves most
+     * of the intended 64 KiB per-class byte budget unused (only 4 KiB for
+     * 16 B blocks, 32 KiB for 128 B blocks).  Spend the full budget: a
+     * larger local limit means fewer flushes -- fewer central-lock
+     * acquisitions and batch round trips -- while retained bytes stay
+     * bounded at 64 KiB per class.  The div override still scales it. */
+    uint32_t budget = (uint32_t)((64u * 1024u) / kClassSize[cls]);
+    if (budget > limit)
+        limit = budget;
     uint32_t div = FM_CFG()->local_limit_div;
     if (div > 1) {
         limit /= div;
@@ -2160,6 +2182,24 @@ static inline size_t fm_large_usable(const FM_Span *sp)
     return sp->map_size - ((uintptr_t)sp - sp->map_base);
 }
 
+/* Adaptive per-bucket budget: a bucket that has actually served a cache hit
+ * (fm_lcache_warm_mask) may retain twice the configured per-thread budget,
+ * capped at 128 MiB; cold buckets keep the configured cap.  Doubling keeps
+ * the footprint profile's 8 MiB small, shortlived's 0 off, and leaves the
+ * throughput preset's 256 MiB untouched.  Called only on the large-free
+ * slow path, after the bucket-range check. */
+static inline uint64_t fm_lcache_budget(int b)
+{
+    uint64_t budget = FM_CFG()->lcache_max_bytes;
+    if ((fm_lcache_warm_mask & (1ULL << b)) &&
+        budget < FM_LCACHE_WARM_BUDGET_CAP) {
+        budget <<= 1;
+        if (budget > FM_LCACHE_WARM_BUDGET_CAP)
+            budget = FM_LCACHE_WARM_BUDGET_CAP;
+    }
+    return budget;
+}
+
 static inline void fm_large_free(FM_Span *sp, void *p)
 {
     fm_ltick++;
@@ -2167,7 +2207,7 @@ static inline void fm_large_free(FM_Span *sp, void *p)
         size_t ms = sp->map_size;
         int b = 63 - __builtin_clzll(fm_large_usable(sp));
         if (b < FM_LCACHE_BUCKETS &&
-            fm_lcache_bytes + ms <= FM_CFG()->lcache_max_bytes &&
+            fm_lcache_bytes + ms <= fm_lcache_budget(b) &&
             fm_ltick - fm_lbucket_seen[b] <=
                 ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : FM_LCACHE_HOT_WINDOW)) {
             if (FM_CFG()->lcache_cold_purge &&
@@ -2272,7 +2312,10 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
         size_t need_map = FM_ALIGN_UP(size + HEADER_SIZE, FM_PAGE_SIZE);
         int nb = 63 - __builtin_clzll(need_map);
         size_t want = size;
-        if (growing_from && size - growing_from < growing_from)
+        /* Any growth -- including a 1.5x/2x geometric step -- gets one
+         * extra request of bounded headroom, so the carved block can serve
+         * the next step without a copy. */
+        if (growing_from)
             want += size;
         size_t carve = FM_ALIGN_UP(want + HEADER_SIZE, SPAN_SIZE);
         for (int b = nb + 2; b <= 22 && b < FM_LCACHE_BUCKETS; b++) {
@@ -2313,12 +2356,17 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
     }
     uintptr_t raw = 0;
     size_t raw_len = 0;
-    /* A buffer growing in sub-doubling steps would otherwise copy and
-     * fault a new mapping at almost every step. Reserve untouched VA on
-     * a miss. Cache lookup and user_size still use the actual request. */
+    /* A growing buffer would otherwise copy and fault a new mapping at
+     * every step. ADR 0075 only reserved headroom for sub-doubling growth,
+     * so geometric (1.5x/2x) growth -- what parsers and builders use --
+     * copied on every step. Reserve one extra request (bounded at 8 MiB)
+     * for ANY growth so the next growth fits in place. Untouched reserve
+     * pages cost VA, not RSS; if the larger mapping cannot be made we
+     * retry the exact request below. Cache lookup and user_size still use
+     * the actual request, so malloc_usable_size stays honest. */
     size_t capacity = size;
     const size_t huge_page = 2u << 20;
-    if (growing_from && size - growing_from < growing_from) {
+    if (growing_from) {
         size_t extra = size < (8u << 20) ? size : (8u << 20);
         capacity += extra;
         if (capacity >= huge_page / 2)

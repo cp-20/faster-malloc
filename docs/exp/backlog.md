@@ -253,6 +253,26 @@ own brk use and fails the multithreaded cross test; N117 is blocked for
 the same reason.  Node/Redis large-buffer legacy measurements (N105/N103)
 are the remaining RSS lead.
 
+## Round 15: dirty/muzzy decay rejected
+
+| branch | result | status |
+|---|---|---|
+| `exp/auto-n121` | 11-rep time neutral, micro 1.0011; legacy RSS unchanged (node 531, redis 6.4, gcc 374) | rejected |
+| `exp/auto-n128` | 64 MiB/100 ms/1 s tuning: legacy RSS unchanged (node 528, redis 6.6, gcc 376) | rejected |
+| `exp/auto-n131` | mapped-bytes high-water: legacy RSS unchanged (node 527, redis 6.36, gcc 374) | rejected |
+| `exp/auto-n129` | MADV_FREE muzzy: peak RSS cannot improve before pressure | not pursued |
+| `exp/auto-n133` | 10 ms aggressive decay: same mechanism, no RSS evidence | not pursued |
+| `exp/auto-n134` | flush-triggered decay: same mechanism | not pursued |
+
+The decay hypothesis is falsified on this workload set: the peak RSS gap is
+not dirty pages that a time-based sweep can drop.  It is live allocation,
+internal fragmentation, and the number of distinct mappings.  Together with
+the rejected startup/brk/large-cache variants, every incremental RSS lever
+has been measured.  Closing the remaining gaps (node +17%, gcc +7%,
+sqlite +27%, git +15%, redis +16%, Python +4%) needs either the page-map/
+segment rewrite (N135) with a taxed free path, or a separate single-heap
+design (N126).  The campaign manager is paused at this decision point.
+
 ## Open hypotheses
 
 | id | area | hypothesis | risk |

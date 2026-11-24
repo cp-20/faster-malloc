@@ -643,7 +643,13 @@ static struct {
     unsigned remaining;
     unsigned warmup;
     uint32_t opened_ms;
+    unsigned first_done; /* N43: the first span has been served already */
 } fm_dense_extent;
+
+/* N43: number of distinct threads that have entered the allocator (each
+ * thread arms its exit hook exactly once, in fm_arm_thread_exit).  Used only
+ * on the cold first-span path to recognise a single-threaded server. */
+static _Atomic unsigned fm_alloc_threads;
 
 static char *fm_map_dense_span(void)
 {
@@ -651,6 +657,27 @@ static char *fm_map_dense_span(void)
     enum { burst_ms = 100, warmup_extents = 4 };
     fm_stack_exclusive();
     if (!fm_dense_extent.remaining) {
+        /* N43: for a single-threaded server the very first span does not
+         * amortise a 2 MiB dense extent -- the rest of the extent would sit
+         * as unused VA for the process's whole life.  Map that one span with
+         * a direct exact-sized mmap (the same 64 KiB mapping it would own
+         * inside the extent, so release semantics are identical) and open
+         * the dense extent normally from the second span on.  Combined with
+         * N2 the first span owns the full slot's blocks, so this mapping is
+         * fully consumed by bump refills before a second span is opened.
+         * The branch is one-shot and gated to one allocator thread so
+         * multi-threaded workloads keep the accepted ADR 0077 dense path. */
+        if (!fm_dense_extent.cursor && !fm_dense_extent.first_done &&
+            atomic_load_explicit(&fm_alloc_threads, memory_order_relaxed) <= 1) {
+            char *base;
+            fm_dense_extent.first_done = 1;
+            base = fm_map_aligned(SPAN_SIZE - HEADER_SIZE);
+            fm_stack_resume();
+            if (base)
+                return base;
+            /* Allocation failure: fall through and try a dense extent. */
+            fm_stack_exclusive();
+        }
         char *raw = mmap(NULL, map_len, PROT_READ | PROT_WRITE,
                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (raw == MAP_FAILED) {
@@ -725,17 +752,28 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
 
 /* Map and initialise a fresh span for class cls.  Blocks are carved
  * lazily from the span's bump range by the refill path, so creation
- * does not touch every block's memory. */
-static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
+ * does not touch every block's memory.  `first_cap_out` receives the
+ * initial-carve cap for this class's first span (0 when unrestricted);
+ * the span itself always owns a full 64 KiB slot. */
+static inline char *fm_span_new(uint32_t cls, uint32_t *count_out,
+                                uint32_t *first_cap_out)
 {
     size_t bs = kClassSize[cls];
     size_t bytes = SPAN_SIZE;
+    uint32_t first_cap = 0;
 #ifdef FM_SMALL_FIRST_SPAN
-    /* ADR 0060: sparsely used startup classes cap initial carved blocks
-     * while still drawing 64 KiB VA slots from the shared dense extent. */
+    /* N2: ADR 0060 kept startup RSS low by shrinking nblocks on the first
+     * span.  That still consumed a full 64 KiB slot, so a hot startup class
+     * opened a *second* slot as soon as its first 16 KiB was used, exhausting
+     * the 2 MiB extent sooner.  Give every span the full slot but cap only
+     * the first carve to the ADR 0060 budget: later refills bump-carve the
+     * same mapping, so a second span opens only when the first is truly
+     * exhausted.  Tail pages stay untouched until blocks are handed out. */
     static _Atomic unsigned char started[CLASS_COUNT];
-    bytes = atomic_exchange_explicit(&started[cls], 1, memory_order_relaxed)
-        ? SPAN_SIZE : FM_ALIGN_UP(HEADER_SIZE + (bs > 16320 ? bs : 16320), FM_PAGE_SIZE);
+    if (!atomic_exchange_explicit(&started[cls], 1, memory_order_relaxed)) {
+        uint32_t cap = (uint32_t)((bs > 16320 ? 1u : 16320u / bs));
+        first_cap = cap ? cap : 1;
+    }
 #endif
     size_t n = (bytes - HEADER_SIZE) / bs;
     uintptr_t raw_base = 0;
@@ -769,6 +807,7 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
     sp->withheld_cnt = 0;
 
     *count_out = (uint32_t)n;
+    *first_cap_out = first_cap;
     return base;
 }
 
@@ -935,14 +974,18 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
     char *cur = fm_bump_ptr[cls];
     char *end = fm_bump_end[cls];
     if (cur >= end) {
-        uint32_t total = 0;
-        char *base = fm_span_new(cls, &total);
+        uint32_t total = 0, first_cap = 0;
+        char *base = fm_span_new(cls, &total, &first_cap);
         if (!base)
             return NULL;
         cur = base + HEADER_SIZE;
         end = cur + (size_t)total * bs;
         uint32_t avail0 = (uint32_t)((end - cur) / bs);
         uint32_t keep0 = limit < avail0 ? limit : avail0;
+        /* N2: cap the first span's initial carve; the rest stays in this
+         * span's bump range so the next refill reuses the same mapping. */
+        if (first_cap && keep0 > first_cap)
+            keep0 = first_cap;
 
         void *head = cur;
         void *t = cur;
@@ -2575,6 +2618,7 @@ static void fm_arm_thread_exit(void)
     if (fm_exit_armed != 0) return;
     /* Mark armed first: pthread initialization can reenter the allocator. */
     fm_exit_armed = 1;
+    atomic_fetch_add_explicit(&fm_alloc_threads, 1, memory_order_relaxed);
     pthread_once(&fm_exit_once, fm_exit_make_key);
     pthread_setspecific(fm_exit_key, (const void *)&fm_exit_key);
 }

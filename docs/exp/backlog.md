@@ -273,6 +273,16 @@ flag and re-run the 11-rep matrices.
 |---|---|---|---|
 | P3 | `exp/pageheap` | ADR 0086's 257-2032 B page heap, 11 reps: **micro 1.1844 (worst 1.559)**, jq 1.208 / RSS 262 -> 285 MiB, git 1.440, gcc 1.004 / RSS +2.4%, sort RSS +6.3%, sqlite RSS +3.2% | rejected |
 
+| P4 | `exp/purged-cache` | keep the VMA of a large block that misses the byte budget, `MADV_DONTNEED` its payload, and reuse it from a per-bucket list: node munmap 6931 -> 3296 (madvise 1263 -> 4771) at cap 1024, node time 1.18 -> 1.15 s but RSS 405 -> 409 MB because each cached block keeps its header page; cap 256 is time- and RSS-neutral. | rejected |
+
+Node's syscall profile (`strace -c -f` on `churn.js`): v2 does **6888
+munmap + 1118 mmap** against glibc's 1632 + 960, for 0.44 s vs 0.22 s of
+syscall time.  The freed sizes are overwhelmingly 64 KiB (4287), 128 KiB
+(1006) and 256 KiB (789), i.e. the medium blocks just above `SMALL_MAX`,
+which v2 carves from a 4 MiB slab and then `munmap`s one slice at a time.
+That is the source of node's time gap and of the lcache budget trade
+measured in Round 16.
+
 The local A/B on `bench/apps/work/real_suite` had shown git 23.9 -> 21.1 MiB
 at equal time and sqlite 11.6 -> 10.9, but both fixtures are much smaller
 in CI (`exp-bench` git is a 13 MiB process) and the page heap's chunk

@@ -318,6 +318,18 @@ free-and-forget 1 MiB obmalloc arena (CPython); per-bucket warm/cold
 retention can, and it recovers RSS on python and lua without the node
 time cost that ADR 0083 traded away.
 
+## Round 23: quarter local batch for >= 2 KiB classes (2026-11-25)
+
+| id | branch | result | status |
+|---|---|---|---|
+| B2 | `exp/large-class-div` | RSS5: classes >= 2 KiB keep a quarter of the 64 KiB local byte budget (16 KiB).  11-rep legacy vs the selective build: gcc 366.8 -> 365.4 MiB, lua 15.0 -> 14.5, sqlite 14.0 -> 13.5, node 465.5 -> 461.4, redis 6.5 -> 6.2, python/git flat.  11-rep exp-bench: micro 1.0004/worst 1.0012, **jq paired 1.0291**, real paired 0.9958 | rejected as a stack (RSS win, but it costs the only green app 1.5-2.9% time) |
+
+The threshold of 2048 was chosen so `churn 1024` stays out of the change;
+the 1024 threshold measured gcc -2.8 MiB but moves that micro case.  The
+mechanism is real and broad-based (-3.3 MiB across five apps) but it
+narrows jq's lead, and jq is the only app that is green in both
+dimensions, so it is not stacked onto PR #5.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

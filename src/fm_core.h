@@ -302,6 +302,13 @@ extern __thread uint32_t fm_lbucket_seen[FM_LCACHE_BUCKETS]
 #define FM_PROMPT_MIN_FLUSHES (8u * FM_RELEASE_EVERY)
 #define FM_RELEASE_MIN_DEPTH 4u
 #define FM_RELEASE_KEEP 2u
+/* A retained dead span is always one 64 KiB mapping, but its burst
+ * absorption value scales with how many blocks it holds: a 16 B class
+ * keeps ~4k reusable blocks per span, a large class only a handful.
+ * Below this block size the two-span quota is worth its RSS premium;
+ * at or above it the spans are almost pure footprint with no real
+ * reuse benefit, so retain none (N23). */
+#define FM_KEEP_LARGE_MIN 2048u
 #define FM_RELEASE_AGE_MS 100u
 #define FM_RELEASE_INTERVAL_MS 10u
 #define FM_RELEASE_MAX_INTERVAL_MS 5000u
@@ -638,11 +645,19 @@ static inline char *fm_map_aligned(size_t bytes)
 /* Carve full, densely packed spans from a common 2 MiB extent. Each span
  * still owns exactly its own mapping range and can be released independently.
  * The central lock also serializes the cursor across fork. */
+/* Startup mapping diet (N12): a short-lived process that touches only a
+ * couple of small-span classes should not open a 2 MiB dense extent on its
+ * first allocation.  Serve that first span from one 64 KiB bootstrap
+ * mapping and open the extent lazily, on the second request.  The bootstrap
+ * mapping is an ordinary 64 KiB-aligned span -- fm_span_new records it in
+ * map_base/map_size, so census, page purge and trim release it like any
+ * other span and it is never wasted. */
 static struct {
     char *cursor;
     unsigned remaining;
     unsigned warmup;
     uint32_t opened_ms;
+    unsigned bootstrapped;
 } fm_dense_extent;
 
 static char *fm_map_dense_span(void)
@@ -650,6 +665,12 @@ static char *fm_map_dense_span(void)
     enum { extent_size = 2 * 1024 * 1024, map_len = 2 * extent_size - FM_PAGE_SIZE };
     enum { burst_ms = 100, warmup_extents = 4 };
     fm_stack_exclusive();
+    if (!fm_dense_extent.bootstrapped) {
+        fm_dense_extent.bootstrapped = 1;
+        char *span = fm_map_aligned(SPAN_SIZE - HEADER_SIZE);
+        fm_stack_resume();
+        return span;
+    }
     if (!fm_dense_extent.remaining) {
         char *raw = mmap(NULL, map_len, PROT_READ | PROT_WRITE,
                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -1616,7 +1637,12 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
     /* Retention quota (ADR 0020): a census in its automatic form
      * keeps up to `keep` of the dead spans -- their blocks stay on
      * the central stack, immediately reusable -- and unmaps only
-     * the excess.  malloc_trim passes keep == 0 and releases all. */
+     * the excess.  malloc_trim passes keep == 0 and releases all.
+     * N23: for large classes a 64 KiB span holds few blocks, so the
+     * quota buys almost no burst absorption for its RSS cost; drop it
+     * there while leaving small classes (and their profiles) intact. */
+    if (bs >= FM_KEEP_LARGE_MIN)
+        keep = 0;
     if (keep) {
         uint32_t kept = 0;
         for (size_t i = 0; i < cen.cap && kept < keep; i++) {
@@ -2204,6 +2230,23 @@ static inline uint64_t fm_lcache_budget(int b)
     return budget;
 }
 
+/* Dedicated reuse bucket for cc1plus obstack chunks (ADR 0078): a 64 KiB
+ * obstack chunk maps to a 132 KiB extent, which hashes to bucket 17, and
+ * cc1plus cycles ~20 of these per function.  Without a proven cache hit
+ * yet this bucket starts cold and the FM_LCACHE_HOT_WINDOW (8) window drops
+ * chunks beyond the first few at a function boundary, forcing the mmap /
+ * munmap churn the warm window was added to avoid.  Treat this one bucket as
+ * permanently warm for the *reuse* decisions (window + cold purge) so the
+ * obstack mapping survives between functions.  The byte budget is left on
+ * the real warm mask: retention stays bounded by the global lcache cap, so
+ * this is reuse shaping, not an RSS increase. */
+#define FM_OBSTACK_REUSE_BUCKET 17u
+static inline int fm_lcache_reuse_warm(int b)
+{
+    return (fm_lcache_warm_mask & (1ULL << (b))) != 0 ||
+           (unsigned)(b) == FM_OBSTACK_REUSE_BUCKET;
+}
+
 static inline void fm_large_free(FM_Span *sp, void *p)
 {
     fm_ltick++;
@@ -2213,7 +2256,7 @@ static inline void fm_large_free(FM_Span *sp, void *p)
         if (b < FM_LCACHE_BUCKETS &&
             fm_lcache_bytes + ms <= fm_lcache_budget(b) &&
             fm_ltick - fm_lbucket_seen[b] <=
-                ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : FM_LCACHE_HOT_WINDOW)) {
+                (fm_lcache_reuse_warm(b) ? 64u : FM_LCACHE_HOT_WINDOW)) {
             /* Only purge cold mappings large enough that the application is
              * unlikely to reuse them soon (bucket b covers usable sizes in
              * [2^b, 2^(b+1)), so b >= 24 means >= 16 MiB).  Medium buffers
@@ -2221,7 +2264,7 @@ static inline void fm_large_free(FM_Span *sp, void *p)
              * sort's one-shot merge buffers (>= 16 MiB) are still purged. */
             if (FM_CFG()->lcache_cold_purge &&
                 b >= 24 &&
-                !(fm_lcache_warm_mask & (1ULL << b))) {
+                !fm_lcache_reuse_warm(b)) {
                 uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
                 uintptr_t pend = (sp->map_base + sp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);
                 if (pend > pstart)

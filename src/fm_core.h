@@ -727,11 +727,16 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
     size_t bs = kClassSize[cls];
     size_t bytes = SPAN_SIZE;
 #ifdef FM_SMALL_FIRST_SPAN
-    /* ADR 0060: sparsely used startup classes cap initial carved blocks
-     * while still drawing 64 KiB VA slots from the shared dense extent. */
+    /* ADR 0060 first-span policy, tightened for short-lived processes:
+     * cap the first span at one 4 KiB page for every class whose block plus
+     * header fits (bs <= 4032, classes 0..95) and at one block plus header
+     * for larger classes.  A process that touches many classes but fills
+     * none of them faults one page per class instead of four; later spans
+     * keep the full 64 KiB geometry.  Slow path only -- never on malloc/free. */
     static _Atomic unsigned char started[CLASS_COUNT];
     bytes = atomic_exchange_explicit(&started[cls], 1, memory_order_relaxed)
-        ? SPAN_SIZE : FM_ALIGN_UP(HEADER_SIZE + (bs > 16320 ? bs : 16320), FM_PAGE_SIZE);
+        ? SPAN_SIZE
+        : FM_ALIGN_UP(HEADER_SIZE + (bs > 4032 ? bs : 4032), FM_PAGE_SIZE);
 #endif
     size_t n = (bytes - HEADER_SIZE) / bs;
     uintptr_t raw_base = 0;

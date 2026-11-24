@@ -648,7 +648,13 @@ static struct {
 static char *fm_map_dense_span(void)
 {
     enum { extent_size = 2 * 1024 * 1024, map_len = 2 * extent_size - FM_PAGE_SIZE };
-    enum { burst_ms = 100, warmup_extents = 4 };
+    /* N109: keep dense extents on demand-paged base pages for longer.
+     * MADV_HUGEPAGE promotes a whole 2 MiB extent, so hinting after only
+     * four extents inflates peak RSS on medium-length dense workloads
+     * (sort/xz) that never reach steady-state THP use.  Wait for eight
+     * extents: sustained consumers still get THP, but short/medium heaps
+     * avoid backing partially-used extents with huge pages. */
+    enum { burst_ms = 100, warmup_extents = 8 };
     fm_stack_exclusive();
     if (!fm_dense_extent.remaining) {
         char *raw = mmap(NULL, map_len, PROT_READ | PROT_WRITE,

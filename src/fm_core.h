@@ -270,6 +270,13 @@ extern __thread uint64_t fm_lcache_warm_mask __attribute__((tls_model("initial-e
  * bucket is always cached, so seeding a cycle still works.  All state
  * is per-thread, so this is race-free. */
 #define FM_LCACHE_HOT_WINDOW 8u
+/* Wider cold hot window for the 64 KiB-1 MiB band (buckets 16..20, usable
+ * size in [2^b, 2^(b+1))).  cc1plus obstack cycles free ~20 chunks before
+ * re-stamping the bucket with an allocation, so the default 8 evicts these
+ * medium mappings to munmap too early; 16 keeps them cached through a full
+ * cycle. Warm buckets (fm_lcache_warm_mask) still use the much wider 64, and
+ * every other size band keeps 8. Slow path only. */
+#define FM_LCACHE_MED_HOT_WINDOW 16u
 extern __thread uint32_t fm_ltick __attribute__((tls_model("initial-exec")));
 /* realloc -> large-miss hint (ADR 0075): the old user size of a buffer
  * being grown, or 0. Passed out of band so the shared cache-hit path
@@ -2213,7 +2220,10 @@ static inline void fm_large_free(FM_Span *sp, void *p)
         if (b < FM_LCACHE_BUCKETS &&
             fm_lcache_bytes + ms <= fm_lcache_budget(b) &&
             fm_ltick - fm_lbucket_seen[b] <=
-                ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : FM_LCACHE_HOT_WINDOW)) {
+                ((fm_lcache_warm_mask & (1ULL << b))
+                     ? 64u
+                     : ((b >= 16 && b <= 20) ? FM_LCACHE_MED_HOT_WINDOW
+                                             : FM_LCACHE_HOT_WINDOW))) {
             /* Only purge cold mappings large enough that the application is
              * unlikely to reuse them soon (bucket b covers usable sizes in
              * [2^b, 2^(b+1)), so b >= 24 means >= 16 MiB).  Medium buffers

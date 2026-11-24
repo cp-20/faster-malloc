@@ -270,6 +270,13 @@ extern __thread uint64_t fm_lcache_warm_mask __attribute__((tls_model("initial-e
  * bucket is always cached, so seeding a cycle still works.  All state
  * is per-thread, so this is race-free. */
 #define FM_LCACHE_HOT_WINDOW 8u
+/* Wider cold hot window for the 64 KiB-1 MiB band (buckets 16..20, usable
+ * size in [2^b, 2^(b+1))).  cc1plus obstack cycles free ~20 chunks before
+ * re-stamping the bucket with an allocation, so the default 8 evicts these
+ * medium mappings to munmap too early; 16 keeps them cached through a full
+ * cycle. Warm buckets (fm_lcache_warm_mask) still use the much wider 64, and
+ * every other size band keeps 8. Slow path only. */
+#define FM_LCACHE_MED_HOT_WINDOW 16u
 extern __thread uint32_t fm_ltick __attribute__((tls_model("initial-exec")));
 /* realloc -> large-miss hint (ADR 0075): the old user size of a buffer
  * being grown, or 0. Passed out of band so the shared cache-hit path
@@ -302,6 +309,13 @@ extern __thread uint32_t fm_lbucket_seen[FM_LCACHE_BUCKETS]
 #define FM_PROMPT_MIN_FLUSHES (8u * FM_RELEASE_EVERY)
 #define FM_RELEASE_MIN_DEPTH 4u
 #define FM_RELEASE_KEEP 2u
+/* A retained dead span is always one 64 KiB mapping, but its burst
+ * absorption value scales with how many blocks it holds: a 16 B class
+ * keeps ~4k reusable blocks per span, a large class only a handful.
+ * Below this block size the two-span quota is worth its RSS premium;
+ * at or above it the spans are almost pure footprint with no real
+ * reuse benefit, so retain none (N23). */
+#define FM_KEEP_LARGE_MIN 2048u
 #define FM_RELEASE_AGE_MS 100u
 #define FM_RELEASE_INTERVAL_MS 10u
 #define FM_RELEASE_MAX_INTERVAL_MS 5000u
@@ -1616,7 +1630,12 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
     /* Retention quota (ADR 0020): a census in its automatic form
      * keeps up to `keep` of the dead spans -- their blocks stay on
      * the central stack, immediately reusable -- and unmaps only
-     * the excess.  malloc_trim passes keep == 0 and releases all. */
+     * the excess.  malloc_trim passes keep == 0 and releases all.
+     * N23: for large classes a 64 KiB span holds few blocks, so the
+     * quota buys almost no burst absorption for its RSS cost; drop it
+     * there while leaving small classes (and their profiles) intact. */
+    if (bs >= FM_KEEP_LARGE_MIN)
+        keep = 0;
     if (keep) {
         uint32_t kept = 0;
         for (size_t i = 0; i < cen.cap && kept < keep; i++) {
@@ -2204,6 +2223,23 @@ static inline uint64_t fm_lcache_budget(int b)
     return budget;
 }
 
+/* Dedicated reuse bucket for cc1plus obstack chunks (ADR 0078): a 64 KiB
+ * obstack chunk maps to a 132 KiB extent, which hashes to bucket 17, and
+ * cc1plus cycles ~20 of these per function.  Without a proven cache hit
+ * yet this bucket starts cold and the FM_LCACHE_HOT_WINDOW (8) window drops
+ * chunks beyond the first few at a function boundary, forcing the mmap /
+ * munmap churn the warm window was added to avoid.  Treat this one bucket as
+ * permanently warm for the *reuse* decisions (window + cold purge) so the
+ * obstack mapping survives between functions.  The byte budget is left on
+ * the real warm mask: retention stays bounded by the global lcache cap, so
+ * this is reuse shaping, not an RSS increase. */
+#define FM_OBSTACK_REUSE_BUCKET 17u
+static inline int fm_lcache_reuse_warm(int b)
+{
+    return (fm_lcache_warm_mask & (1ULL << (b))) != 0 ||
+           (unsigned)(b) == FM_OBSTACK_REUSE_BUCKET;
+}
+
 static inline void fm_large_free(FM_Span *sp, void *p)
 {
     fm_ltick++;
@@ -2213,15 +2249,21 @@ static inline void fm_large_free(FM_Span *sp, void *p)
         if (b < FM_LCACHE_BUCKETS &&
             fm_lcache_bytes + ms <= fm_lcache_budget(b) &&
             fm_ltick - fm_lbucket_seen[b] <=
-                ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : FM_LCACHE_HOT_WINDOW)) {
-            /* Only purge cold mappings large enough that the application is
+                (fm_lcache_reuse_warm(b)
+                     ? 64u
+                     : ((b >= 16 && b <= 20) ? FM_LCACHE_MED_HOT_WINDOW
+                                             : FM_LCACHE_HOT_WINDOW))) {
+            /* Only purge mappings large enough that the application is
              * unlikely to reuse them soon (bucket b covers usable sizes in
              * [2^b, 2^(b+1)), so b >= 24 means >= 16 MiB).  Medium buffers
-             * churned by jq/g++/Python stay resident when re-freed, while
-             * sort's one-shot merge buffers (>= 16 MiB) are still purged. */
-            if (FM_CFG()->lcache_cold_purge &&
-                b >= 24 &&
-                !(fm_lcache_warm_mask & (1ULL << b))) {
+             * churned by jq/g++/Python stay resident when re-freed.  A
+             * >=16 MiB payload is worth dropping even on warm reuse (warm-
+             * huge): V8 external/Buffer churn cycles many distinct huge
+             * buffers through a bucket marked warm on its first reuse, and
+             * the warm exemption otherwise keeps the whole 128 MiB budget
+             * resident.  G3's obstack bucket is 132 KiB (b == 17), far below
+             * this threshold, so the two mechanisms do not conflict. */
+            if (FM_CFG()->lcache_cold_purge && b >= 24) {
                 uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
                 uintptr_t pend = (sp->map_base + sp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);
                 if (pend > pstart)

@@ -2267,6 +2267,16 @@ static inline size_t fm_large_cache_drain(void)
  * cache hits are not.  calloc depends on this distinction. */
 __attribute__((noinline, cold)) static void *fm_large_alloc_map(size_t size, int *zeroed);
 
+/* N38: geometric realloc headroom. Keep the full doubling step for small
+ * buffers, but reserve only 1.5x for buffers >= 1 MiB so large growing
+ * arrays (jq) waste less VA and cache capacity on unused reserve. The
+ * extra is still bounded at 8 MiB (ADR 0080). */
+static inline size_t fm_realloc_extra(size_t size)
+{
+    size_t extra = size >= (1u << 20) ? size / 2 : size;
+    return extra < (8u << 20) ? extra : (8u << 20);
+}
+
 __attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *zeroed,
                                                              int wide)
 {
@@ -2322,11 +2332,11 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
         size_t need_map = FM_ALIGN_UP(size + HEADER_SIZE, FM_PAGE_SIZE);
         int nb = 63 - __builtin_clzll(need_map);
         size_t want = size;
-        /* Any growth -- including a 1.5x/2x geometric step -- gets one
-         * extra request of bounded headroom, so the carved block can serve
-         * the next step without a copy. */
+        /* Any growth -- including a 1.5x/2x geometric step -- gets bounded
+         * headroom, so the carved block can serve the next step without a
+         * copy. N38: 2x below 1 MiB, 1.5x at/above it. */
         if (growing_from)
-            want += size;
+            want += fm_realloc_extra(size);
         size_t carve = FM_ALIGN_UP(want + HEADER_SIZE, SPAN_SIZE);
         for (int b = nb + 2; b <= 22 && b < FM_LCACHE_BUCKETS; b++) {
             FM_Span **link = (FM_Span **)&fm_lcache_head[b];
@@ -2369,16 +2379,15 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
     /* A growing buffer would otherwise copy and fault a new mapping at
      * every step. ADR 0075 only reserved headroom for sub-doubling growth,
      * so geometric (1.5x/2x) growth -- what parsers and builders use --
-     * copied on every step. Reserve one extra request (bounded at 8 MiB)
-     * for ANY growth so the next growth fits in place. Untouched reserve
-     * pages cost VA, not RSS; if the larger mapping cannot be made we
-     * retry the exact request below. Cache lookup and user_size still use
+     * copied on every step. Reserve bounded headroom for ANY growth so the
+     * next geometric step fits in place (N38: 2x below 1 MiB, 1.5x above).
+     * Untouched reserve pages cost VA, not RSS; if the larger mapping cannot
+     * be made we retry the exact request below. Cache lookup and user_size still use
      * the actual request, so malloc_usable_size stays honest. */
     size_t capacity = size;
     const size_t huge_page = 2u << 20;
     if (growing_from) {
-        size_t extra = size < (8u << 20) ? size : (8u << 20);
-        capacity += extra;
+        capacity += fm_realloc_extra(size);
         if (capacity >= huge_page / 2)
             capacity = FM_ALIGN_UP(capacity + HEADER_SIZE + SPAN_SIZE, huge_page)
                      - HEADER_SIZE - SPAN_SIZE;

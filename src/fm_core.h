@@ -177,6 +177,48 @@ extern FM_Central fm_central[CLASS_COUNT];
 static pthread_mutex_t fm_census_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t fm_central_lock = PTHREAD_MUTEX_INITIALIZER;
 
+/* N36: give the 8 busiest size classes (16..128 B, classes 1..8 -- the
+ * classes fm_class_of maps the smallest, most frequent requests to) their
+ * own central-stack mutexes.  They dominate slow-path contention; every
+ * other class keeps the single global lock.  Unlike ADR 0048's 16 stripes
+ * this touches only the hot tail and needs just 8 extra locks at fork.
+ * Lock order is census -> global -> stripes[0..7]; no path takes a stripe
+ * before the global lock, so adding the stripes to fork is sufficient. */
+#ifndef FM_RECLAIM_EPOCH
+#define FM_N_CENTRAL_STRIPES 8u
+/* Zero-initialised normal mutexes (Linux/glibc), as in ADR 0048's
+ * prototype; a portable build would use explicit initialisers. */
+static struct {
+    pthread_mutex_t lock;
+    char pad[64 - sizeof(pthread_mutex_t)];
+} fm_central_stripes[FM_N_CENTRAL_STRIPES];
+
+static inline pthread_mutex_t *fm_class_lock(uint32_t cls)
+{
+    if (cls >= 1 && cls <= FM_N_CENTRAL_STRIPES)
+        return &fm_central_stripes[cls - 1].lock;
+    return &fm_central_lock;
+}
+#define fm_class_exclusive(cls) pthread_mutex_lock(fm_class_lock(cls))
+#define fm_class_resume(cls)    pthread_mutex_unlock(fm_class_lock(cls))
+static inline void fm_stripes_lock_all(void)
+{
+    for (unsigned i = 0; i < FM_N_CENTRAL_STRIPES; i++)
+        pthread_mutex_lock(&fm_central_stripes[i].lock);
+}
+static inline void fm_stripes_unlock_all(void)
+{
+    for (unsigned i = FM_N_CENTRAL_STRIPES; i-- > 0;)
+        pthread_mutex_unlock(&fm_central_stripes[i].lock);
+}
+#else
+/* Epoch prototype keeps its single global ownership lock. */
+#define fm_class_exclusive(cls) fm_stack_exclusive()
+#define fm_class_resume(cls)    fm_stack_resume()
+static inline void fm_stripes_lock_all(void) {}
+static inline void fm_stripes_unlock_all(void) {}
+#endif
+
 /* ADR 0049: measured default; compile with =0 for the blocking control. */
 #ifndef FM_CENSUS_TRYLOCK
 #define FM_CENSUS_TRYLOCK 1
@@ -586,11 +628,11 @@ static inline void fm_central_push(uint32_t cls, FM_Batch *b)
                 memory_order_acq_rel, memory_order_acquire));
     fm_epoch_leave();
 #else
-    fm_stack_exclusive();
+    fm_class_exclusive(cls);
     b->next = atomic_load_explicit(&fm_central[cls].head, memory_order_relaxed);
     atomic_store_explicit(&fm_central[cls].head, b, memory_order_relaxed);
     atomic_fetch_add_explicit(&fm_central[cls].depth, 1, memory_order_relaxed);
-    fm_stack_resume();
+    fm_class_resume(cls);
 #endif
 }
 
@@ -903,13 +945,13 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
             fm_stack_resume();
         }
 #else
-        fm_stack_exclusive();
+        fm_class_exclusive(cls);
         FM_Batch *b = atomic_load_explicit(&fm_central[cls].head, memory_order_relaxed);
         if (b) {
             atomic_store_explicit(&fm_central[cls].head, b->next, memory_order_relaxed);
             atomic_fetch_sub_explicit(&fm_central[cls].depth, 1, memory_order_relaxed);
         }
-        fm_stack_resume();
+        fm_class_resume(cls);
 #endif
         if (b) {
             /* A span-pure batch going back into service witnesses
@@ -1339,11 +1381,11 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
      * after this point land on the fresh stack; batches another
      * thread's refill already popped are out of reach.  Both only
      * shrink what the census can see. */
-    fm_stack_exclusive();
+    fm_class_exclusive(cls);
     FM_Batch *all = atomic_exchange_explicit(&fm_central[cls].head, NULL,
                                              memory_order_acq_rel);
     atomic_store_explicit(&fm_central[cls].depth, 0, memory_order_relaxed);
-    fm_stack_resume();
+    fm_class_resume(cls);
     if (!all) {
         fm_in_census = was_in_census;
         pthread_mutex_unlock(&fm_census_lock);
@@ -1947,7 +1989,7 @@ static void fm_release_maybe(uint32_t cls, uint32_t now, uint32_t flushed_cls)
         uint32_t mask = atomic_load_explicit(&c->prompt_mask, memory_order_relaxed);
         if (fm_flush_seq[cls] & (mask | (FM_PROMPT_MIN_FLUSHES - 1)))
             return;
-        fm_stack_exclusive();
+        fm_class_exclusive(cls);
         FM_Batch *h = atomic_load_explicit(&c->head, memory_order_relaxed);
         uint32_t hd = atomic_load_explicit(&c->depth, memory_order_relaxed);
         uint32_t hc = h ? (h->count & FM_COUNT_MASK) : 0;
@@ -1958,7 +2000,7 @@ static void fm_release_maybe(uint32_t cls, uint32_t now, uint32_t flushed_cls)
          * small head batch is the fragmentation signature; big-head
          * stacks (deep regrouped or DOM-style churn) skip this. */
         int frag = h && hc != 0 && hc < 32 && hd >= 64;
-        fm_stack_resume();
+        fm_class_resume(cls);
         if (!unchar && !frag)
             return;
     }
@@ -2022,10 +2064,12 @@ static void fm_fork_prepare(void)
 {
     pthread_mutex_lock(&fm_census_lock);
     fm_stack_exclusive();
+    fm_stripes_lock_all();
 }
 
 static void fm_fork_parent(void)
 {
+    fm_stripes_unlock_all();
     fm_stack_resume();
     pthread_mutex_unlock(&fm_census_lock);
 }

@@ -267,6 +267,20 @@ path optimised (its string churn hits the page heap 2x harder than v2's
 bins).  The next cycle should integrate S2's small path into v2 behind a
 flag and re-run the 11-rep matrices.
 
+## Round 20: page-heap integration rejected by the 11-rep matrix (2026-11-25)
+
+| id | branch | result | status |
+|---|---|---|---|
+| P3 | `exp/pageheap` | ADR 0086's 257-2032 B page heap, 11 reps: **micro 1.1844 (worst 1.559)**, jq 1.208 / RSS 262 -> 285 MiB, git 1.440, gcc 1.004 / RSS +2.4%, sort RSS +6.3%, sqlite RSS +3.2% | rejected |
+
+The local A/B on `bench/apps/work/real_suite` had shown git 23.9 -> 21.1 MiB
+at equal time and sqlite 11.6 -> 10.9, but both fixtures are much smaller
+in CI (`exp-bench` git is a 13 MiB process) and the page heap's chunk
+operations cost far more instructions than v2's bins: the micro geomean
+rose 18% and jq, whose string buffers land in the band, lost 21% of its
+time and 8.6% of its RSS.  Lesson: screen allocator-layout changes on the
+paired 11-rep matrix, never on a single local fixture.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

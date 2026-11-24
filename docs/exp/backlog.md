@@ -308,6 +308,7 @@ mappings above the slab cutoff, which cannot join the slab list.
 
 | id | branch | result | status |
 |---|---|---|---|
+| C4 | `exp/selective3` | warm bucket cap 4 -> 32 MiB (let node's 27 MB JSON payload in): node time +8.3% -> +6.0%, node RSS 454.6 -> 455.2 MiB, gcc RSS 358.2 -> 361.5, python unchanged.  The node time difference is inside run-to-run noise and the gcc cost is real. | rejected |
 | C3 | `exp/selective2` | relax the cold-bucket rule to one block of any size (protect xz's 8 MiB buffers): gcc 351.6 -> 361.8 MB, python 138.2 -> 140.9, xz unchanged at 57.7 MB | rejected |
 | C2 | `exp/selective-cache` | on top of the 16 MiB base (ADR 0083): warm buckets (a hit) may keep 4 MiB, cold buckets one block <= 256 KiB, exact per-bucket byte accounting.  11-rep legacy vs the 16 MiB build: python 446.9 -> **432.0** MiB, gcc 364.6 -> **358.2**, jq 358.9 -> **353.9**, node 460.2 -> **454.6**, lua 16.2 -> **14.7**, git 28.8 -> 28.2, redis 6.2 -> 6.3, sqlite 13.5 -> 13.7; time equal or better except node +8.3% | **PR #5** |
 

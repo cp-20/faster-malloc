@@ -84,6 +84,7 @@
 
 static inline void *fm_malloc(size_t size);
 static inline void *fm_malloc_class(size_t size);
+static void fm_ph_tc_drain(void);
 
 /* Hot thread-local free-list state grouped into one struct with parallel
  * arrays inside it: head sits at offset 0 so %fs:(base,cls,8) has zero
@@ -2533,6 +2534,7 @@ static void fm_thread_exit_flush(void)
         }
     }
     fm_large_cache_drain();
+    fm_ph_tc_drain();
     if (fm_batch_pool) {
         FM_Batch *tail = fm_batch_pool;
         while (tail->next)
@@ -2746,6 +2748,23 @@ static void fm_ph_free(void *p)
     pthread_mutex_unlock(&fm_ph_lock);
 }
 static size_t fm_ph_usable(void *p) { return fm_ph_sz(fm_ph_hdr(p)) - FM_PH_HDR; }
+static void fm_ph_tc_drain(void)
+{
+    for (uint32_t b = 0; b < FM_PH_NB; b++) {
+        if (!fm_ph_tc[b])
+            continue;
+        pthread_mutex_lock(&fm_ph_lock);
+        uint32_t *c = (uint32_t *)fm_ph_tc[b];
+        fm_ph_tc[b] = 0;
+        fm_ph_tcn[b] = 0;
+        while (c) {
+            uint32_t *nx = (uint32_t *)*fm_ph_next(c);
+            fm_ph_push(c, b * 16);
+            c = nx;
+        }
+        pthread_mutex_unlock(&fm_ph_lock);
+    }
+}
 #endif
 
 static inline void *fm_malloc_class(size_t size)

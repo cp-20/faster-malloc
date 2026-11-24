@@ -297,6 +297,18 @@ extern __thread uint32_t fm_lbucket_seen[FM_LCACHE_BUCKETS]
 #define FM_RELEASE_INTERVAL_MS 10u
 #define FM_RELEASE_MAX_INTERVAL_MS 5000u
 
+/* ADR 0030 page purge: minimum number of pages a partially-free span
+ * must yield in one census before it is purged.  Raised from 4 to 8 for
+ * the balanced default: after ADR 0078 removed syscalls from the fast
+ * path, a purge costs a mincore + MADV_DONTNEED and risks refaulting
+ * pages that are still in a short run's working set.  Requiring a
+ * larger, more durable free run halves the number of candidate spans
+ * (and thus coverage walks, mincore calls and refaults) during active
+ * allocation.  Reclamation is not disabled: the footprint profile
+ * still uses 2, explicit malloc_trim keeps its instant semantics, and
+ * whole-span dead-span release is untouched. */
+#define FM_PURGE_MIN_PAGES 8u
+
 /* ADR 0024: in the census rebuild, a span needs at least this many
  * blocks in central to earn its own span-pure batch; smaller
  * fragments merge into one mixed residue batch.  Bounds the batch
@@ -372,7 +384,7 @@ static void fm_config_init(void)
     c.regroup_only_depth = 32;
     c.lcache_max_bytes = FM_LCACHE_MAX_BYTES;
     c.page_purge = 1;
-    c.purge_min_pages = 4;
+    c.purge_min_pages = FM_PURGE_MIN_PAGES;
     c.idle_release = 0;
     c.realloc_cache_search = 0;
     c.local_limit_div = 1;

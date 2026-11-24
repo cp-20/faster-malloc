@@ -76,6 +76,29 @@ These are deliberately smaller and self-contained so the local
 | N20 | all | cap realloc headroom for buffers that are freed without reuse (track a reuse flag) | med |
 | N21 | python/g++ | purge pages of partially-free spans more aggressively, but only when an RSS high-water mark is exceeded | med |
 | N22 | redis | reduce redis server RSS: first-span cap and TLS array size for single-thread servers | med |
+| N23 | all | `FM_RELEASE_KEEP` per class: keep 0 for large classes, 2 for small | low |
+| N24 | all | page-purge threshold adaptive by class: 2 pages for small classes, 4 for large | low |
+| N25 | g++ | give classes >= 2 KiB a 128 KiB local byte budget (the 64 KiB rule leaves them at the old cap) | low |
+| N26 | g++/jq | hot-window 16 for 64 KiB-1 MiB warm buckets only | low |
+| N27 | sort | cold-purge threshold 8 MiB when RSS is above a 128 MiB high-water, 16 MiB otherwise | med |
+| N28 | all | `MADV_FREE` for cached large payloads instead of `MADV_DONTNEED` | med |
+| N29 | sort/xz | `MADV_HUGEPAGE` only for the per-thread large slab after the second refill | med |
+| N30 | startup | 32 KiB first spans instead of 16 KiB (the 4 KiB attempt was worse) | low |
+| N31 | startup | 8 KiB first spans for classes that only ever hold one block | low |
+| N32 | startup | map the dense extent lazily: first span from `fm_map_aligned`, then switch | med |
+| N33 | all | reduce TLS footprint: pack `head/tail/cnt` into one array of 16-byte cells | high |
+| N34 | multi-thread | per-thread batch-header page, no global lock on first batch | low |
+| N35 | all | flush only when the local list reaches 3/4 of the limit, not at the limit | low |
+| N36 | multi-thread | central-list lock stripes for the 8 busiest classes | high |
+| N37 | churn | FIFO free-list hand-out for large classes, LIFO for small | med |
+| N38 | jq | realloc headroom 1.5x for buffers >= 1 MiB, 2x below | low |
+| N39 | all | lower the large-cache budget to 32 MiB only for >8 MiB buckets | low |
+| N40 | idle | enable the idle-release timer by default only after a 1 GiB mapped-bytes high-water | high |
+| N41 | python | unmap fully-free spans at interpreter finalization (register an atexit handler) | med |
+| N42 | node | drain the thread-exit cache earlier for worker threads (after 1 ms idle) | med |
+| N43 | redis | avoid the first dense extent for single-threaded servers: first span from `mmap` | med |
+| N44 | gcc | reuse 64 KiB obstack chunks from a dedicated bucket across functions | med |
+| N45 | all | cold-purge 8 MiB blocks only when the large-cache budget is above 32 MiB | low |
 
 
 

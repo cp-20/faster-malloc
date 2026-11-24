@@ -251,10 +251,25 @@ static FM_Batch *fm_batch_global_head; /* protected by fm_central_lock */
  * throughput preset's 256 MiB and page purge stays on: this is a bounded
  * reuse boost, not the whole throughput profile. */
 #define FM_LCACHE_WARM_BUDGET_CAP (128ull << 20)
+/* N110: per-class (per-bucket) cap for small large-block classes.  The
+ * shared per-thread budget lets one churning small class (e.g. a burst
+ * of 64 KiB-1 MiB buffers) occupy all 64 MiB, inflating peak RSS and
+ * starving buckets that are genuinely being reused.  Cap each bucket
+ * whose usable size is <= 8 MiB (b <= 22) at this value; the shared
+ * budget still applies on top, so the cap binds only when a single
+ * small class dominates.  Larger buckets keep the existing policy --
+ * their blocks are few and one-shot, already handled by the hot window
+ * and the cold purge. */
+#define FM_LCACHE_SMALL_BUCKET_CAP (8ull << 20)
+#define FM_LCACHE_SMALL_BUCKET_MAX_B 22
 extern __thread void *fm_lcache_head[FM_LCACHE_BUCKETS]
     __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_warm_mask __attribute__((tls_model("initial-exec")));
+/* Cached bytes per bucket (N110).  Defined here, not in the entry files,
+ * because only the shared inline helpers below touch it; each build gets
+ * its own thread-local instance. */
+static _Thread_local uint64_t fm_lcache_bbytes[FM_LCACHE_BUCKETS];
 /* Large-block cache hotness (ADR 0011 follow-up): the cache pays off
  * only for sizes the workload allocates again soon; a bucket that
  * keeps receiving frees with no allocation in between (a one-shot
@@ -2210,8 +2225,12 @@ static inline void fm_large_free(FM_Span *sp, void *p)
     if (sp->align == 0 && (uintptr_t)p == (uintptr_t)sp + HEADER_SIZE) {
         size_t ms = sp->map_size;
         int b = 63 - __builtin_clzll(fm_large_usable(sp));
+        uint64_t bcap = fm_lcache_budget(b);
+        if (b <= FM_LCACHE_SMALL_BUCKET_MAX_B && bcap > FM_LCACHE_SMALL_BUCKET_CAP)
+            bcap = FM_LCACHE_SMALL_BUCKET_CAP;
         if (b < FM_LCACHE_BUCKETS &&
             fm_lcache_bytes + ms <= fm_lcache_budget(b) &&
+            fm_lcache_bbytes[b] + ms <= bcap &&
             fm_ltick - fm_lbucket_seen[b] <=
                 ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : FM_LCACHE_HOT_WINDOW)) {
             /* Only purge cold mappings large enough that the application is
@@ -2230,6 +2249,7 @@ static inline void fm_large_free(FM_Span *sp, void *p)
             sp->lnext = (uintptr_t)fm_lcache_head[b];
             fm_lcache_head[b] = sp;
             fm_lcache_bytes += ms;
+            fm_lcache_bbytes[b] += ms;
             return;
         }
     }
@@ -2253,6 +2273,8 @@ static inline size_t fm_large_cache_drain(void)
         }
     }
     fm_lcache_bytes = 0;
+    for (int b = 0; b < FM_LCACHE_BUCKETS; b++)
+        fm_lcache_bbytes[b] = 0;
     if (fm_lextent_rem) {
         if (munmap(fm_lextent_cur, fm_lextent_rem) == 0)
             released += fm_lextent_rem;
@@ -2298,6 +2320,7 @@ __attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *z
                     fm_lcache_warm_mask |= (1ULL << b);
                 *link = (FM_Span *)sp->lnext;
                 fm_lcache_bytes -= sp->map_size;
+                fm_lcache_bbytes[b] -= sp->map_size;
                 sp->user_size = size;
                 sp->lnext = 0;
                 if (zeroed)
@@ -2336,6 +2359,7 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
                 if (usable <= (4u << 20) && usable >= need_map) {
                     *link = (FM_Span *)sp->lnext;
                     fm_lcache_bytes -= sp->map_size;
+                    fm_lcache_bbytes[b] -= sp->map_size;
                     if (usable >= carve + SPAN_SIZE + FM_PAGE_SIZE) {
                         uintptr_t map_end = sp->map_base + sp->map_size;
                         uintptr_t rem_addr = (uintptr_t)sp + carve;
@@ -2351,6 +2375,7 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
                         rem->lnext = (uintptr_t)fm_lcache_head[rb];
                         fm_lcache_head[rb] = rem;
                         fm_lcache_bytes += rem->map_size;
+                        fm_lcache_bbytes[rb] += rem->map_size;
                         fm_lbucket_seen[rb] = fm_ltick;
                         sp->map_size = rem_addr - sp->map_base;
                     }

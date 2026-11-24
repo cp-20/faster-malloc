@@ -152,6 +152,9 @@ run_redis() {
     done
     if ! "$cli" -p $port ping >/dev/null 2>&1; then
         note_fail redis "$alloc" "server-did-not-start"
+        if [ -f "$WORK/redis-run/pid" ]; then
+            kill "$(cat "$WORK/redis-run/pid")" 2>/dev/null || true
+        fi
         return
     fi
     local pid
@@ -167,6 +170,15 @@ run_redis() {
     got=$("$cli" -p $port get r3check 2>/dev/null)
     RSS=$(grep VmHWM "/proc/$pid/status" 2>/dev/null | awk '{print $2}')
     "$cli" -p $port shutdown nosave >/dev/null 2>&1
+    # The next allocator reuses the port; wait for the old server to exit so
+    # a slow teardown cannot be reported as the next allocator's failure.
+    for i in $(seq 1 50); do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 0.1
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null || true
+    fi
     if [ "$got" != "hello" ] || [ -z "$out" ]; then
         note_fail redis "$alloc" "roundtrip=$got"
         return

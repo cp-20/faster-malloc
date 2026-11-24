@@ -1405,6 +1405,17 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
      * previously withheld blocks) in the phases below. */
     const FM_Config *cfg = FM_CFG();
     const size_t bs = kClassSize[cls];
+    /* N24: a fully-free page run is much harder to assemble in a small
+     * class (dozens of tiny blocks must all be free at once) than in a
+     * large one (a handful of blocks per page).  Requiring the default
+     * four new pages kept small classes from ever being purged under
+     * churn, even though two resident pages are 8 KiB the allocator
+     * could return.  Lower the gate for the small-block classes only;
+     * large classes keep the conservative four-page threshold.  A user
+     * override below the default (footprint profile / FM_PURGE_MIN_PAGES)
+     * is never raised. */
+    uint32_t min_pages = (bs <= 512u && cfg->purge_min_pages > 2u)
+                             ? 2u : cfg->purge_min_pages;
     uint32_t now = instant ? 0 : fm_now_ms();
     fm_census_marked = 0;
     fm_census_waiting = 0;
@@ -1458,7 +1469,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
          * minimum-size purge run could exist.  The coverage pass
          * decides whether it really does. */
         if (e->cnt && (uint64_t)e->cnt * bs >=
-                          (uint64_t)(cfg->purge_min_pages - 1) * FM_PAGE_SIZE) {
+                          (uint64_t)(min_pages - 1) * FM_PAGE_SIZE) {
             memset(e->page_free, 0, sizeof(e->page_free));
             memset(e->page_tot, 0, sizeof(e->page_tot));
             memset(e->page_sfree, 0, sizeof(e->page_sfree));
@@ -1567,7 +1578,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             }
             uint16_t new_mask = 0;
             uint32_t new_pages = 0;
-            if (cand_pages >= cfg->purge_min_pages) {
+            if (cand_pages >= min_pages) {
                 unsigned char vec[16];
                 int have_vec = mincore((void *)e->span, sp->map_size, vec) == 0;
                 for (uint32_t pg = 1; pg < 16; pg++) {
@@ -1577,7 +1588,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
                         new_pages++;
                     }
                 }
-                if (new_pages < cfg->purge_min_pages)
+                if (new_pages < min_pages)
                     new_mask = 0, new_pages = 0;
             }
             uint16_t new_withheld = 0;

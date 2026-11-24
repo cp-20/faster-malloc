@@ -133,6 +133,13 @@ run_redis() {
     local bench=${REDIS_BENCH:-$(command -v redis-benchmark || echo /tmp/r3tools/redis/src/redis-benchmark)}
     local cli=${REDIS_CLI:-$(command -v redis-cli || echo /tmp/r3tools/redis/src/redis-cli)}
     local port=7777 lib=${LIBS[$alloc]}
+    # A redis-server built with its own jemalloc/tcmalloc bypasses
+    # LD_PRELOAD for its internal allocations; measuring it would attribute
+    # the built-in allocator to v2.  Require a libc build.
+    if ! "$redis" --version 2>/dev/null | grep -q 'malloc=libc'; then
+        note_fail redis "$alloc" "redis-not-libc"
+        return
+    fi
     rm -rf "$WORK/redis-run"; mkdir -p "$WORK/redis-run"
     if [ -n "$lib" ]; then
         env LD_PRELOAD="$lib" "$redis" --port $port --save '' \

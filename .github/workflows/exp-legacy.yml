@@ -45,6 +45,15 @@ jobs:
           sudo apt-get install -y libmimalloc3 || sudo apt-get install -y libmimalloc2.0
           sudo apt-get install -y libtcmalloc-minimal4t64 || sudo apt-get install -y libtcmalloc-minimal4
 
+      - name: Build Redis with the libc allocator
+        run: |
+          git clone --depth 1 --branch 8.0.5 https://github.com/redis/redis.git /tmp/redis
+          make -C /tmp/redis -j"$(nproc)" MALLOC=libc
+          /tmp/redis/src/redis-server --version
+          echo "REDIS_BIN=/tmp/redis/src/redis-server" >> "$GITHUB_ENV"
+          echo "REDIS_BENCH=/tmp/redis/src/redis-benchmark" >> "$GITHUB_ENV"
+          echo "REDIS_CLI=/tmp/redis/src/redis-cli" >> "$GITHUB_ENV"
+
       - name: Restore legacy fixtures
         uses: actions/cache@v4
         with:

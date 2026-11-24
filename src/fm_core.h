@@ -259,7 +259,7 @@ extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec"
  * (CPython's 1 MiB obmalloc arenas) is cold by construction, so it is
  * returned instead of filling the budget; a reused buffer (Lua strings,
  * Node Buffers) is warm and keeps its cache. */
-#define FM_LCACHE_BUCKET_WARM (4u << 20)
+#define FM_LCACHE_BUCKET_WARM (32u << 20)
 #define FM_LCACHE_BUCKET_COLD (256u << 10)
 extern __thread uint32_t fm_lbucket_bytes[FM_LCACHE_BUCKETS]
     __attribute__((tls_model("initial-exec")));

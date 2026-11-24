@@ -614,6 +614,42 @@ static inline void fm_publish2(void *head, void *tail, uint32_t cls,
 /* spans                                                               */
 /* ------------------------------------------------------------------ */
 
+/* N40: process-wide high-water of live mapped bytes.  Once the allocator
+ * has >= 1 GiB mapped at once it pays to run the idle-release maintenance
+ * thread even in the default profile; below that the timer stays off as
+ * before (ADR 0029/0036/0040).  These counters are heuristic-only: they
+ * never affect allocator correctness, only whether the idle sweep starts.
+ * Unmap lengths are saturating-subtracted so accounting drift can never
+ * wrap the counter into a false high-water. */
+static _Atomic uint64_t fm_mapped_live;
+static _Atomic uint64_t fm_mapped_hw;
+static _Atomic int fm_idle_hw_reached;
+
+static inline void fm_mapped_add(size_t n)
+{
+    uint64_t v = atomic_fetch_add_explicit(&fm_mapped_live, (uint64_t)n,
+                                           memory_order_relaxed) + (uint64_t)n;
+    uint64_t hw = atomic_load_explicit(&fm_mapped_hw, memory_order_relaxed);
+    while (v > hw &&
+           !atomic_compare_exchange_weak_explicit(&fm_mapped_hw, &hw, v,
+                        memory_order_relaxed, memory_order_relaxed))
+        ;
+    if (v >= (1ull << 30))
+        atomic_store_explicit(&fm_idle_hw_reached, 1, memory_order_relaxed);
+}
+
+static inline void fm_mapped_sub(size_t n)
+{
+    uint64_t cur = atomic_load_explicit(&fm_mapped_live, memory_order_relaxed);
+    uint64_t d = (uint64_t)n;
+    while (cur) {
+        uint64_t nv = cur > d ? cur - d : 0;
+        if (atomic_compare_exchange_weak_explicit(&fm_mapped_live, &cur, nv,
+                        memory_order_relaxed, memory_order_relaxed))
+            break;
+    }
+}
+
 /* Map `bytes` usable bytes at a 64 KiB-aligned address, with a 64 byte
  * header in front.  The mapping is trimmed to exactly the pages needed. */
 static inline char *fm_map_aligned(size_t bytes)
@@ -632,6 +668,7 @@ static inline char *fm_map_aligned(size_t bytes)
     size_t map_end = (size_t)FM_ALIGN_UP((uintptr_t)raw + map_len, FM_PAGE_SIZE);
     if (tail_start < map_end)
         munmap((void *)tail_start, map_end - tail_start);
+    fm_mapped_add(keep);
     return (char *)base;
 }
 
@@ -674,6 +711,7 @@ static char *fm_map_dense_span(void)
         fm_dense_extent.opened_ms = now;
         fm_dense_extent.cursor = base;
         fm_dense_extent.remaining = extent_size / SPAN_SIZE;
+        fm_mapped_add(extent_size);
     }
     char *span = fm_dense_extent.cursor;
     fm_dense_extent.cursor += SPAN_SIZE;
@@ -703,7 +741,9 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
         return base;
     }
     if (fm_lextent_rem) {
-        munmap(fm_lextent_cur, fm_lextent_rem);
+        size_t rem = fm_lextent_rem;
+        if (munmap(fm_lextent_cur, rem) == 0)
+            fm_mapped_sub(rem);
         fm_lextent_cur = NULL;
         fm_lextent_rem = 0;
     }
@@ -720,6 +760,7 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
     *len_out = need;
     fm_lextent_cur = aligned + need;
     fm_lextent_rem = slab_len - head_slack - need;
+    fm_mapped_add(slab_len - head_slack);
     return aligned;
 }
 
@@ -1813,6 +1854,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             size_t len = sp->map_size;
             released += len;
             munmap((void *)base, len);
+            fm_mapped_sub(len);
         }
     }
 
@@ -1984,7 +2026,13 @@ static void fm_idle_kick(uint32_t now);
 static void fm_auto_release_tick(uint32_t flushed_cls)
 {
     uint32_t now = fm_now_ms();
-    if (FM_CFG()->idle_release && !fm_in_census)
+    /* N40: the idle timer is opt-in, but a process that has mapped >= 1 GiB
+     * has enough to reclaim that it is worth running the maintenance thread
+     * even in the default profile.  Below the high-water, behaviour is
+     * unchanged (timer off unless FM_IDLE_RELEASE=1). */
+    if ((FM_CFG()->idle_release ||
+         atomic_load_explicit(&fm_idle_hw_reached, memory_order_relaxed)) &&
+        !fm_in_census)
         fm_idle_kick(now);
     /* Consider every class, not just the one whose flush ticked: a
      * class that stops being flushed would otherwise never be
@@ -2119,6 +2167,7 @@ static inline size_t fm_trim_spans(void)
         size_t bytes = (size_t)fm_dense_extent.remaining * SPAN_SIZE;
         if (munmap(fm_dense_extent.cursor, bytes) == 0) {
             released += bytes;
+            fm_mapped_sub(bytes);
             fm_dense_extent.remaining = 0;
             fm_dense_extent.cursor = NULL;
         }
@@ -2167,6 +2216,7 @@ static inline char *fm_map_large(size_t bytes, uintptr_t *raw_out, size_t *len_o
         return NULL;
     *raw_out = (uintptr_t)raw;
     *len_out = map_len;
+    fm_mapped_add(map_len);
     return (char *)FM_ALIGN_UP((uintptr_t)raw, SPAN_SIZE);
 }
 
@@ -2233,7 +2283,9 @@ static inline void fm_large_free(FM_Span *sp, void *p)
             return;
         }
     }
-    munmap((void *)sp->map_base, sp->map_size);
+    size_t ms = sp->map_size;
+    munmap((void *)sp->map_base, ms);
+    fm_mapped_sub(ms);
 }
 
 /* Release every cached large block of this thread to the OS.
@@ -2247,15 +2299,20 @@ static inline size_t fm_large_cache_drain(void)
         fm_lcache_head[b] = NULL;
         while (sp) {
             FM_Span *next = (FM_Span *)sp->lnext;
-            released += sp->map_size;
-            munmap((void *)sp->map_base, sp->map_size);
+            size_t ms = sp->map_size;
+            released += ms;
+            munmap((void *)sp->map_base, ms);
+            fm_mapped_sub(ms);
             sp = next;
         }
     }
     fm_lcache_bytes = 0;
     if (fm_lextent_rem) {
-        if (munmap(fm_lextent_cur, fm_lextent_rem) == 0)
-            released += fm_lextent_rem;
+        size_t rem = fm_lextent_rem;
+        if (munmap(fm_lextent_cur, rem) == 0) {
+            released += rem;
+            fm_mapped_sub(rem);
+        }
         fm_lextent_cur = NULL;
         fm_lextent_rem = 0;
     }
@@ -2453,6 +2510,7 @@ __attribute__((noinline)) static void *fm_aligned_alloc_impl(size_t align, size_
         size_t map_end = (size_t)FM_ALIGN_UP((uintptr_t)raw + map_len, FM_PAGE_SIZE);
         if (tail_start < map_end)
             munmap((void *)tail_start, map_end - tail_start);
+        fm_mapped_add(keep);
 
         FM_Span *sp = (FM_Span *)base;
         sp->cls = LARGE_CLASS;
@@ -2478,6 +2536,7 @@ __attribute__((noinline)) static void *fm_aligned_alloc_impl(size_t align, size_
         munmap(raw, map_len);
         return NULL;
     }
+    fm_mapped_add(map_len);
     FM_Span *sp = (FM_Span *)(user - HEADER_SIZE);
     sp->cls = LARGE_CLASS;
     sp->magic = FM_ALIGNED_MAGIC;
@@ -2645,7 +2704,9 @@ __attribute__((noinline, cold)) static void fm_free_slow_large(FM_Span *sp, void
 __attribute__((noinline, cold)) static void fm_free_aligned(const void *p)
 {
     const FM_Span *sp = (const FM_Span *)((const char *)p - HEADER_SIZE);
-    munmap((void *)sp->map_base, sp->map_size);
+    size_t ms = sp->map_size;
+    munmap((void *)sp->map_base, ms);
+    fm_mapped_sub(ms);
 }
 
 __attribute__((noinline)) static void fm_free_cnt_slow(uint32_t cls)
@@ -2869,7 +2930,9 @@ __attribute__((noinline)) static void *fm_realloc_slow(void *p, size_t size)
         if (!q)
             return NULL;
         memcpy(q, p, sp->user_size);
-        munmap((void *)sp->map_base, sp->map_size);
+        size_t ms = sp->map_size;
+        munmap((void *)sp->map_base, ms);
+        fm_mapped_sub(ms);
         return q;
     }
     FM_Span *sp = (FM_Span *)((uintptr_t)p & SPAN_MASK);

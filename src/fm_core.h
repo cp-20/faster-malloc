@@ -794,12 +794,21 @@ static inline uint32_t fm_local_limit(uint32_t cls)
     uint32_t limit = kClassLimit[cls];
     /* The generated kClassLimit caps every class at 256 blocks.  For the
      * small classes that dominate parsing/compiler bursts that leaves most
-     * of the intended 64 KiB per-class byte budget unused (only 4 KiB for
-     * 16 B blocks, 32 KiB for 128 B blocks).  Spend the full budget: a
-     * larger local limit means fewer flushes -- fewer central-lock
-     * acquisitions and batch round trips -- while retained bytes stay
-     * bounded at 64 KiB per class.  The div override still scales it. */
-    uint32_t budget = (uint32_t)((64u * 1024u) / kClassSize[cls]);
+     * of the intended byte budget unused (only 4 KiB for 16 B blocks, 32 KiB
+     * for 128 B blocks).  Spend the full budget: a larger local limit means
+     * fewer flushes -- fewer central-lock acquisitions and batch round
+     * trips -- while retained bytes stay bounded per class.  The div
+     * override still scales it.
+     *
+     * Two-tier budget: medium classes (512 B - 4 KiB) get 128 KiB because
+     * g++ (cc1plus) and jq medium-buffer bursts flush far too often at
+     * 64 KiB (only 16-128 blocks); every other class keeps the original
+     * 64 KiB.  kClassSize is the class's block size, so this touches only
+     * the [512, 4096] range and leaves smaller/larger classes unchanged. */
+    uint32_t sz = kClassSize[cls];
+    uint32_t budget_bytes = (sz >= 512u && sz <= 4096u)
+                                ? (128u * 1024u) : (64u * 1024u);
+    uint32_t budget = (uint32_t)(budget_bytes / sz);
     if (budget > limit)
         limit = budget;
     uint32_t div = FM_CFG()->local_limit_div;

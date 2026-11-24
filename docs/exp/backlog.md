@@ -134,6 +134,26 @@ These are deliberately smaller and self-contained so the local
 | N78 | sort/xz | MADV_FREE (N28) + warm-huge | low |
 | N79 | all | idle-release timer (default off) + cold purge on idle, not on free | high |
 | N80 | all | per-class page purge + earlier fully-free span release (N1 + N21) | med |
+| N81 | python | confirm N67 (N1+N24+N23) at 11 reps; only PR if RSS down and no time regression | med |
+| N82 | redis | combine N9 (lazy bump run) + N59 (exact first span + full slot) | med |
+| N83 | node | confirm N72 (warm-huge + 8 MiB cold) on the legacy node row at 11 reps | med |
+| N84 | gcc/g++ | combine N66 (64 KiB/medium windows) + N53 (THP slab after 2nd refill) | med |
+| N85 | git/sqlite | combine N58 (startup mapping) + N32 (lazy dense) + N9 (lazy bump) | med |
+| N86 | python | combine N67 + N50 (2-page purge below 256 B) | med |
+| N87 | git | combine N58 + N31 (one-block first span) | med |
+| N88 | sqlite | combine N58 + N24 (2-page purge) | med |
+| N89 | micro | confirm N5 (prefetch removal) at 11 reps, including rand/cross micro | low |
+| N90 | large/cross | combine N37 (large-class FIFO) + N16 (cross-free batching) | med |
+| N91 | redis | combine N9 + N59 + N60 (8 MiB cold purge) | med |
+| N92 | node | combine N72 + N45 (8-16 MiB purge) | med |
+| N93 | g++ | combine N66 + N11 (adaptive slab) + N25 (128 KiB budget) | med |
+| N94 | sort | combine N74 (32 MiB huge cap + THP slab) + N53 | med |
+| N95 | xz | combine N74 + N28 (MADV_FREE) | low |
+| N96 | all | after the current batch, combine the top 3 measured winners into one branch | med |
+| N97 | all | adaptive large-cache budget from RSS high-water, not mapped bytes | high |
+| N98 | git/sqlite | combine N58 + N2 + N12 | med |
+| N99 | python | confirm N67 + N86 at 11 reps | med |
+| N100 | redis | combine N43 + N9 + N59 | med |
 
 
 

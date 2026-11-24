@@ -80,6 +80,11 @@
 #define FM_SPAN_MAGIC 0x5A6E4C5Au
 #define FM_ALIGNED_MAGIC 0xA110CEDAu
 #define FM_PAGE_SIZE 4096u
+/* LARGE_CLASS spans never enter the small-span census, so dead_mark is
+ * spare there.  Bit 0 means "ADR 0080 growth reserve still unused": the
+ * buffer was given extra capacity for a next geometric step that never
+ * arrived.  Free drops the untouched tail instead of caching it. */
+#define FM_GROW_RESERVE_PENDING 1u
 #define FM_ALIGN_UP(x, a) (((uintptr_t)(x) + (a)-1) & ~((uintptr_t)(a)-1))
 
 static inline void *fm_malloc(size_t size);
@@ -2208,6 +2213,21 @@ static inline void fm_large_free(FM_Span *sp, void *p)
 {
     fm_ltick++;
     if (sp->align == 0 && (uintptr_t)p == (uintptr_t)sp + HEADER_SIZE) {
+        /* ADR 0080 reserves one extra request of capacity on growth.  If no
+         * later realloc consumed it, the reserve is dead weight: it inflates
+         * the cached map_size, the byte budget and the process footprint.
+         * Drop the untouched tail before the block re-enters the cache. */
+        if (atomic_load_explicit(&sp->dead_mark, memory_order_relaxed) &
+            FM_GROW_RESERVE_PENDING) {
+            atomic_store_explicit(&sp->dead_mark, 0, memory_order_relaxed);
+            uintptr_t keep_end = (uintptr_t)sp +
+                FM_ALIGN_UP(HEADER_SIZE + sp->user_size, FM_PAGE_SIZE);
+            uintptr_t map_end = sp->map_base + sp->map_size;
+            if (keep_end < map_end) {
+                (void)munmap((void *)keep_end, map_end - keep_end);
+                sp->map_size = keep_end - sp->map_base;
+            }
+        }
         size_t ms = sp->map_size;
         int b = 63 - __builtin_clzll(fm_large_usable(sp));
         if (b < FM_LCACHE_BUCKETS &&
@@ -2300,6 +2320,7 @@ __attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *z
                 fm_lcache_bytes -= sp->map_size;
                 sp->user_size = size;
                 sp->lnext = 0;
+                atomic_store_explicit(&sp->dead_mark, 0, memory_order_relaxed);
                 if (zeroed)
                     *zeroed = 0;
                 return (void *)((char *)sp + HEADER_SIZE);
@@ -2347,6 +2368,8 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
                         rem->map_size = map_end - rem_addr;
                         rem->user_size = 0;
                         rem->align = 0;
+                        atomic_store_explicit(&rem->dead_mark, 0,
+                                              memory_order_relaxed);
                         int rb = 63 - __builtin_clzll(rem->map_size);
                         rem->lnext = (uintptr_t)fm_lcache_head[rb];
                         fm_lcache_head[rb] = rem;
@@ -2356,6 +2379,13 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
                     }
                     sp->user_size = size;
                     sp->lnext = 0;
+                    /* Flag growth headroom the caller never asked for, so
+                     * a free without a second growth can drop it. */
+                    atomic_store_explicit(&sp->dead_mark,
+                        (growing_from && carve > FM_ALIGN_UP(size + HEADER_SIZE,
+                                                             SPAN_SIZE))
+                            ? FM_GROW_RESERVE_PENDING : 0,
+                        memory_order_relaxed);
                     if (zeroed)
                         *zeroed = 0;
                     return (void *)((char *)sp + HEADER_SIZE);
@@ -2407,6 +2437,9 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
     sp->user_size = size;
     sp->align = 0;
     sp->lnext = 0;
+    atomic_store_explicit(&sp->dead_mark,
+                          capacity != size ? FM_GROW_RESERVE_PENDING : 0,
+                          memory_order_relaxed);
     if (zeroed)
         *zeroed = 1;
     return (void *)(base + HEADER_SIZE);
@@ -2894,6 +2927,10 @@ __attribute__((noinline)) static void *fm_realloc_slow(void *p, size_t size)
     if (sp->align == 0) {
         size_t off = (size_t)((char *)p - (char *)sp->map_base);
         if (size <= sp->map_size - off) {
+            /* Growing into the reserve consumes it: keep the full mapping
+             * when this buffer is eventually freed. */
+            if (size > sp->user_size)
+                atomic_store_explicit(&sp->dead_mark, 0, memory_order_relaxed);
             sp->user_size = size;
             return p;
         }
@@ -2928,6 +2965,9 @@ static inline void *fm_realloc(void *p, size_t size)
         } else if (sp->align == 0) {
             size_t off = (size_t)((char *)p - (char *)sp->map_base);
             if (__builtin_expect(size <= sp->map_size - off, 1)) {
+                if (size > sp->user_size)
+                    atomic_store_explicit(&sp->dead_mark, 0,
+                                          memory_order_relaxed);
                 sp->user_size = size;
                 return p;
             }

@@ -2200,6 +2200,23 @@ static inline uint64_t fm_lcache_budget(int b)
     return budget;
 }
 
+/* Dedicated reuse bucket for cc1plus obstack chunks (ADR 0078): a 64 KiB
+ * obstack chunk maps to a 132 KiB extent, which hashes to bucket 17, and
+ * cc1plus cycles ~20 of these per function.  Without a proven cache hit
+ * yet this bucket starts cold and the FM_LCACHE_HOT_WINDOW (8) window drops
+ * chunks beyond the first few at a function boundary, forcing the mmap /
+ * munmap churn the warm window was added to avoid.  Treat this one bucket as
+ * permanently warm for the *reuse* decisions (window + cold purge) so the
+ * obstack mapping survives between functions.  The byte budget is left on
+ * the real warm mask: retention stays bounded by the global lcache cap, so
+ * this is reuse shaping, not an RSS increase. */
+#define FM_OBSTACK_REUSE_BUCKET 17u
+static inline int fm_lcache_reuse_warm(int b)
+{
+    return (fm_lcache_warm_mask & (1ULL << (b))) != 0 ||
+           (unsigned)(b) == FM_OBSTACK_REUSE_BUCKET;
+}
+
 static inline void fm_large_free(FM_Span *sp, void *p)
 {
     fm_ltick++;
@@ -2209,9 +2226,9 @@ static inline void fm_large_free(FM_Span *sp, void *p)
         if (b < FM_LCACHE_BUCKETS &&
             fm_lcache_bytes + ms <= fm_lcache_budget(b) &&
             fm_ltick - fm_lbucket_seen[b] <=
-                ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : FM_LCACHE_HOT_WINDOW)) {
+                (fm_lcache_reuse_warm(b) ? 64u : FM_LCACHE_HOT_WINDOW)) {
             if (FM_CFG()->lcache_cold_purge &&
-                !(fm_lcache_warm_mask & (1ULL << b))) {
+                !fm_lcache_reuse_warm(b)) {
                 uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
                 uintptr_t pend = (sp->map_base + sp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);
                 if (pend > pstart)

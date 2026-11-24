@@ -1,0 +1,79 @@
+name: exp-legacy
+
+# Re-baseline the dashboard's older application matrix (rounds 3-6):
+# redis, sqlite speedtest1, legacy jq, Lua, CPython, Node, gcc and git.
+# Runs all allocators interleaved via bench/apps/apps.sh, with time and
+# peak RSS, on current main.  Separate from exp-matrix because it needs
+# redis/lua/node and builds its own fixtures.
+
+on:
+  workflow_dispatch:
+    inputs:
+      reps:
+        description: "Repetitions"
+        required: false
+        default: "3"
+      apps:
+        description: "Space-separated apps (empty = all)"
+        required: false
+        default: ""
+      allocators:
+        description: "Space-separated allocators"
+        required: false
+        default: "glibc v2 jemalloc mimalloc tcmalloc"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: exp-legacy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  legacy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install runtimes and competing allocators
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential curl unzip git jq python3 \
+            redis-server redis-tools lua5.4 nodejs libjemalloc2
+          sudo apt-get install -y libmimalloc3 || sudo apt-get install -y libmimalloc2.0
+          sudo apt-get install -y libtcmalloc-minimal4t64 || sudo apt-get install -y libtcmalloc-minimal4
+
+      - name: Restore legacy fixtures
+        uses: actions/cache@v4
+        with:
+          path: bench/apps/work
+          key: legacy-fixtures-v1
+
+      - name: Build fixtures
+        run: bash bench/apps/prep.sh
+
+      - name: Run legacy app matrix
+        env:
+          REPS: ${{ inputs.reps || '3' }}
+          APPS: ${{ inputs.apps || '' }}
+          ALLOCATORS: ${{ inputs.allocators || 'glibc v2 jemalloc mimalloc tcmalloc' }}
+        run: |
+          set -o pipefail
+          make -j"$(nproc)"
+          bash bench/apps/apps.sh 2>&1 | tee legacy.txt
+          {
+            echo "## exp-legacy: ${GITHUB_REF_NAME}"
+            echo '```'
+            grep -v '^  redis/' legacy.txt || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload legacy matrix
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exp-legacy-${{ github.run_id }}
+          path: legacy.txt
+          if-no-files-found: ignore

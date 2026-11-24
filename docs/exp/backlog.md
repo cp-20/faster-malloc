@@ -4,8 +4,8 @@ The recurring campaign picks the first unclaimed `TODO` items from this
 file (see `GOAL.md` for the selection rules).  Update the status when a
 result arrives; a measured "no" is a result.
 
-`exp/combined-v2` is the accepted round-13 batch and is PR #1.  It is not
-a new campaign result; do not open another PR for it.
+`exp/combined-v2` is the accepted round-13 batch and was merged as PR
+#1.  It is not a new campaign result; do not open another PR for it.
 
 Status: `TODO` / `RUNNING` / `ACCEPTED` / `REJECTED` / `BLOCKED`.
 
@@ -20,6 +20,32 @@ Status: `TODO` / `RUNNING` / `ACCEPTED` / `REJECTED` / `BLOCKED`.
 
 Combined branch `exp/combined-v2` at 11 reps: micro 0.9612, real
 geomean 0.9845 / paired 0.9819, sort 0.138 -> 0.126 s.
+
+## Current priority: RSS and the legacy dashboard
+
+The campaign is not done until v2 is first in **both time and peak RSS**
+on every app.  The new suite's RSS gaps (2026-11-24) are: g++ +3.5%,
+jq +0.04%, sqlite +17.5%, Python +3.2%, git +15.8%, xz +0.5%, sort
++38.9% (all against glibc).  The dashboard's redis/sqlite/jq_legacy/lua/
+python_legacy/node/gcc/git rows are stale and must be re-baselined with
+`exp-legacy.yml` first.
+
+| id | area | hypothesis | risk |
+|---|---|---|---|
+| RSS1 | all | move the balanced defaults toward the footprint profile (shorter age, keep=0, smaller lcache) and recover the time loss with the accepted fast paths; measure the Pareto point | med |
+| RSS2 | sort | drain the per-thread large slab remainder and cold large-cache buckets when the process has been idle for N ms, not only on trim/exit | med |
+| RSS3 | sort | cap the warm large-cache budget per size band (e.g. 8 MiB for 32-128 KiB) instead of one 128 MiB pool | low |
+| RSS4 | git/sqlite | startup footprint: smaller first spans, fewer initial classes mapped, avoid the 2 MiB dense extent for processes that allocate < N KiB | med |
+| RSS5 | g++ | release fully-free small spans during compilation pauses; lower the per-class local budget for large classes only | med |
+| RSS6 | Python | drain per-thread caches at interpreter shutdown / thread exit earlier; verify peak not just final RSS | med |
+| RSS7 | jq/xz | close the 0.04%/0.5% gaps with page-granular purge thresholds (6 pages) and no time loss | low |
+| RSS8 | all | add per-app RSS decomposition (smaps/mincore) to the CI artifact so the next cycle targets the actual resident classes, not a guess | low |
+| LGC1 | legacy | run `exp-legacy.yml` on current main and record time/RSS for redis, sqlite1, jq_legacy, lua, python_legacy, node, gcc, git_legacy | low |
+| LGC2 | redis | reduce server RSS: spans/TLS retention under redis-benchmark; target glibc's 7.4 MiB | med |
+| LGC3 | node | release V8 external/Buffer churn; target tcmalloc's time and glibc's RSS | med |
+| LGC4 | sqlite1 | speedtest1 query path: time vs tcmalloc, RSS vs glibc | med |
+| LGC5 | gcc | SQLite amalgamation compile: close the 8% time gap to mimalloc and the RSS gap | med |
+
 
 ## Rejected (do not repeat without a materially different mechanism)
 

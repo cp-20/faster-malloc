@@ -723,11 +723,76 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
     return aligned;
 }
 
+#ifdef FM_V6_SLOT
+/* Hybrid span slots: every span starts at a 64 KiB-aligned slot, so the
+ * v2 free path's 64 KiB mask still finds the header.  Cold classes map
+ * only 4 KiB at the slot base (4 KiB resident pages); hot classes map the
+ * full 64 KiB slot.  The slot VA itself is reserved PROT_NONE. */
+static char *fm_v6_arena;
+static char *fm_v6_cursor;
+static size_t fm_v6_remaining;
+static _Thread_local uint16_t fm_v6_hot[CLASS_COUNT];
+
+static char *fm_v6_slot_alloc(void)
+{
+    fm_stack_exclusive();
+    if (!fm_v6_arena) {
+        size_t len = 4ull << 30;
+        char *raw = mmap(NULL, len + SPAN_SIZE, PROT_NONE,
+                         MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+        if (raw == MAP_FAILED) {
+            fm_stack_resume();
+            return NULL;
+        }
+        char *base = (char *)FM_ALIGN_UP((uintptr_t)raw, SPAN_SIZE);
+        fm_v6_arena = base;
+        fm_v6_cursor = base;
+        fm_v6_remaining = len;
+    }
+    if (fm_v6_remaining < SPAN_SIZE) {
+        fm_stack_resume();
+        return NULL;
+    }
+    char *p = fm_v6_cursor;
+    fm_v6_cursor += SPAN_SIZE;
+    fm_v6_remaining -= SPAN_SIZE;
+    fm_stack_resume();
+    return p;
+}
+#endif
+
 /* Map and initialise a fresh span for class cls.  Blocks are carved
  * lazily from the span's bump range by the refill path, so creation
  * does not touch every block's memory. */
 static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
 {
+#ifdef FM_V6_SLOT
+    size_t bs = kClassSize[cls];
+    int small = (bs <= 3968 && fm_v6_hot[cls] < 8);
+    size_t span_size = small ? 4096u : SPAN_SIZE;
+    char *slot = fm_v6_slot_alloc();
+    if (!slot)
+        return NULL;
+    void *m = mmap(slot, span_size, PROT_READ | PROT_WRITE,
+                   MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (m != (void *)slot)
+        return NULL;
+    size_t n = (span_size - HEADER_SIZE) / bs;
+    FM_Span *sp = (FM_Span *)slot;
+    sp->cls = cls;
+    sp->magic = FM_SPAN_MAGIC;
+    sp->nblocks = (uint32_t)n;
+    sp->dead_mark = 0;
+    sp->map_base = (uintptr_t)slot;
+    sp->map_size = span_size;
+    sp->user_size = 0;
+    sp->align = 0;
+    sp->purge_mark = 0;
+    sp->purged_mask = 0;
+    sp->withheld_cnt = 0;
+    *count_out = (uint32_t)n;
+    return slot;
+#else
     size_t bs = kClassSize[cls];
     size_t bytes = SPAN_SIZE;
 #ifdef FM_SMALL_FIRST_SPAN
@@ -770,6 +835,7 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
 
     *count_out = (uint32_t)n;
     return base;
+#endif
 }
 
 /* ------------------------------------------------------------------ */
@@ -935,6 +1001,10 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
     char *cur = fm_bump_ptr[cls];
     char *end = fm_bump_end[cls];
     if (cur >= end) {
+#ifdef FM_V6_SLOT
+        if (kClassSize[cls] <= 3968 && fm_v6_hot[cls] < 0xFFFF)
+            fm_v6_hot[cls]++;
+#endif
         uint32_t total = 0;
         char *base = fm_span_new(cls, &total);
         if (!base)
@@ -1285,6 +1355,9 @@ static inline void fm_pg_cover(FM_CensusEnt *e, uintptr_t span, void *p,
     uint32_t fp = (uint32_t)((HEADER_SIZE + (size_t)idx * bs) / FM_PAGE_SIZE);
     uint32_t lp = (uint32_t)((HEADER_SIZE + (size_t)(idx + 1) * bs - 1) /
                              FM_PAGE_SIZE);
+    uint32_t pages = (uint32_t)(((FM_Span *)span)->map_size / FM_PAGE_SIZE);
+    if (pages > 16) pages = 16;
+    if (lp >= pages) lp = pages - 1;
     for (uint32_t pg = fp; pg <= lp; pg++)
         e->page_free[pg]++;
     e->page_sfree[fp]++;
@@ -1556,7 +1629,9 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             uint32_t nb = sp->nblocks;
             uint16_t cand_mask = 0;
             uint32_t cand_pages = 0;
-            for (uint32_t pg = 1; pg < 16; pg++) {
+            uint32_t pages = (uint32_t)(sp->map_size / FM_PAGE_SIZE);
+            if (pages > 16) pages = 16;
+            for (uint32_t pg = 1; pg < pages; pg++) {
                 if (sp->purged_mask & (uint16_t)(1u << pg))
                     continue;
                 if (e->page_tot[pg] && e->page_free[pg] == e->page_tot[pg] &&
@@ -1570,7 +1645,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             if (cand_pages >= cfg->purge_min_pages) {
                 unsigned char vec[16];
                 int have_vec = mincore((void *)e->span, sp->map_size, vec) == 0;
-                for (uint32_t pg = 1; pg < 16; pg++) {
+                for (uint32_t pg = 1; pg < pages; pg++) {
                     if ((cand_mask & (uint16_t)(1u << pg)) &&
                         (!have_vec || (vec[pg] & 1))) {
                         new_mask |= (uint16_t)(1u << pg);

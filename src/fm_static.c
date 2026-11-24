@@ -9,7 +9,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-#define FM_SMALL_FIRST_SPAN /* ADR 0060; JIT guard rejected in ADR 0061. */
+/* v6: 4 KiB/64 KiB slot hybrid; no first-span mapping cap. */
 #include "fm_core.h"
 
 FM_Config fm_cfg;

@@ -2792,20 +2792,57 @@ static inline void *fm_calloc(size_t n, size_t sz)
     return fm_calloc_slow(total);
 }
 
+/* Programs that link their own allocator can pass their pointers to the
+ * libc malloc_usable_size symbol; LD_PRELOAD routes that symbol here.  Redis
+ * 8 links jemalloc and does exactly this, so a foreign pointer used to crash
+ * on the v2 span header.  Recognise a v2 span by its magic and delegate
+ * everything else to the next definition (jemalloc's or glibc's). */
+static size_t (*fm_next_usable_size)(void *);
+
+__attribute__((noinline, cold)) static size_t fm_foreign_usable_size(void *p)
+{
+    static _Thread_local int in_foreign;
+    if (in_foreign)
+        return 0;
+    if (!fm_next_usable_size) {
+        void *sym = dlsym(RTLD_NEXT, "malloc_usable_size");
+        Dl_info self, target;
+        if (sym &&
+            dladdr((void *)&fm_foreign_usable_size, &self) &&
+            dladdr(sym, &target) &&
+            self.dli_fbase == target.dli_fbase)
+            sym = NULL; /* RTLD_NEXT did not skip us; do not recurse. */
+        fm_next_usable_size = (size_t (*)(void *))sym;
+    }
+    if (!fm_next_usable_size)
+        return 0;
+    in_foreign = 1;
+    size_t n = fm_next_usable_size(p);
+    in_foreign = 0;
+    return n;
+}
+
 static inline size_t fm_usable_size(void *p)
 {
-    if (__builtin_expect(((uintptr_t)p & (SPAN_SIZE - 1)) == 0, 0)) {
-        if (!p)
-            return 0;
+    uintptr_t u = (uintptr_t)p;
+    if (__builtin_expect(u == 0, 0))
+        return 0;
+    if (__builtin_expect(u < FM_PAGE_SIZE, 0))
+        return 0; /* neither a v2 span nor a valid foreign heap pointer */
+    if (__builtin_expect((u & (SPAN_SIZE - 1)) == 0, 0)) {
         if (fm_is_aligned_ptr(p)) {
             const FM_Span *sp = (const FM_Span *)((const char *)p - HEADER_SIZE);
             return sp->user_size;
         }
     }
-    const FM_Span *sp = (const FM_Span *)((uintptr_t)p & SPAN_MASK);
-    if (sp->cls == LARGE_CLASS)
-        return sp->user_size;
-    return kClassSize[sp->cls];
+    const FM_Span *sp = (const FM_Span *)(u & SPAN_MASK);
+    if (__builtin_expect(sp->magic == FM_SPAN_MAGIC, 1)) {
+        if (sp->cls == LARGE_CLASS)
+            return sp->user_size;
+        if (sp->cls < CLASS_COUNT)
+            return kClassSize[sp->cls];
+    }
+    return fm_foreign_usable_size(p);
 }
 
 __attribute__((noinline)) static void *fm_realloc_slow(void *p, size_t size)

@@ -21,6 +21,10 @@ on:
         description: "Space-separated allocators"
         required: false
         default: "glibc v2 jemalloc mimalloc tcmalloc"
+      runtime_env:
+        description: "Extra env inherited by every app (NAME=value ...)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -68,8 +72,10 @@ jobs:
           REPS: ${{ inputs.reps || '3' }}
           APPS: ${{ inputs.apps || '' }}
           ALLOCATORS: ${{ inputs.allocators || 'glibc v2 jemalloc mimalloc tcmalloc' }}
+          RUNTIME_ENV: ${{ inputs.runtime_env || '' }}
         run: |
           set -o pipefail
+          if [ -n "$RUNTIME_ENV" ]; then export $RUNTIME_ENV; fi
           make -j"$(nproc)"
           bash bench/apps/apps.sh 2>&1 | tee legacy.txt
           {

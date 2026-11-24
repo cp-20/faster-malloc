@@ -88,3 +88,7 @@ mark were recorded when the work was done.
 | [0076](0076-dense-extents-locked-batch-pool-paced-prompt.md) | Dense span extents, locked batch pool, paced regroup prompt | Accepted |
 | [0077](0077-large-slab-cache-splitting-dense-first-spans.md) | Per-thread large slab, cached-mapping splitting, dense first spans | Accepted |
 | [0078](0078-small-object-fastpath-and-census-syscalls.md) | Frameless single-TLS free/calloc/realloc, C++17/C23 sized & aligned paths, and syscall-free census/first-span reuse | Accepted |
+| [0079](0079-full-local-byte-budget.md) | Spend the full per-class local byte budget | Accepted |
+| [0080](0080-geometric-realloc-headroom.md) | Reserve headroom for geometric large-realloc growth | Accepted |
+| [0081](0081-warm-large-cache-budget.md) | Adaptive warm large-cache budget (2x, cap 128 MiB) | Accepted |
+| [0082](0082-4m-large-slab.md) | 4 MiB per-thread large slab | Accepted |

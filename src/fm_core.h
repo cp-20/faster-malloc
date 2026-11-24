@@ -229,6 +229,12 @@ static void fm_stack_resume(void)
 extern __thread uint32_t fm_flush_seq[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 extern __thread int fm_in_census __attribute__((tls_model("initial-exec")));
 extern __thread FM_Batch *fm_batch_pool __attribute__((tls_model("initial-exec")));
+/* N16: keep a small stash of spare batch headers per thread.  The old code
+ * retained exactly one, so the second batch release in a cross-thread free
+ * burst took fm_central_lock; with the stash the first N16 releases are
+ * lock-free and a global-pool refill grabs several headers under one lock. */
+#define FM_BATCH_LOCAL_STASH 8u
+static __thread uint32_t fm_batch_pool_n __attribute__((tls_model("initial-exec")));
 static FM_Batch *fm_batch_global_head; /* protected by fm_central_lock */
 
 /* Large-block cache (ADR 0011): per-thread cache of freed large blocks,
@@ -252,6 +258,11 @@ static FM_Batch *fm_batch_global_head; /* protected by fm_central_lock */
  * reuse boost, not the whole throughput profile. */
 #define FM_LCACHE_WARM_BUDGET_CAP (128ull << 20)
 extern __thread void *fm_lcache_head[FM_LCACHE_BUCKETS]
+    __attribute__((tls_model("initial-exec")));
+/* N37: large-block cache buckets hand out FIFO.  The lists stay singly
+ * linked; a per-thread tail makes admission O(1).  Small size classes keep
+ * their LIFO local lists, so the malloc/free hot paths are untouched. */
+static __thread void *fm_lcache_tail[FM_LCACHE_BUCKETS]
     __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_warm_mask __attribute__((tls_model("initial-exec")));
@@ -514,21 +525,35 @@ static inline FM_Batch *fm_batch_alloc(void)
     FM_Batch *b = fm_batch_pool;
     if (__builtin_expect(b != NULL, 1)) {
         fm_batch_pool = b->next;
+        if (fm_batch_pool_n)
+            fm_batch_pool_n--;
         b->next = NULL;
         return b;
     }
-    /* Try global freelist (cross-thread recycling). */
+    /* Try global freelist (cross-thread recycling).  Take a whole stash
+     * under the one lock acquisition instead of a single header: a
+     * cross-free burst otherwise paid fm_central_lock on every release
+     * after its first (N16). */
     /* Recycled nodes can leave and re-enter the stack between a load and
      * a CAS. Hold the same fork-aware lock as the central batch lists. */
     pthread_mutex_lock(&fm_central_lock);
     b = fm_batch_global_head;
-    if (b)
-        fm_batch_global_head = b->next;
-    pthread_mutex_unlock(&fm_central_lock);
     if (b) {
+        FM_Batch *tail = b;
+        uint32_t got = 1;
+        while (tail->next && got < FM_BATCH_LOCAL_STASH) {
+            tail = tail->next;
+            got++;
+        }
+        fm_batch_global_head = tail->next;
+        fm_batch_pool = b->next;
+        fm_batch_pool_n = got - 1;
+        tail->next = NULL;
         b->next = NULL;
-        return b;
     }
+    pthread_mutex_unlock(&fm_central_lock);
+    if (b)
+        return b;
     char *page = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (page == MAP_FAILED)
@@ -543,15 +568,19 @@ static inline FM_Batch *fm_batch_alloc(void)
      * leaked per page the moment recycling was exhausted, which flush
      * splitting does in pure-free churn. */
     fm_batch_pool = &first[1];
+    fm_batch_pool_n = 126;
     return &first[0];
 }
 
 static inline void fm_batch_release(FM_Batch *b)
 {
-    /* The next local publication usually needs the header we just popped. */
-    if (!fm_batch_pool) {
-        b->next = NULL;
+    /* The next local publication usually needs the header we just popped;
+     * keep up to FM_BATCH_LOCAL_STASH of them local and lock only on
+     * overflow. */
+    if (fm_batch_pool_n < FM_BATCH_LOCAL_STASH) {
+        b->next = fm_batch_pool;
         fm_batch_pool = b;
+        fm_batch_pool_n++;
         return;
     }
     pthread_mutex_lock(&fm_central_lock);
@@ -2227,8 +2256,14 @@ static inline void fm_large_free(FM_Span *sp, void *p)
                 if (pend > pstart)
                     (void)madvise((void *)pstart, pend - pstart, MADV_DONTNEED);
             }
-            sp->lnext = (uintptr_t)fm_lcache_head[b];
-            fm_lcache_head[b] = sp;
+            /* N37: enqueue at the tail so hand-out (which pops the head)
+             * is FIFO for large blocks.  Small classes keep LIFO. */
+            sp->lnext = 0;
+            if (fm_lcache_head[b])
+                ((FM_Span *)fm_lcache_tail[b])->lnext = (uintptr_t)sp;
+            else
+                fm_lcache_head[b] = sp;
+            fm_lcache_tail[b] = sp;
             fm_lcache_bytes += ms;
             return;
         }
@@ -2245,6 +2280,7 @@ static inline size_t fm_large_cache_drain(void)
     for (int b = 0; b < FM_LCACHE_BUCKETS; b++) {
         FM_Span *sp = (FM_Span *)fm_lcache_head[b];
         fm_lcache_head[b] = NULL;
+        fm_lcache_tail[b] = NULL;
         while (sp) {
             FM_Span *next = (FM_Span *)sp->lnext;
             released += sp->map_size;
@@ -2291,12 +2327,15 @@ __attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *z
          * blocks in a bucket differ by less than 2x, so the head
          * usually fits. */
         FM_Span **link = (FM_Span **)&fm_lcache_head[b];
+        FM_Span *prev = NULL;
         for (int i = 0; i < 8 && *link; i++) {
             FM_Span *sp = *link;
             if (fm_large_usable(sp) >= need_map) {
                 if (b < 64)
                     fm_lcache_warm_mask |= (1ULL << b);
                 *link = (FM_Span *)sp->lnext;
+                if ((void *)sp == fm_lcache_tail[b])
+                    fm_lcache_tail[b] = prev ? (void *)prev : *link;
                 fm_lcache_bytes -= sp->map_size;
                 sp->user_size = size;
                 sp->lnext = 0;
@@ -2304,6 +2343,7 @@ __attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *z
                     *zeroed = 0;
                 return (void *)((char *)sp + HEADER_SIZE);
             }
+            prev = sp;
             link = (FM_Span **)&sp->lnext;
         }
     }
@@ -2330,11 +2370,14 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
         size_t carve = FM_ALIGN_UP(want + HEADER_SIZE, SPAN_SIZE);
         for (int b = nb + 2; b <= 22 && b < FM_LCACHE_BUCKETS; b++) {
             FM_Span **link = (FM_Span **)&fm_lcache_head[b];
+            FM_Span *prev = NULL;
             for (int i = 0; i < 8 && *link; i++) {
                 FM_Span *sp = *link;
                 size_t usable = fm_large_usable(sp);
                 if (usable <= (4u << 20) && usable >= need_map) {
                     *link = (FM_Span *)sp->lnext;
+                    if ((void *)sp == fm_lcache_tail[b])
+                        fm_lcache_tail[b] = prev ? (void *)prev : *link;
                     fm_lcache_bytes -= sp->map_size;
                     if (usable >= carve + SPAN_SIZE + FM_PAGE_SIZE) {
                         uintptr_t map_end = sp->map_base + sp->map_size;
@@ -2348,8 +2391,12 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
                         rem->user_size = 0;
                         rem->align = 0;
                         int rb = 63 - __builtin_clzll(rem->map_size);
-                        rem->lnext = (uintptr_t)fm_lcache_head[rb];
-                        fm_lcache_head[rb] = rem;
+                        rem->lnext = 0;
+                        if (fm_lcache_head[rb])
+                            ((FM_Span *)fm_lcache_tail[rb])->lnext = (uintptr_t)rem;
+                        else
+                            fm_lcache_head[rb] = rem;
+                        fm_lcache_tail[rb] = rem;
                         fm_lcache_bytes += rem->map_size;
                         fm_lbucket_seen[rb] = fm_ltick;
                         sp->map_size = rem_addr - sp->map_base;
@@ -2360,6 +2407,7 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
                         *zeroed = 0;
                     return (void *)((char *)sp + HEADER_SIZE);
                 }
+                prev = sp;
                 link = (FM_Span **)&sp->lnext;
             }
         }
@@ -2541,6 +2589,7 @@ static void fm_thread_exit_flush(void)
         fm_batch_global_head = fm_batch_pool;
         pthread_mutex_unlock(&fm_central_lock);
         fm_batch_pool = NULL;
+        fm_batch_pool_n = 0;
     }
 }
 

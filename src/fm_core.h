@@ -2219,9 +2219,12 @@ static inline void fm_large_free(FM_Span *sp, void *p)
              * [2^b, 2^(b+1)), so b >= 24 means >= 16 MiB).  Medium buffers
              * churned by jq/g++/Python stay resident when re-freed, while
              * sort's one-shot merge buffers (>= 16 MiB) are still purged. */
-            if (FM_CFG()->lcache_cold_purge &&
-                b >= 24 &&
-                !(fm_lcache_warm_mask & (1ULL << b))) {
+            /* A >=16 MiB payload is worth dropping even on warm reuse:
+             * V8 external/Buffer churn cycles many distinct huge buffers
+             * through a bucket that was marked warm on its first reuse, and
+             * the warm exemption otherwise keeps the whole 128 MiB budget
+             * resident.  Below 16 MiB the medium buffers stay resident. */
+            if (FM_CFG()->lcache_cold_purge && b >= 24) {
                 uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
                 uintptr_t pend = (sp->map_base + sp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);
                 if (pend > pstart)

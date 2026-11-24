@@ -270,6 +270,13 @@ extern __thread uint64_t fm_lcache_warm_mask __attribute__((tls_model("initial-e
  * bucket is always cached, so seeding a cycle still works.  All state
  * is per-thread, so this is race-free. */
 #define FM_LCACHE_HOT_WINDOW 8u
+/* N44+N26: cc1plus cycles ~64 KiB obstack chunks (buckets 16-17) across
+ * function boundaries, so they need the 64-free window; the rest of the
+ * 64 KiB-1 MiB medium band (buckets 18-20) needs 16 frees to outlive a
+ * cycle.  Every other size band keeps the default 8, and warm buckets
+ * keep the wide 64.  Slow path only. */
+#define FM_LCACHE_OBSTACK_WINDOW 64u
+#define FM_LCACHE_MED_HOT_WINDOW 16u
 extern __thread uint32_t fm_ltick __attribute__((tls_model("initial-exec")));
 /* realloc -> large-miss hint (ADR 0075): the old user size of a buffer
  * being grown, or 0. Passed out of band so the shared cache-hit path
@@ -683,13 +690,21 @@ static char *fm_map_dense_span(void)
 }
 
 /* Per-thread 4 MiB base-page slab for >4 KiB class spans and <=512 KiB
- * large allocations: amortizes mmap/trim syscalls without hinting THP on
- * potentially sparse allocations, and drains on malloc_trim / thread exit.
- * A 4 MiB slab holds twice as many 64 KiB carves as 2 MiB, so g++/jq/xz
- * medium-buffer churn crosses the mmap/munmap slow path half as often;
- * untouched tail pages stay non-resident, so RSS is unaffected. */
+ * large allocations: amortizes mmap/trim syscalls and drains on
+ * malloc_trim / thread exit.  First slabs stay base-page to avoid faulting
+ * huge folios for sparse use; once a thread has refilled the slab twice,
+ * THP is hinted for subsequent slabs.  A 4 MiB slab holds twice as many
+ * 64 KiB carves as 2 MiB, so g++/jq/xz medium-buffer churn crosses the
+ * mmap/munmap slow path half as often; untouched tail pages stay
+ * non-resident, so RSS is unaffected. */
 static _Thread_local char *fm_lextent_cur __attribute__((tls_model("initial-exec")));
 static _Thread_local size_t fm_lextent_rem __attribute__((tls_model("initial-exec")));
+#ifdef MADV_HUGEPAGE
+/* Number of slabs this thread has mapped.  The first slab is the initial
+ * one and the next is the first refill; only after the second refill has
+ * the thread proven sustained slab demand do we hint THP (see ADR 0077). */
+static _Thread_local unsigned fm_lextent_maps __attribute__((tls_model("initial-exec")));
+#endif
 
 static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out)
 {
@@ -716,6 +731,14 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
     size_t head_slack = (size_t)(aligned - raw);
     if (head_slack)
         munmap(raw, head_slack);
+#ifdef MADV_HUGEPAGE
+    /* Sparse first slabs must stay base-page (ADR 0077: a single touched
+     * page faults a whole 2 MiB folio).  Hint only once two refills show
+     * the thread keeps consuming slabs, so sort/xz medium-buffer churn
+     * gets huge-page faults without the startup/pareto RSS blowup. */
+    if (++fm_lextent_maps > 2)
+        (void)madvise(aligned, slab_len - head_slack, MADV_HUGEPAGE);
+#endif
     *raw_out = (uintptr_t)aligned;
     *len_out = need;
     fm_lextent_cur = aligned + need;
@@ -2210,10 +2233,14 @@ static inline void fm_large_free(FM_Span *sp, void *p)
     if (sp->align == 0 && (uintptr_t)p == (uintptr_t)sp + HEADER_SIZE) {
         size_t ms = sp->map_size;
         int b = 63 - __builtin_clzll(fm_large_usable(sp));
+        uint32_t hot_window =
+            (b >= 16 && b <= 17) ? FM_LCACHE_OBSTACK_WINDOW
+            : (b >= 18 && b <= 20) ? FM_LCACHE_MED_HOT_WINDOW
+                                   : FM_LCACHE_HOT_WINDOW;
         if (b < FM_LCACHE_BUCKETS &&
             fm_lcache_bytes + ms <= fm_lcache_budget(b) &&
             fm_ltick - fm_lbucket_seen[b] <=
-                ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : FM_LCACHE_HOT_WINDOW)) {
+                ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : hot_window)) {
             /* Only purge cold mappings large enough that the application is
              * unlikely to reuse them soon (bucket b covers usable sizes in
              * [2^b, 2^(b+1)), so b >= 24 means >= 16 MiB).  Medium buffers

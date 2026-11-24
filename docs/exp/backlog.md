@@ -119,6 +119,21 @@ These are deliberately smaller and self-contained so the local
 | N63 | git | N2 + N12 + N31 | med |
 | N64 | sqlite | N2 + N12 + N24 | med |
 | N65 | all | combine warm-huge + G3 + N23 + N26 | med |
+| N66 | gcc/g++ | combine N44 (64 KiB obstack window) + N26 (64 KiB-1 MiB window) | low |
+| N67 | python | combine N1 (span hint release) + N24 (2-page purge) + N23 (dead large span) | med |
+| N68 | git/sqlite | combine N2 + N12 + N31 + N57 for startup mappings | med |
+| N69 | large/cross | combine N37 (large-class FIFO) + N16 (cross-free batching) | med |
+| N70 | sort | combine N45 (8-16 MiB purge) + warm-huge | low |
+| N71 | redis | combine N43 (exact first span) + N59 + N2 | med |
+| N72 | node | combine N60 (warm-huge + 8 MiB) + N44 (obstack/medium window) | med |
+| N73 | g++ | combine N11 (adaptive slab) + N25 (128 KiB budget) + N61 | med |
+| N74 | sort/xz | combine N29 (THP slab) + N39 (32 MiB huge cap) + N54 | med |
+| N75 | micro | combine N5 (no prefetch) + N15 (class fold) only if both win | low |
+| N76 | all | N8 128 KiB spans + fix sort +1.6% by keeping 64 KiB purge units | high |
+| N77 | all | adaptive large-cache budget from RSS high-water instead of mapped bytes | high |
+| N78 | sort/xz | MADV_FREE (N28) + warm-huge | low |
+| N79 | all | idle-release timer (default off) + cold purge on idle, not on free | high |
+| N80 | all | per-class page purge + earlier fully-free span release (N1 + N21) | med |
 
 
 

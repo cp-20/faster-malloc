@@ -719,6 +719,16 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
     return aligned;
 }
 
+/* A short-lived process usually touches only a handful of size classes.
+ * The first of them would otherwise pay for the whole dense extent: one
+ * 4 MiB mmap, two trims and the extent's global-lock/warmup bookkeeping.
+ * Serve that one span from an unused slice of our own BSS instead: zero
+ * syscalls, and the pages stay demand-faulted exactly as before.  The
+ * 2xSPAN_SIZE buffer is runtime-aligned because ld.so maps the DSO only
+ * page-aligned, not 64 KiB-aligned. */
+static char fm_boot_area[2 * SPAN_SIZE] __attribute__((aligned(SPAN_SIZE)));
+static _Atomic int fm_boot_taken;
+
 /* Map and initialise a fresh span for class cls.  Blocks are carved
  * lazily from the span's bump range by the refill path, so creation
  * does not touch every block's memory. */
@@ -737,7 +747,16 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
     uintptr_t raw_base = 0;
     size_t raw_len = SPAN_SIZE;
     char *base;
-    if (bs <= FM_PAGE_SIZE) {
+    int boot = 0;
+    if (bs <= 2048 &&
+        !atomic_exchange_explicit(&fm_boot_taken, 1, memory_order_relaxed)) {
+        /* Leave map_base zero: a census can never call this span dead
+         * (one block is kept permanently out of circulation below), and
+         * no other OS-release path applies to a small span, so no munmap
+         * can ever be issued against the library's own data segment. */
+        base = (char *)FM_ALIGN_UP((uintptr_t)fm_boot_area, SPAN_SIZE);
+        boot = 1;
+    } else if (bs <= FM_PAGE_SIZE) {
         base = fm_map_dense_span();
         raw_base = (uintptr_t)base;
     } else {
@@ -756,7 +775,7 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
     sp->magic = FM_SPAN_MAGIC;
     sp->nblocks = (uint32_t)n;
     sp->dead_mark = 0;
-    sp->map_base = raw_base;
+    sp->map_base = boot ? 0 : raw_base;
     sp->map_size = raw_len;
     sp->user_size = 0;
     sp->align = 0;
@@ -764,7 +783,11 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
     sp->purged_mask = 0;
     sp->withheld_cnt = 0;
 
-    *count_out = (uint32_t)n;
+    /* Withhold the last block of the bootstrap span forever.  A census
+     * sees one block that is neither free nor visible, so the span is
+     * never a release/purge candidate; every other block is carved and
+     * handed out normally. */
+    *count_out = (uint32_t)n - (uint32_t)boot;
     return base;
 }
 
@@ -1805,10 +1828,12 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
         FM_CensusEnt *e = &cen.ents[i];
         if (e->span && e->dead) {
             FM_Span *sp = (FM_Span *)e->span;
-            uintptr_t base = sp->map_base;
-            size_t len = sp->map_size;
-            released += len;
-            munmap((void *)base, len);
+            if (sp->map_base) { /* static bootstrap span has no mapping */
+                uintptr_t base = sp->map_base;
+                size_t len = sp->map_size;
+                released += len;
+                munmap((void *)base, len);
+            }
         }
     }
 

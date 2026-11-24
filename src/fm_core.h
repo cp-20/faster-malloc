@@ -302,6 +302,13 @@ extern __thread uint32_t fm_lbucket_seen[FM_LCACHE_BUCKETS]
 #define FM_PROMPT_MIN_FLUSHES (8u * FM_RELEASE_EVERY)
 #define FM_RELEASE_MIN_DEPTH 4u
 #define FM_RELEASE_KEEP 2u
+/* A retained dead span is always one 64 KiB mapping, but its burst
+ * absorption value scales with how many blocks it holds: a 16 B class
+ * keeps ~4k reusable blocks per span, a large class only a handful.
+ * Below this block size the two-span quota is worth its RSS premium;
+ * at or above it the spans are almost pure footprint with no real
+ * reuse benefit, so retain none (N23). */
+#define FM_KEEP_LARGE_MIN 2048u
 #define FM_RELEASE_AGE_MS 100u
 #define FM_RELEASE_INTERVAL_MS 10u
 #define FM_RELEASE_MAX_INTERVAL_MS 5000u
@@ -1616,7 +1623,12 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
     /* Retention quota (ADR 0020): a census in its automatic form
      * keeps up to `keep` of the dead spans -- their blocks stay on
      * the central stack, immediately reusable -- and unmaps only
-     * the excess.  malloc_trim passes keep == 0 and releases all. */
+     * the excess.  malloc_trim passes keep == 0 and releases all.
+     * N23: for large classes a 64 KiB span holds few blocks, so the
+     * quota buys almost no burst absorption for its RSS cost; drop it
+     * there while leaving small classes (and their profiles) intact. */
+    if (bs >= FM_KEEP_LARGE_MIN)
+        keep = 0;
     if (keep) {
         uint32_t kept = 0;
         for (size_t i = 0; i < cen.cap && kept < keep; i++) {

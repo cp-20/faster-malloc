@@ -109,15 +109,23 @@ def fixture_paths(work: Path) -> dict[str, str]:
     }
 
 
+def sub_paths(text: str, paths: dict[str, str]) -> str:
+    # Command strings contain literal braces (the jq filter), so use plain
+    # placeholder replacement rather than str.format.
+    for key, value in paths.items():
+        text = text.replace("{" + key + "}", value)
+    return text
+
+
 def expand(spec: dict, paths: dict[str, str]) -> dict:
     out = dict(spec)
-    out["cmd"] = [part.format(**paths) for part in spec["cmd"]]
+    out["cmd"] = [sub_paths(part, paths) for part in spec["cmd"]]
     if "cwd" in spec:
-        out["cwd"] = spec["cwd"].format(**paths)
+        out["cwd"] = sub_paths(spec["cwd"], paths)
     if "stdin_file" in spec:
-        out["stdin_file"] = spec["stdin_file"].format(**paths)
+        out["stdin_file"] = sub_paths(spec["stdin_file"], paths)
     if "digest_file" in spec:
-        out["digest_file"] = spec["digest_file"].format(**paths)
+        out["digest_file"] = sub_paths(spec["digest_file"], paths)
     return out
 
 

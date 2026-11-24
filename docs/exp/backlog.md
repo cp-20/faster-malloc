@@ -62,6 +62,20 @@ These are deliberately smaller and self-contained so the local
 | N6 | xz | add per-app smaps/mincore instrumentation to the CI artifact so the xz 0.68% RSS gap is attributed, not guessed | low |
 | N7 | all | trim on memory pressure: read `/proc/self/statm` on the large-free slow path and purge cold caches when RSS exceeds a high-water mark | high |
 | N8 | all | 128 KiB spans (regenerate `size_classes2.h`; free mask/dense extent/census/trim all follow) | high |
+| N9 | redis | reduce Redis's startup RSS: the libc-built redis now shows v2 6.4 MiB vs glibc 5.4; cut first-span/TLS mappings or the idle extent | med |
+| N10 | node | node RSS 531 vs glibc 450: purge 8-16 MiB V8 external buffers (separate threshold from the 16 MiB default) | med |
+| N11 | g++ | make the large slab adaptive: 2 MiB for single-thread/short processes, 4 MiB for multithread; target g++ RSS without sort time loss | med |
+| N12 | git/sqlite | startup mapping diet: map the dense extent lazily and reuse one 64 KiB bootstrap span; target 13.2 -> 11.4 MiB | med |
+| N13 | python | release fully-free spans at a higher cadence (lower release interval / keep=0) only when RSS is above a high-water mark | high |
+| N14 | all | make the cold-purge threshold adaptive: 16 MiB default, 8 MiB when the process is above a mapped-bytes high-water | med |
+| N15 | micro | shave one load/branch from malloc/free (fold the class and head load); accept only an exact Ir win | low |
+| N16 | cross | reduce cross-thread free cost: avoid the central lock on the second free of a batch | med |
+| N17 | all | 8-byte size classes below 128 B (regenerate the ladder; arithmetic dispatch changes) | high |
+| N18 | all | 128 KiB spans (regenerate `size_classes2.h`; free mask/dense extent/census follow) | high |
+| N19 | all | use MADV_FREE for cold cached large blocks instead of MADV_DONTNEED; measure peak RSS and time | med |
+| N20 | all | cap realloc headroom for buffers that are freed without reuse (track a reuse flag) | med |
+| N21 | python/g++ | purge pages of partially-free spans more aggressively, but only when an RSS high-water mark is exceeded | med |
+| N22 | redis | reduce redis server RSS: first-span cap and TLS array size for single-thread servers | med |
 
 
 

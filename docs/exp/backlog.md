@@ -271,7 +271,7 @@ flag and re-run the 11-rep matrices.
 
 | id | branch | result | status |
 |---|---|---|---|
-| P3 | `exp/pageheap` | ADR 0086's 257-2032 B page heap, 11 reps: **micro 1.1844 (worst 1.559)**, jq 1.208 / RSS 262 -> 285 MiB, git 1.440, gcc 1.004 / RSS +2.4%, sort RSS +6.3%, sqlite RSS +3.2% | rejected |
+| P3 | `exp/pageheap` | ADR 0086's 257-2032 B page heap, 11 reps: **micro 1.1844 (worst 1.559)**, jq 1.208 / RSS 262 -> 285 MiB, git 1.440, gcc 1.004 / RSS +2.4%, sort RSS +6.3%, sqlite RSS +3.2%.  Legacy 11 reps: **git 29.5 -> 26.7 MiB (-9.6%)** but node 471 -> 525, jq 368 -> 385, lua 16.6 -> 18.2, gcc 374 -> 379, sqlite 13.9 -> 14.0 | rejected (only git wins) |
 
 | P4 | `exp/purged-cache` | keep the VMA of a large block that misses the byte budget, `MADV_DONTNEED` its payload, and reuse it from a per-bucket list: node munmap 6931 -> 3296 (madvise 1263 -> 4771) at cap 1024, node time 1.18 -> 1.15 s but RSS 405 -> 409 MB because each cached block keeps its header page; cap 256 is time- and RSS-neutral. | rejected |
 

@@ -409,6 +409,23 @@ buckets get a 32 MiB budget): exp-bench flat (micro 1.0005, jq 252, paired
 payload buys 8 MiB of RSS and does not recover the time, so both huge-bucket
 variants are rejected and PR #5 keeps the selective build.
 
+## Round 27: bump-first refill ordering (2026-11-25)
+
+`fm_refill_class` takes a central batch before carving from the current
+span's bump remainder, so freed blocks from old spans are reused while
+those spans still hold live blocks -- exactly the shape that keeps pages
+partially occupied.  The variant carves from the bump remainder first and
+only falls back to central when the span is exhausted, so a class fills
+one span densely before touching older holes.
+
+| case | main | bump-first |
+|---|---:|---:|
+| git rev-list | 24.0 MB / 0.03 s | 23.9 / 0.04 |
+| lua churn (6 interleaved) | 16.2-16.6 MB / 0.31 s | 16.0-16.2 / 0.31-0.33 |
+
+Within noise on both, with a small time cost.  Recorded as a null result;
+the refill order does not change page residency enough to matter.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

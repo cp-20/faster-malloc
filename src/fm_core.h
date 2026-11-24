@@ -93,13 +93,32 @@ typedef struct FM_HotTls {
     void *head[CLASS_COUNT];
     int32_t cnt[CLASS_COUNT];
     void *tail[CLASS_COUNT];
+    /* Exit-flush dirty mask, appended so the hot offsets above (and the JIT's
+     * fs: head displacement) stay unchanged.  Bit c is set the first time this
+     * thread creates local state for class c: a non-empty free bin (refill or
+     * a free push) or a bump range remainder.  fm_thread_exit_flush then only
+     * visits classes whose bit is set instead of walking all CLASS_COUNT bins
+     * and ranges on every thread exit.  Set-only: the mask is never cleared
+     * mid-life, so it is a conservative superset and draining a class whose
+     * bin/range is already empty is a safe no-op (fm_flush_bin/fm_publish2
+     * both handle the zero case).  Leaking is impossible here because the
+     * mask can only ever gain bits relative to the real local state. */
+    uint64_t exit_dirty[(CLASS_COUNT + 63) / 64];
 } FM_HotTls;
+#define FM_EXIT_DIRTY_WORDS ((CLASS_COUNT + 63) / 64)
 
 extern __thread FM_HotTls fm_tls __attribute__((tls_model("initial-exec")));
 extern __thread char *fm_bump_ptr[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 extern __thread char *fm_bump_end[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 /* Exit hook state: 0 = not armed, 1 = armed, 2 = destructor running (disarmed). */
 extern __thread int fm_exit_armed __attribute__((tls_model("initial-exec")));
+
+/* Mark cls as having local state that may need returning at exit.  Called
+ * only from cold/transition paths: refill, and an empty->nonempty free push. */
+static inline void fm_mark_local_dirty(uint32_t cls)
+{
+    fm_tls.exit_dirty[cls >> 6] |= (uint64_t)1 << (cls & 63);
+}
 
 typedef struct FM_Span {
     uint32_t cls;       /* size class, or LARGE_CLASS */
@@ -882,6 +901,10 @@ static void *fm_regroup_by_span(void *head, void **tail_out)
 __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t cls)
 {
     fm_arm_thread_exit();
+    /* Every exit below leaves local state behind: a populated head, and/or a
+     * bump remainder (lazy_bump keeps one, non-lazy publishes it).  Mark here
+     * so exit flush need not revisit classes this thread never touched. */
+    fm_mark_local_dirty(cls);
 
     /* Try the central list first: take a whole batch, O(1). */
     {
@@ -2495,29 +2518,42 @@ static inline int fm_is_aligned_ptr(const void *p)
  * cached mappings.  Use only core helpers: TLS teardown must not malloc. */
 static void fm_thread_exit_flush(void)
 {
-    for (uint32_t c = 0; c < CLASS_COUNT; c++) {
-        if (fm_tls.head[c])
-            fm_flush_bin(c);
-        char *cur = fm_bump_ptr[c];
-        char *end = fm_bump_end[c];
-        if (cur < end) {
-            size_t bs = kClassSize[c];
-            uint32_t rcount = (uint32_t)((end - cur) / bs);
-            fm_bump_ptr[c] = end;
-            if (rcount > 0) {
-                void *rhead = cur;
-                void *rt = cur;
-                for (uint32_t i = 1; i < rcount; i++) {
-                    void *next = (char *)rt + bs;
-                    *(void **)rt = next;
-                    rt = next;
-                }
-                *(void **)rt = NULL;
+    /* Visit only classes this thread actually left local state in.  The dirty
+     * mask is set on every path that can populate a free bin or bump range
+     * (refill, and an empty->nonempty free push) and is never cleared mid-life,
+     * so its set bits are a conservative superset of the classes the old full
+     * CLASS_COUNT walk would have visited -- no block can be stranded here. */
+    for (uint32_t w = 0; w < FM_EXIT_DIRTY_WORDS; w++) {
+        uint64_t mask = fm_tls.exit_dirty[w];
+        while (mask) {
+            uint32_t b = (uint32_t)__builtin_ctzll(mask);
+            mask &= mask - 1;
+            uint32_t c = (w << 6) + b;
+            if (c >= CLASS_COUNT) /* padding bits in the final word */
+                continue;
+            if (fm_tls.head[c])
+                fm_flush_bin(c);
+            char *cur = fm_bump_ptr[c];
+            char *end = fm_bump_end[c];
+            if (cur < end) {
+                size_t bs = kClassSize[c];
+                uint32_t rcount = (uint32_t)((end - cur) / bs);
+                fm_bump_ptr[c] = end;
+                if (rcount > 0) {
+                    void *rhead = cur;
+                    void *rt = cur;
+                    for (uint32_t i = 1; i < rcount; i++) {
+                        void *next = (char *)rt + bs;
+                        *(void **)rt = next;
+                        rt = next;
+                    }
+                    *(void **)rt = NULL;
 #ifdef FM_DEBUG
-                for (uint32_t i = 0; i < rcount; i++)
-                    ((uint64_t *)(cur + (size_t)i * bs))[1] = 0xDEADDEADDEADDEADull;
+                    for (uint32_t i = 0; i < rcount; i++)
+                        ((uint64_t *)(cur + (size_t)i * bs))[1] = 0xDEADDEADDEADDEADull;
 #endif
-                fm_publish2(rhead, rt, c, rcount, 1);
+                    fm_publish2(rhead, rt, c, rcount, 1);
+                }
             }
         }
     }
@@ -2674,6 +2710,7 @@ static inline void fm_tls_push_free(void *p, size_t cls)
                 : [off] "r"(tp_off), [cls] "r"(cls), [p] "r"(p),
                   [toff] "i"(offsetof(FM_HotTls, tail))
                 : "memory");
+        fm_mark_local_dirty((uint32_t)cls); /* bin went empty -> nonempty */
     }
     __asm__("subl $1, %%fs:%c[coff](%[off],%[cls],4)"
             : "=@ccle"(le)
@@ -2689,8 +2726,10 @@ static inline void fm_tls_push_free(void *p, size_t cls)
     ((uint64_t *)p)[1] = 0xDEADDEADDEADDEADull;
 #endif
     fm_tls.head[cls] = p;
-    if (__builtin_expect(!old_h, 0))
+    if (__builtin_expect(!old_h, 0)) {
         fm_tls.tail[cls] = p;
+        fm_mark_local_dirty((uint32_t)cls); /* bin went empty -> nonempty */
+    }
     if (__builtin_expect(--fm_tls.cnt[cls] <= 0, 0))
         fm_free_cnt_slow((uint32_t)cls);
 #endif

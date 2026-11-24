@@ -66,6 +66,7 @@
 #include <stdatomic.h>
 #include <sched.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -1918,7 +1919,26 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
  * spacing those censuses to seconds makes the tax negligible
  * while leaving small dead stacks on the fast cadence their
  * release needs. */
-static void fm_release_maybe(uint32_t cls, uint32_t now, uint32_t flushed_cls)
+/* RSS-pressure high-water gate (N13).  ru_maxrss is the process's peak RSS
+ * in KiB on Linux, i.e. a true high-water mark that never recedes; once a
+ * process has grown past the threshold the automatic span release drops its
+ * burst-absorption reserve (keep -> 0) so fully-free spans that age out are
+ * unmapped instead of retained.  Checked once per release tick, not per
+ * class, in fm_auto_release_tick.  The adaptive census interval is left
+ * alone: lowering it on deep DOM-style stacks is the jq census tax ADR 0020
+ * already paid for, and the age gate (100 ms) still protects cyclic sets. */
+#define FM_RSS_PRESSURE_MB 128u
+static inline int fm_rss_pressured(void)
+{
+    struct rusage ru;
+    if (getrusage(RUSAGE_SELF, &ru) != 0)
+        return 0;
+    return (uint64_t)ru.ru_maxrss >=
+           (uint64_t)FM_RSS_PRESSURE_MB * 1024u;
+}
+
+static void fm_release_maybe(uint32_t cls, uint32_t now, uint32_t flushed_cls,
+                             int rss_pressured)
 {
     const FM_Config *cfg = FM_CFG();
     FM_Central *c = &fm_central[cls];
@@ -1963,7 +1983,7 @@ static void fm_release_maybe(uint32_t cls, uint32_t now, uint32_t flushed_cls)
      * the full release census (mark/purge/unmap) as before. */
     uint32_t depth = atomic_load_explicit(&c->depth, memory_order_relaxed);
     int mode = depth <= cfg->regroup_only_depth ? 2 : 0;
-    size_t released = fm_trim_class(cls, cfg->release_keep, mode);
+    size_t released = fm_trim_class(cls, rss_pressured ? 0u : cfg->release_keep, mode);
     uint32_t next = fm_census_walked / cfg->release_walk_div;
     if (next < cfg->release_interval_ms)
         next = cfg->release_interval_ms;
@@ -1988,8 +2008,9 @@ static void fm_auto_release_tick(uint32_t flushed_cls)
      * releasing.  The per-class gates are two atomic loads, so a
      * full sweep per tick is cheap; the census behind them is what
      * the gates protect. */
+    int rss_pressured = fm_rss_pressured();
     for (uint32_t cls = 0; cls < CLASS_COUNT; cls++)
-        fm_release_maybe(cls, now, flushed_cls);
+        fm_release_maybe(cls, now, flushed_cls, rss_pressured);
 }
 
 /* ------------------------------------------------------------------ */

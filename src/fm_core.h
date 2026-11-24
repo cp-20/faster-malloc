@@ -2224,8 +2224,19 @@ static inline void fm_large_free(FM_Span *sp, void *p)
                 !(fm_lcache_warm_mask & (1ULL << b))) {
                 uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
                 uintptr_t pend = (sp->map_base + sp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);
-                if (pend > pstart)
-                    (void)madvise((void *)pstart, pend - pstart, MADV_DONTNEED);
+                if (pend > pstart) {
+                    /* N78/N28: lazy-free the cold payload instead of
+                     * dropping it now.  Pages stay mapped and can be
+                     * reused without zero-fill faults; the kernel
+                     * reclaims them under pressure.  Fall back to
+                     * DONTNEED on kernels that do not support MADV_FREE
+                     * so the discard still happens.  Composes with the
+                     * adaptive warm budget (ADR 0081): only genuinely
+                     * cold >=16 MiB buckets reach this path. */
+                    if (madvise((void *)pstart, pend - pstart, MADV_FREE) != 0)
+                        (void)madvise((void *)pstart, pend - pstart,
+                                      MADV_DONTNEED);
+                }
             }
             sp->lnext = (uintptr_t)fm_lcache_head[b];
             fm_lcache_head[b] = sp;

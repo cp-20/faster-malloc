@@ -679,13 +679,19 @@ static char *fm_map_dense_span(void)
 }
 
 /* Per-thread 4 MiB base-page slab for >4 KiB class spans and <=512 KiB
- * large allocations: amortizes mmap/trim syscalls without hinting THP on
- * potentially sparse allocations, and drains on malloc_trim / thread exit.
+ * large allocations: amortizes mmap/trim syscalls and hints THP once a slab
+ * serves a second carve (one-shot slabs stay base-page backed), and drains
+ * on malloc_trim / thread exit.
  * A 4 MiB slab holds twice as many 64 KiB carves as 2 MiB, so g++/jq/xz
  * medium-buffer churn crosses the mmap/munmap slow path half as often;
  * untouched tail pages stay non-resident, so RSS is unaffected. */
 static _Thread_local char *fm_lextent_cur __attribute__((tls_model("initial-exec")));
 static _Thread_local size_t fm_lextent_rem __attribute__((tls_model("initial-exec")));
+/* Current slab identity + reuse state, for one-shot MADV_HUGEPAGE hinting. */
+static _Thread_local char *fm_lextent_slab __attribute__((tls_model("initial-exec")));
+static _Thread_local size_t fm_lextent_slab_len __attribute__((tls_model("initial-exec")));
+static _Thread_local unsigned char fm_lextent_uses __attribute__((tls_model("initial-exec")));
+static _Thread_local unsigned char fm_lextent_hinted __attribute__((tls_model("initial-exec")));
 
 static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out)
 {
@@ -694,6 +700,18 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
         char *base = fm_lextent_cur;
         fm_lextent_cur += need;
         fm_lextent_rem -= need;
+        /* Only a slab that serves a second carve is worth hinting: one-shot
+         * slabs stay base-page backed so a sparse tail is not faulted in. */
+        if (fm_lextent_uses < 2)
+            fm_lextent_uses++;
+        if (!fm_lextent_hinted && fm_lextent_uses >= 2) {
+            fm_lextent_hinted = 1;
+#ifdef MADV_HUGEPAGE
+            size_t hint_len = fm_lextent_slab_len & ~((size_t)(2u << 20) - 1);
+            if (hint_len)
+                (void)madvise(fm_lextent_slab, hint_len, MADV_HUGEPAGE);
+#endif
+        }
         *raw_out = (uintptr_t)base;
         *len_out = need;
         return base;
@@ -716,6 +734,10 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
     *len_out = need;
     fm_lextent_cur = aligned + need;
     fm_lextent_rem = slab_len - head_slack - need;
+    fm_lextent_slab = aligned;
+    fm_lextent_slab_len = slab_len - head_slack;
+    fm_lextent_uses = 1; /* first carve is this fresh mmap's allocation */
+    fm_lextent_hinted = 0;
     return aligned;
 }
 

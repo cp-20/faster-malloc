@@ -242,6 +242,15 @@ static FM_Batch *fm_batch_global_head; /* protected by fm_central_lock */
  * allocator's peak-RSS excess in real apps; 64 MiB keeps every measured
  * churn workload at full speed while cutting most of that excess. */
 #define FM_LCACHE_MAX_BYTES (64ull << 20)
+/* Adaptive budget (large-cache slow path only): a bucket already proven to
+ * reuse cached blocks (fm_lcache_warm_mask, set on a cache hit) may retain
+ * twice the configured per-thread budget, capped here at 128 MiB.  Cold
+ * buckets keep the configured budget exactly, so a teardown-shaped bucket
+ * still stops retaining after FM_LCACHE_HOT_WINDOW frees and the footprint /
+ * shortlived profiles keep their small (or zero) cache.  The cap is half the
+ * throughput preset's 256 MiB and page purge stays on: this is a bounded
+ * reuse boost, not the whole throughput profile. */
+#define FM_LCACHE_WARM_BUDGET_CAP (128ull << 20)
 extern __thread void *fm_lcache_head[FM_LCACHE_BUCKETS]
     __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));
@@ -2160,6 +2169,24 @@ static inline size_t fm_large_usable(const FM_Span *sp)
     return sp->map_size - ((uintptr_t)sp - sp->map_base);
 }
 
+/* Adaptive per-bucket budget: a bucket that has actually served a cache hit
+ * (fm_lcache_warm_mask) may retain twice the configured per-thread budget,
+ * capped at 128 MiB; cold buckets keep the configured cap.  Doubling keeps
+ * the footprint profile's 8 MiB small, shortlived's 0 off, and leaves the
+ * throughput preset's 256 MiB untouched.  Called only on the large-free
+ * slow path, after the bucket-range check. */
+static inline uint64_t fm_lcache_budget(int b)
+{
+    uint64_t budget = FM_CFG()->lcache_max_bytes;
+    if ((fm_lcache_warm_mask & (1ULL << b)) &&
+        budget < FM_LCACHE_WARM_BUDGET_CAP) {
+        budget <<= 1;
+        if (budget > FM_LCACHE_WARM_BUDGET_CAP)
+            budget = FM_LCACHE_WARM_BUDGET_CAP;
+    }
+    return budget;
+}
+
 static inline void fm_large_free(FM_Span *sp, void *p)
 {
     fm_ltick++;
@@ -2167,7 +2194,7 @@ static inline void fm_large_free(FM_Span *sp, void *p)
         size_t ms = sp->map_size;
         int b = 63 - __builtin_clzll(fm_large_usable(sp));
         if (b < FM_LCACHE_BUCKETS &&
-            fm_lcache_bytes + ms <= FM_CFG()->lcache_max_bytes &&
+            fm_lcache_bytes + ms <= fm_lcache_budget(b) &&
             fm_ltick - fm_lbucket_seen[b] <=
                 ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : FM_LCACHE_HOT_WINDOW)) {
             if (FM_CFG()->lcache_cold_purge &&

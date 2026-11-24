@@ -330,6 +330,34 @@ mechanism is real and broad-based (-3.3 MiB across five apps) but it
 narrows jq's lead, and jq is the only app that is green in both
 dimensions, so it is not stacked onto PR #5.
 
+## Round 24: the free-page reservoir is measured (2026-11-25)
+
+The campaign had repeatedly concluded "page purge is a no-op" from knob
+screens.  That was wrong: the purge was simply unreachable.  `strace -f`
+shows **zero** `MADV_DONTNEED` calls because (a) `page_purge` is off in
+the balanced preset and (b) `fm_release_maybe` returns early while a
+class's central depth is below `release_min_depth` (default 16).
+
+An instrumented build (`FM_DIAG_PURGE`) proves the census itself runs
+thousands of times per git run (`fm_trim_class` calls: 1595 and 8555 in
+the two processes) and, once made reachable
+(`FM_PAGE_PURGE=1 FM_PURGE_MIN_PAGES=1 FM_RELEASE_MIN_DEPTH=1
+FM_RELEASE_INTERVAL_MS=1 FM_RELEASE_AGE_MS=0`), the purge pass finds
+
+```
+DIAG trim=8582 cand=58 purged=58
+```
+
+i.e. **58 fully free 4 KiB pages = 232 KiB** in the whole git rev-list
+run, and the measured RSS moves by exactly that: 23.88 -> 23.71 MiB at
+unchanged time.
+
+So a per-page free list that lets fully-free 4 KiB pages return to a
+shared pool can recover at most ~0.2 MiB on git, not the 4 MiB gap.  The
+gap is pages that each still hold at least one live block, which neither
+a page-level free list nor a cross-class page pool can reclaim without
+moving live objects.  This closes the question for git/lua/sqlite/redis.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

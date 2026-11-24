@@ -82,6 +82,14 @@
 #define FM_PAGE_SIZE 4096u
 #define FM_ALIGN_UP(x, a) (((uintptr_t)(x) + (a)-1) & ~((uintptr_t)(a)-1))
 
+/* Stage-1 dirty/muzzy decay (docs/exp/redesign-page-map.md).  A small span
+ * keeps align == 0 for its entire life (align is only meaningful for large
+ * and over-aligned spans, which never enter the small-span decay state
+ * machine), so the field is spare and is packed with the MUZZY transition
+ * timestamp.  This avoids growing the 64-byte span header, which would
+ * change every class's block count and is forbidden by the ABI. */
+#define FM_MUZZY(sp) ((sp)->align)
+
 static inline void *fm_malloc(size_t size);
 
 /* Hot thread-local free-list state grouped into one struct with parallel
@@ -306,6 +314,17 @@ extern __thread uint32_t fm_lbucket_seen[FM_LCACHE_BUCKETS]
 #define FM_RELEASE_INTERVAL_MS 10u
 #define FM_RELEASE_MAX_INTERVAL_MS 5000u
 
+/* Stage-1 time-based decay defaults.  DIRTY spans have their payload pages
+ * dropped with MADV_DONTNEED after dirty_decay_ms; MUZZY spans keep only the
+ * VA/header until muzzy_decay_ms, then are munmapped.  The maintenance thread
+ * is armed by the internal high-water of cumulative large-block frees (a
+ * cold path, so short apps and the exact-Ir micro suite never spawn it);
+ * decay_pulse_spans bounds the batches a single census pulse detaches. */
+#define FM_DECAY_DIRTY_MS 500u
+#define FM_DECAY_MUZZY_MS 2000u
+#define FM_DECAY_HIGH_WATER (256ull << 20)
+#define FM_DECAY_PULSE_SPANS 32u
+
 /* ADR 0024: in the census rebuild, a span needs at least this many
  * blocks in central to earn its own span-pure batch; smaller
  * fragments merge into one mixed residue batch.  Bounds the batch
@@ -362,6 +381,11 @@ typedef struct FM_Config {
     uint32_t lcache_cold_purge;
     uint32_t lazy_bump;
     uint32_t locality_sort;
+    /* Stage-1 decay (see FM_DECAY_* defaults): read only by slow paths. */
+    uint32_t dirty_decay_ms;
+    uint32_t muzzy_decay_ms;
+    uint64_t decay_high_water;
+    uint32_t decay_pulse_spans;
 } FM_Config;
 
 extern FM_Config fm_cfg;
@@ -392,6 +416,10 @@ static void fm_config_init(void)
     c.lcache_cold_purge = 1;
     c.lazy_bump = 1;
     c.locality_sort = 0;
+    c.dirty_decay_ms = FM_DECAY_DIRTY_MS;
+    c.muzzy_decay_ms = FM_DECAY_MUZZY_MS;
+    c.decay_high_water = FM_DECAY_HIGH_WATER;
+    c.decay_pulse_spans = FM_DECAY_PULSE_SPANS;
 
     const char *prof = getenv("FM_PROFILE");
     if (prof) {
@@ -444,6 +472,9 @@ static void fm_config_init(void)
         { "FM_LCACHE_COLD_PURGE", &c.lcache_cold_purge, 0, 1 },
         { "FM_LAZY_BUMP", &c.lazy_bump, 0, 1 },
         { "FM_LOCALITY_SORT", &c.locality_sort, 0, 1 },
+        { "FM_DIRTY_DECAY_MS", &c.dirty_decay_ms, 1, 600000 },
+        { "FM_MUZZY_DECAY_MS", &c.muzzy_decay_ms, 1, 3600000 },
+        { "FM_DECAY_PULSE_SPANS", &c.decay_pulse_spans, 1, 4096 },
     };
     for (size_t i = 0; i < sizeof(num) / sizeof(num[0]); i++) {
         const char *v = getenv(num[i].name);
@@ -467,6 +498,16 @@ static void fm_config_init(void)
             if (x > (16ull << 30))
                 x = 16ull << 30;
             c.lcache_max_bytes = x;
+        }
+    }
+    const char *hw = getenv("FM_DECAY_HIGH_WATER");
+    if (hw && *hw) {
+        char *end = NULL;
+        unsigned long long x = strtoull(hw, &end, 10);
+        if (end != hw) {
+            if (x > (16ull << 30))
+                x = 16ull << 30;
+            c.decay_high_water = x;
         }
     }
     if (c.release_max_interval_ms < c.release_interval_ms)
@@ -1113,8 +1154,9 @@ typedef struct FM_CensusEnt {
 } FM_CensusEnt;
 
 /* FM_CensusEnt.pg_flags bits */
-#define FM_PG_CANDIDATE 1u /* coverage pass should visit this span */
-#define FM_PG_RECLAIM 2u   /* re-carve withheld blocks in the rebuild */
+#define FM_PG_CANDIDATE 1u  /* coverage pass should visit this span */
+#define FM_PG_RECLAIM 2u    /* re-carve withheld blocks in the rebuild */
+#define FM_PG_MUZZY_NEW 4u  /* this census moved the span DIRTY -> MUZZY */
 
 typedef struct FM_Census {
     FM_CensusEnt *ents;
@@ -1123,6 +1165,32 @@ typedef struct FM_Census {
 } FM_Census;
 
 static FM_Census fm_shared_census; /* protected by fm_census_lock */
+
+/* Stage-1 muzzy queue.  Fully-free small spans spend dirty_decay_ms as
+ * DIRTY (mark ageing in the census), then have their payload pages returned
+ * with MADV_DONTNEED and spend muzzy_decay_ms as MUZZY (VA + header only)
+ * before being munmapped.  lnext is unused on small spans, so the queue is
+ * intrusive.  fm_census_lock guards the queue and every state transition. */
+static FM_Span *fm_muzzy_head;
+/* The muzzy pipeline only runs once the maintenance thread is armed;
+ * otherwise fully-free spans keep the original direct-munmap ageing, so an
+ * app that never crosses the high-water cannot accumulate muzzy headers. */
+static _Atomic int fm_decay_enabled;
+
+static void fm_muzzy_enqueue(FM_Span *sp)
+{
+    sp->lnext = (uintptr_t)fm_muzzy_head;
+    fm_muzzy_head = sp;
+}
+
+static void fm_muzzy_unlink(FM_Span *sp)
+{
+    FM_Span **link = &fm_muzzy_head;
+    while (*link && *link != sp)
+        link = (FM_Span **)&(*link)->lnext;
+    if (*link == sp)
+        *link = (FM_Span *)sp->lnext;
+}
 
 static int fm_census_acquire(FM_Census *c)
 {
@@ -1318,7 +1386,8 @@ static int fm_batch_count_desc(const void *a, const void *b)
  * (trim) mode purges immediately.  A span whose circulating supply
  * runs out gets its withheld blocks re-carved (reclaim) instead. */
 __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t keep,
-                                                      int instant)
+                                                      int instant,
+                                                      uint32_t span_budget)
 {
     fm_census_walked = fm_census_marked = fm_census_waiting = 0;
     fm_census_reclaimed = fm_census_pg_waiting = 0;
@@ -1340,9 +1409,31 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
      * thread's refill already popped are out of reach.  Both only
      * shrink what the census can see. */
     fm_stack_exclusive();
-    FM_Batch *all = atomic_exchange_explicit(&fm_central[cls].head, NULL,
-                                             memory_order_acq_rel);
-    atomic_store_explicit(&fm_central[cls].depth, 0, memory_order_relaxed);
+    FM_Batch *all;
+    if (span_budget) {
+        /* Budgeted pulse: detach at most span_budget batches and leave
+         * the rest of the stack in place.  Seeing fewer batches only ever
+         * makes a span look less free, so the census's dead-span proof
+         * stays safe; untouched batches keep their blocks on the stack. */
+        all = atomic_load_explicit(&fm_central[cls].head, memory_order_relaxed);
+        FM_Batch **link = &all;
+        uint32_t n = 0;
+        while (*link && n < span_budget) {
+            link = &(*link)->next;
+            n++;
+        }
+        FM_Batch *rest = *link;
+        *link = NULL;
+        atomic_store_explicit(&fm_central[cls].head, rest, memory_order_relaxed);
+        uint32_t d = atomic_load_explicit(&fm_central[cls].depth,
+                                          memory_order_relaxed);
+        atomic_store_explicit(&fm_central[cls].depth, d > n ? d - n : 0,
+                              memory_order_relaxed);
+    } else {
+        all = atomic_exchange_explicit(&fm_central[cls].head, NULL,
+                                       memory_order_acq_rel);
+        atomic_store_explicit(&fm_central[cls].depth, 0, memory_order_relaxed);
+    }
     fm_stack_resume();
     if (!all) {
         fm_in_census = was_in_census;
@@ -1406,6 +1497,8 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
     const FM_Config *cfg = FM_CFG();
     const size_t bs = kClassSize[cls];
     uint32_t now = instant ? 0 : fm_now_ms();
+    int muzzy_enabled = !instant &&
+        atomic_load_explicit(&fm_decay_enabled, memory_order_relaxed);
     fm_census_marked = 0;
     fm_census_waiting = 0;
     fm_census_purged = 0;
@@ -1430,12 +1523,36 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
         if (eff == nb) {
             if (instant) {
                 e->dead = 1;
+            } else if (FM_MUZZY(sp)) {
+                /* MUZZY: payload pages are already DONTNEED'd and all
+                 * blocks are out of circulation.  The muzzy queue owns
+                 * the VA until its own decay expires; the sweep releases
+                 * it, so nothing is unmapped from this census. */
+                if ((uint32_t)(now - (uint32_t)FM_MUZZY(sp)) >=
+                    cfg->muzzy_decay_ms)
+                    e->dead = 1;
+                else
+                    fm_census_waiting++;
             } else if (!sp->dead_mark) {
                 sp->dead_mark = now ? now : 1;
                 fm_census_marked++;
             } else if ((uint32_t)(now - sp->dead_mark) >=
-                       cfg->release_age_ms) {
-                e->dead = 1;
+                       (muzzy_enabled ? cfg->dirty_decay_ms
+                                      : cfg->release_age_ms)) {
+                if (muzzy_enabled) {
+                    /* DIRTY -> MUZZY: drop the resident payload but keep
+                     * the VA slot and the header page, so the RSS falls
+                     * now and there is no mmap/fault cycle if demand
+                     * returns before the muzzy window ends.  Its blocks
+                     * are dropped from the rebuilt chains exactly like a
+                     * dead span's. */
+                    FM_MUZZY(sp) = now ? now : 1;
+                    e->pg_flags |= FM_PG_MUZZY_NEW;
+                    e->dead = 1;
+                    fm_muzzy_enqueue(sp);
+                } else {
+                    e->dead = 1;
+                }
             } else {
                 fm_census_waiting++;
             }
@@ -1621,7 +1738,9 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
         uint32_t kept = 0;
         for (size_t i = 0; i < cen.cap && kept < keep; i++) {
             FM_CensusEnt *e = &cen.ents[i];
-            if (e->span && e->dead) {
+            /* A span moving DIRTY -> MUZZY has had its payload pages
+             * discarded; its blocks must stay out of circulation. */
+            if (e->span && e->dead && !(e->pg_flags & FM_PG_MUZZY_NEW)) {
                 e->dead = 0;
                 kept++;
             }
@@ -1803,14 +1922,31 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
                                                          : e->pg_new_withheld));
     }
 
-    /* Unmap the dead spans (once each, from the census). */
+    /* Stage 1 DIRTY -> MUZZY: return the resident payload of the newly
+     * muzzy extents now.  Page 0 keeps the header (and its mapping), and
+     * the VA slot is retained until the muzzy sweep munmaps it. */
+    for (size_t i = 0; i < cen.cap; i++) {
+        FM_CensusEnt *e = &cen.ents[i];
+        if (!e->span || !(e->pg_flags & FM_PG_MUZZY_NEW))
+            continue;
+        FM_Span *sp = (FM_Span *)e->span;
+        uintptr_t start = (uintptr_t)sp + FM_PAGE_SIZE;
+        uintptr_t end = (uintptr_t)sp + sp->map_size;
+        if (end > start)
+            (void)madvise((void *)start, end - start, MADV_DONTNEED);
+    }
+
+    /* Unmap the dead spans (once each, from the census).  A span already
+     * in the muzzy queue is released by the sweep, not here. */
     size_t released = 0;
     for (size_t i = 0; i < cen.cap; i++) {
         FM_CensusEnt *e = &cen.ents[i];
-        if (e->span && e->dead) {
+        if (e->span && e->dead && !(e->pg_flags & FM_PG_MUZZY_NEW)) {
             FM_Span *sp = (FM_Span *)e->span;
             uintptr_t base = sp->map_base;
             size_t len = sp->map_size;
+            if (FM_MUZZY(sp))
+                fm_muzzy_unlink(sp);
             released += len;
             munmap((void *)base, len);
         }
@@ -1967,7 +2103,7 @@ static void fm_release_maybe(uint32_t cls, uint32_t now, uint32_t flushed_cls)
      * the full release census (mark/purge/unmap) as before. */
     uint32_t depth = atomic_load_explicit(&c->depth, memory_order_relaxed);
     int mode = depth <= cfg->regroup_only_depth ? 2 : 0;
-    size_t released = fm_trim_class(cls, cfg->release_keep, mode);
+    size_t released = fm_trim_class(cls, cfg->release_keep, mode, 0);
     uint32_t next = fm_census_walked / cfg->release_walk_div;
     if (next < cfg->release_interval_ms)
         next = cfg->release_interval_ms;
@@ -2013,6 +2149,10 @@ static void fm_auto_release_tick(uint32_t flushed_cls)
 
 static _Atomic uint32_t fm_last_activity_ms;
 static _Atomic int fm_idle_thread_state; /* -1 disabled in fork child, 0 none, 1 starting/running */
+/* Stage-1 internal arming high-water: cumulative bytes of large blocks
+ * freed.  Only the large-free cold path touches it, so the exact-Ir micro
+ * suite and sub-100 ms startup apps never arm the maintenance thread. */
+static _Atomic uint64_t fm_decay_freed_bytes;
 
 /* ADR 0040: shipped v2/JIT DSOs require ELF NODELETE, including custom builds.
  * dlclose retains worker code, TLS callbacks and allocator state until exit. */
@@ -2035,8 +2175,35 @@ static void fm_idle_after_fork_child(void)
     /* A multithreaded fork child may only call async-signal-safe
      * functions before exec: never spawn a timer in that window. */
     atomic_store_explicit(&fm_idle_thread_state, -1, memory_order_relaxed);
+    atomic_store_explicit(&fm_decay_enabled, 0, memory_order_relaxed);
     atomic_store_explicit(&fm_last_activity_ms, 0, memory_order_relaxed);
     fm_fork_parent();
+}
+
+/* MUZZY -> release.  Muzzy spans have no blocks in any free list, so a
+ * census can never revisit them; the queue is swept directly.  all != 0
+ * makes malloc_trim release every muzzy extent immediately. */
+static void fm_muzzy_sweep(uint32_t now, int all)
+{
+    const FM_Config *cfg = FM_CFG();
+    pthread_mutex_lock(&fm_census_lock);
+    FM_Span **link = &fm_muzzy_head;
+    while (*link) {
+        FM_Span *sp = *link;
+        FM_Span *next = (FM_Span *)sp->lnext;
+        if (all || (uint32_t)(now - (uint32_t)FM_MUZZY(sp)) >=
+                       cfg->muzzy_decay_ms) {
+            uintptr_t base = sp->map_base;
+            size_t len = sp->map_size;
+            *link = next;
+            sp->lnext = 0;
+            FM_MUZZY(sp) = 0;
+            munmap((void *)base, len);
+        } else {
+            link = (FM_Span **)&sp->lnext;
+        }
+    }
+    pthread_mutex_unlock(&fm_census_lock);
 }
 
 static void *fm_idle_thread_main(void *arg)
@@ -2057,8 +2224,13 @@ static void *fm_idle_thread_main(void *arg)
             FM_Central *c = &fm_central[cls];
             if (atomic_load_explicit(&c->depth, memory_order_relaxed) >=
                 cfg->release_min_depth)
-                fm_trim_class(cls, cfg->release_keep, 0);
+                fm_trim_class(cls, cfg->release_keep, 0,
+                              cfg->decay_pulse_spans);
         }
+        /* Stage 1: release extents whose muzzy window has expired.  The
+         * census cannot see them any more (their blocks were dropped at
+         * the DIRTY -> MUZZY transition), so the queue is swept here. */
+        fm_muzzy_sweep(now, 0);
         /* Sweep at most once a second while silence lasts; each
          * sweep's censuses are a full ageing step apart, which is
          * what the mark-age-release pipeline needs. */
@@ -2109,6 +2281,10 @@ static void fm_idle_kick(uint32_t now)
     pthread_sigmask(SIG_SETMASK, &previous, NULL);
     if (err != 0)
         atomic_store_explicit(&fm_idle_thread_state, 0, memory_order_relaxed);
+    else
+        /* Only now may censuses move spans into the muzzy queue: a
+         * sweep of that queue is guaranteed to exist. */
+        atomic_store_explicit(&fm_decay_enabled, 1, memory_order_relaxed);
 }
 
 static inline size_t fm_trim_spans(void)
@@ -2125,7 +2301,9 @@ static inline size_t fm_trim_spans(void)
     }
     fm_stack_resume();
     for (uint32_t cls = 0; cls < CLASS_COUNT; cls++)
-        released += fm_trim_class(cls, 0, 1);
+        released += fm_trim_class(cls, 0, 1, 0);
+    /* malloc_trim is a release valve: muzzy extents must not survive it. */
+    fm_muzzy_sweep(0, 1);
     pthread_mutex_lock(&fm_census_lock);
     fm_census_destroy(&fm_shared_census);
     pthread_mutex_unlock(&fm_census_lock);
@@ -2207,6 +2385,17 @@ static inline uint64_t fm_lcache_budget(int b)
 static inline void fm_large_free(FM_Span *sp, void *p)
 {
     fm_ltick++;
+    /* Stage 1: arm the maintenance thread only after this process has
+     * churned enough large mappings to be a "large" one.  The counter is
+     * monotonic and lives on a cold path; FM_IDLE_RELEASE=0 keeps its
+     * original meaning (the external knob is unchanged). */
+    const FM_Config *cfg = FM_CFG();
+    uint64_t seen = atomic_fetch_add_explicit(&fm_decay_freed_bytes,
+                                              sp->map_size,
+                                              memory_order_relaxed) + sp->map_size;
+    if (seen >= cfg->decay_high_water &&
+        atomic_load_explicit(&fm_idle_thread_state, memory_order_relaxed) == 0)
+        fm_idle_kick(fm_now_ms());
     if (sp->align == 0 && (uintptr_t)p == (uintptr_t)sp + HEADER_SIZE) {
         size_t ms = sp->map_size;
         int b = 63 - __builtin_clzll(fm_large_usable(sp));

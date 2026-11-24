@@ -34,6 +34,11 @@ far (see ADRs 0079-0082):
 `main` is the merge base; every experiment is screened against it in the
 same CI job.
 
+**Do not open a PR for `exp/combined-v2` or for anything already marked
+ACCEPTED in the backlog.**  That batch is PR #1 and is already under
+review.  A campaign cycle opens a PR only for a *new* branch created by
+that cycle that beats the current `main`.
+
 ## A campaign cycle
 
 The scheduled run is a manager, not a lone coder.  It should:

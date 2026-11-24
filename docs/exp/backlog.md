@@ -4,6 +4,9 @@ The recurring campaign picks the first unclaimed `TODO` items from this
 file (see `GOAL.md` for the selection rules).  Update the status when a
 result arrives; a measured "no" is a result.
 
+`exp/combined-v2` is the accepted round-13 batch and is PR #1.  It is not
+a new campaign result; do not open another PR for it.
+
 Status: `TODO` / `RUNNING` / `ACCEPTED` / `REJECTED` / `BLOCKED`.
 
 ## Accepted (in the 2026-11-24 batch)

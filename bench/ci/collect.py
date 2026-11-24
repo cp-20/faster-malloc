@@ -96,17 +96,21 @@ def main() -> int:
     good = [r for r in rows if r[2] and r[2].get("score")]
     good.sort(key=lambda r: r[2]["score"].get("real_geomean", 9.0))
 
-    print(f"{'branch':<26} {'real_geo':>9} {'micro_geo':>10} {'micro_worst':>12} {'run':>12}")
+    print(f"{'branch':<26} {'real_geo':>9} {'paired_geo':>10} {'micro_geo':>10} {'micro_worst':>12} {'run':>12}")
     for branch, run, res in good:
         s = res["score"]
         print(
             f"{branch:<26} {s.get('real_geomean', float('nan')):>9.4f} "
+            f"{s.get('real_paired_geomean', float('nan')):>10.4f} "
             f"{s.get('micro_geomean', float('nan')):>10.4f} "
             f"{s.get('micro_worst', float('nan')):>12.4f} "
             f"{run['databaseId']:>12}"
         )
         for app, d in res.get("real", {}).items():
-            print(f"    {app:<16} {d['ratio']:.4f}  ({d['baseline_median_s']:.3f}s -> {d['candidate_median_s']:.3f}s)")
+            print(
+                f"    {app:<16} {d['ratio']:.4f} (paired {d.get('paired_ratio', d['ratio']):.4f})"
+                f"  ({d['baseline_median_s']:.3f}s -> {d['candidate_median_s']:.3f}s)"
+            )
     for branch, run, res in rows:
         if res:
             continue

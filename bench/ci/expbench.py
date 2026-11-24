@@ -287,6 +287,7 @@ def main() -> int:
         real_suite.prepare_fixtures()
         paths = fixture_paths(real_suite.WORK)
         ratios = []
+        paired_ratios = []
         for app in apps:
             spec = expand(APP_SPECS[app], paths)
             data = {"baseline": {"times": [], "rss": []}, "candidate": {"times": [], "rss": []}}
@@ -305,25 +306,37 @@ def main() -> int:
             b = statistics.median(data["baseline"]["times"])
             c = statistics.median(data["candidate"]["times"])
             ratio = c / b if b else float("inf")
+            paired = [
+                ct / bt for ct, bt in zip(data["candidate"]["times"], data["baseline"]["times"]) if bt
+            ]
+            paired_ratio = statistics.median(paired) if paired else ratio
             ratios.append(ratio)
+            paired_ratios.append(paired_ratio)
             result["real"][app] = {
                 "baseline_median_s": b,
                 "candidate_median_s": c,
                 "baseline_min_s": min(data["baseline"]["times"]),
                 "candidate_min_s": min(data["candidate"]["times"]),
+                "baseline_times": data["baseline"]["times"],
+                "candidate_times": data["candidate"]["times"],
                 "baseline_rss_kb": int(statistics.median(data["baseline"]["rss"])),
                 "candidate_rss_kb": int(statistics.median(data["candidate"]["rss"])),
                 "ratio": ratio,
+                "paired_ratio": paired_ratio,
             }
             print(
                 f"{app:<16} base {b:.4f}s cand {c:.4f}s ratio {ratio:.4f} "
+                f"paired {paired_ratio:.4f} "
                 f"| RSS {result['real'][app]['baseline_rss_kb']//1024}M -> "
                 f"{result['real'][app]['candidate_rss_kb']//1024}M"
             )
         result["score"] = result.get("score", {})
         result["score"]["real_geomean"] = geomean(ratios)
+        result["score"]["real_paired_geomean"] = geomean(paired_ratios)
         result["score"]["real_worst"] = max(ratios)
-        print(f"{'geomean':<16} {'':>10} {'':>10} ratio {result['score']['real_geomean']:.4f}")
+        result["score"]["real_paired_worst"] = max(paired_ratios)
+        print(f"{'geomean':<16} {'':>10} {'':>10} ratio {result['score']['real_geomean']:.4f} "
+              f"paired {result['score']['real_paired_geomean']:.4f}")
 
     Path(args.json).write_text(json.dumps(result, indent=2) + "\n")
     print(f"\nwrote {args.json}")

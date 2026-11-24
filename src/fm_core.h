@@ -725,17 +725,26 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
 
 /* Map and initialise a fresh span for class cls.  Blocks are carved
  * lazily from the span's bump range by the refill path, so creation
- * does not touch every block's memory. */
-static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
+ * does not touch every block's memory.  `first_cap_out` receives the
+ * initial-carve cap for this class's first span (0 when unrestricted);
+ * the span itself always owns a full 64 KiB slot. */
+static inline char *fm_span_new(uint32_t cls, uint32_t *count_out,
+                                uint32_t *first_cap_out)
 {
     size_t bs = kClassSize[cls];
     size_t bytes = SPAN_SIZE;
+    uint32_t first_cap = 0;
 #ifdef FM_SMALL_FIRST_SPAN
-    /* ADR 0060: sparsely used startup classes cap initial carved blocks
-     * while still drawing 64 KiB VA slots from the shared dense extent. */
+    /* N107: keep N2's full-slot geometry but shrink the startup carve
+     * budget from ADR 0060's 16 KiB to 8 KiB.  The mapping still owns a
+     * full 64 KiB slot (so refills bump-carve the same span instead of
+     * opening a second one); only the initial carve is capped at 8 KiB,
+     * so startup faults fewer pages.  8128 = 8 KiB - HEADER_SIZE. */
     static _Atomic unsigned char started[CLASS_COUNT];
-    bytes = atomic_exchange_explicit(&started[cls], 1, memory_order_relaxed)
-        ? SPAN_SIZE : FM_ALIGN_UP(HEADER_SIZE + (bs > 16320 ? bs : 16320), FM_PAGE_SIZE);
+    if (!atomic_exchange_explicit(&started[cls], 1, memory_order_relaxed)) {
+        uint32_t cap = (uint32_t)((bs > 8128u ? 1u : 8128u / bs));
+        first_cap = cap ? cap : 1;
+    }
 #endif
     size_t n = (bytes - HEADER_SIZE) / bs;
     uintptr_t raw_base = 0;
@@ -769,6 +778,7 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
     sp->withheld_cnt = 0;
 
     *count_out = (uint32_t)n;
+    *first_cap_out = first_cap;
     return base;
 }
 
@@ -935,14 +945,20 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
     char *cur = fm_bump_ptr[cls];
     char *end = fm_bump_end[cls];
     if (cur >= end) {
-        uint32_t total = 0;
-        char *base = fm_span_new(cls, &total);
+        uint32_t total = 0, first_cap = 0;
+        char *base = fm_span_new(cls, &total, &first_cap);
         if (!base)
             return NULL;
         cur = base + HEADER_SIZE;
         end = cur + (size_t)total * bs;
         uint32_t avail0 = (uint32_t)((end - cur) / bs);
         uint32_t keep0 = limit < avail0 ? limit : avail0;
+        /* N107/N2: carve only the 8 KiB startup budget on the class's
+         * first span.  The remainder stays in this span's bump range, so
+         * the next refill reuses the same full-slot mapping instead of
+         * opening a second span; tail pages stay non-resident. */
+        if (first_cap && keep0 > first_cap)
+            keep0 = first_cap;
 
         void *head = cur;
         void *t = cur;

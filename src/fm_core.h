@@ -763,10 +763,34 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out,
     uintptr_t raw_base = 0;
     size_t raw_len = SPAN_SIZE;
     char *base;
+#ifdef FM_SMALL_FIRST_SPAN
+    /* N31: a class whose first span holds a single block (>= 8 KiB blocks)
+     * does not need a whole 64 KiB carve at startup.  Map just the block
+     * plus its header; later spans keep the normal carve.  N57 keeps
+     * `bytes` at SPAN_SIZE for every span (N2), so `first_cap` -- set only
+     * on the first span -- is the first-span signal here.  n and map_size
+     * stay truthful, so census/mincore, page purge and whole-span release
+     * keep working.  JIT retains ADR 0061's full-size first spans. */
+    int tight_first = (n == 1 && bs > FM_PAGE_SIZE && first_cap != 0);
+#else
+    int tight_first = 0;
+#endif
     if (bs <= FM_PAGE_SIZE) {
         base = fm_map_dense_span();
         raw_base = (uintptr_t)base;
+    } else if (tight_first) {
+        raw_len = FM_ALIGN_UP(bs + HEADER_SIZE, FM_PAGE_SIZE);
+        base = fm_map_aligned(raw_len - HEADER_SIZE);
+        raw_base = (uintptr_t)base;
     } else {
+        base = fm_map_large_slab(SPAN_SIZE - HEADER_SIZE, &raw_base, &raw_len);
+        if (!base) {
+            base = fm_map_aligned(SPAN_SIZE - HEADER_SIZE);
+            raw_base = (uintptr_t)base;
+            raw_len = SPAN_SIZE;
+        }
+    }
+    if (!base && tight_first) {
         base = fm_map_large_slab(SPAN_SIZE - HEADER_SIZE, &raw_base, &raw_len);
         if (!base) {
             base = fm_map_aligned(SPAN_SIZE - HEADER_SIZE);

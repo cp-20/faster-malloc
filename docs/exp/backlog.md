@@ -46,6 +46,24 @@ python_legacy/node/gcc/git rows are stale and must be re-baselined with
 | LGC4 | sqlite1 | speedtest1 query path: time vs tcmalloc, RSS vs glibc | med |
 | LGC5 | gcc | SQLite amalgamation compile: close the 8% time gap to mimalloc and the RSS gap | med |
 
+## Autonomous queue (new worker tasks)
+
+These are deliberately smaller and self-contained so the local
+`opencode run` worker can pick one every 30 minutes.  Branch names are
+`exp/auto-<id>`.
+
+| id | area | hypothesis | risk |
+|---|---|---|---|
+| N1 | Python | release fully-free small spans during a run without a full census: track a per-class dead-span hint and unmap one span when its central count equals its block count | med |
+| N2 | git/sqlite | reduce startup mappings: keep the dense extent but do not open a second 64 KiB span for a class until its first span is exhausted; measure the mapping count | med |
+| N3 | node | huge-buffer purge for V8 external/Buffer churn: cold-purge >16 MiB blocks (base `exp/rss-cold-huge`) and measure the legacy node row | med |
+| N4 | gcc/redis | re-run the legacy matrix with the libc-built Redis and the cold-purge candidate; report time/RSS for redis/gcc/node | low |
+| N5 | micro | shave one load/branch from malloc/free without changing the slow paths; accept only an exact Ir win | low |
+| N6 | xz | add per-app smaps/mincore instrumentation to the CI artifact so the xz 0.68% RSS gap is attributed, not guessed | low |
+| N7 | all | trim on memory pressure: read `/proc/self/statm` on the large-free slow path and purge cold caches when RSS exceeds a high-water mark | high |
+| N8 | all | 128 KiB spans (regenerate `size_classes2.h`; free mask/dense extent/census/trim all follow) | high |
+
+
 
 ## Rejected (do not repeat without a materially different mechanism)
 

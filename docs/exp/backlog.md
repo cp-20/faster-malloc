@@ -426,6 +426,27 @@ one span densely before touching older holes.
 Within noise on both, with a small time cost.  Recorded as a null result;
 the refill order does not change page residency enough to matter.
 
+## Round 28: the dense-extent THP hint is worth its RSS (2026-11-25)
+
+`fm_map_dense_span` applies `MADV_HUGEPAGE` after four warm extents.
+THP is madvise-mode on the runners, and a huge page commits 2 MiB, so the
+hypothesis was that removing the hint would cut git/lua RSS at no time
+cost.  Locally it did: git 23.9 -> 22.0 MiB, lua 16.5 -> 15.8, time
+equal on five fixtures.
+
+The paired 11-rep matrix says otherwise:
+
+| build | micro | jq time (paired) | jq RSS | other time |
+|---|---:|---:|---:|---|
+| no-dense-THP | **1.0000** | **1.0788** | 262 -> 261 | within noise |
+| selective + no-THP | 1.0002 | **1.1167** | 262 -> 251 | xz +3.3%, sort +2.9%, python +2.4% |
+
+The instruction-count micro is blind to THP, as expected, but the real
+apps are not: the dense extent's huge pages carry the TLB coverage for
+jq's pointer chasing, and losing them costs 8-12% of jq's time for 1 MiB
+of RSS.  Rejected; PR #5 keeps the selective cache with THP intact.
+The legacy runs were cancelled once the time cells were decisive.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

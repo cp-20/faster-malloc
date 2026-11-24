@@ -400,8 +400,11 @@ exempts buckets >= 24 from the warm/cold rule entirely, leaving the 16 MiB
 base budget as the only bound.  Locally it is a no-op on jq, sort and xz.
 11-rep exp-bench: micro 1.0002, jq RSS 252, real paired 0.9932 -- i.e.
 identical to the selective build, as the 16 MiB base still rejects the
-28.3 MiB block; exp-legacy is running.  The variant that actually lets it
-in is `exp/selective6` (huge buckets get a 32 MiB budget).
+28.3 MiB block.  Legacy 11 reps: node 456.4 MiB / +7.3% time, i.e. the
+same as the selective build (454.6 / +8.3%), and the other apps unchanged.
+The variant that actually lets the payload in is `exp/selective6` (huge
+buckets get a 32 MiB budget); its exp-bench is flat (micro 1.0005, jq 252,
+paired 0.9958) and its legacy is running.
 
 ## Rejected (do not repeat without a materially different mechanism)
 

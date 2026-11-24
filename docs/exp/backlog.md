@@ -475,6 +475,22 @@ node's time remains a payload/budget trade.
 Size-class granularity in the 17-32 KiB band is not where gcc/node/sqlite
 lose their pages; the classes there are few and their spans are dense.
 
+## Round 31: hit-rate-aware warm buckets (2026-11-25)
+
+A bucket that hits once stays warm for the process, so one lucky reuse can
+pin 4 MiB in a bucket that never hits again (sqlite's temp b-tree blocks
+were the suspect).  The variant keeps per-bucket hit/insert counters and
+treats a bucket as warm only while `hits * 4 >= inserts`.
+
+| case | selective | hit-rate |
+|---|---:|---:|
+| sqlite speedtest1 | 10.98-11.17 MB / 2.37-2.41 s | 11.02-11.05 / 2.29-2.50 |
+| lua churn | 14.4-14.8 MB | 14.6-15.0 |
+| node churn | 403.9-405.1 MB | 401.6-404.8 |
+
+Neutral everywhere; rejected.  sqlite's 1.7 MiB of lcache0-removable
+retention is not in warm buckets.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

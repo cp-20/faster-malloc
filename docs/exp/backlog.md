@@ -309,7 +309,7 @@ mappings above the slab cutoff, which cannot join the slab list.
 | id | branch | result | status |
 |---|---|---|---|
 | C3 | `exp/selective2` | relax the cold-bucket rule to one block of any size (protect xz's 8 MiB buffers): gcc 351.6 -> 361.8 MB, python 138.2 -> 140.9, xz unchanged at 57.7 MB | rejected |
-| C2 | `exp/selective-cache` | on top of the 16 MiB base (ADR 0083): warm buckets (a hit) may keep 4 MiB, cold buckets one block <= 256 KiB, exact per-bucket byte accounting.  Local interleaved vs 16 MiB: python 142.0 -> 138.3 MB, lua 16.3 -> 14.4-15.5, sqlite 11.5 -> 11.1, git 24.0 -> 24.0, node 404.9 -> 404.1, all at unchanged time | **candidate** (11-rep matrices running) |
+| C2 | `exp/selective-cache` | on top of the 16 MiB base (ADR 0083): warm buckets (a hit) may keep 4 MiB, cold buckets one block <= 256 KiB, exact per-bucket byte accounting.  11-rep legacy vs the 16 MiB build: python 446.9 -> **432.0** MiB, gcc 364.6 -> **358.2**, jq 358.9 -> **353.9**, node 460.2 -> **454.6**, lua 16.2 -> **14.7**, git 28.8 -> 28.2, redis 6.2 -> 6.3, sqlite 13.5 -> 13.7; time equal or better except node +8.3% | **PR #5** |
 
 The flat budget could not distinguish a reused JSON buffer (node) from a
 free-and-forget 1 MiB obmalloc arena (CPython); per-bucket warm/cold

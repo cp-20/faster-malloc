@@ -19,6 +19,10 @@ on:
         description: "Repetitions per real-app measurement"
         required: false
         default: "3"
+      candidate_lib:
+        description: "Candidate library (default libfastmalloc2.so)"
+        required: false
+        default: "libfastmalloc2.so"
       apps:
         description: "Comma-separated real-app cases (empty = default screen)"
         required: false
@@ -67,7 +71,11 @@ jobs:
             exp-fixtures-v1
 
       - name: Build candidate
-        run: make -j"$(nproc)"
+        run: |
+          make -j"$(nproc)"
+          if [ -f src/size_classes3.h ]; then make -j"$(nproc)" libfastmalloc3.so; fi
+          if [ -f src/size_classes4.h ]; then make -j"$(nproc)" libfastmalloc4.so; fi
+          if grep -q '^libfastmalloc6.so:' Makefile; then make -j"$(nproc)" libfastmalloc6.so; fi
 
       - name: Build merge-base baseline
         run: |
@@ -79,6 +87,8 @@ jobs:
           make -C /tmp/fm-base -j"$(nproc)" libfastmalloc2.so
 
       - name: Correctness gates
+        env:
+          CANDIDATE_LIB: ${{ inputs.candidate_lib || 'libfastmalloc2.so' }}
         run: |
           set -euo pipefail
           ./test_basic
@@ -98,12 +108,19 @@ jobs:
           echo "--- memcheck stress ---"
           LD_PRELOAD="$PWD/libfastmalloc2.so" \
             valgrind --error-exitcode=9 --quiet ./bench/stress
+          if [ "$CANDIDATE_LIB" != "libfastmalloc2.so" ]; then
+            echo "--- $CANDIDATE_LIB test_basic ---"
+            LD_PRELOAD="$PWD/$CANDIDATE_LIB" ./test_basic
+            echo "--- $CANDIDATE_LIB stress ---"
+            LD_PRELOAD="$PWD/$CANDIDATE_LIB" ./bench/stress
+          fi
 
       - name: Screen candidate vs merge-base
         env:
           REPS: ${{ inputs.reps || '3' }}
           APPS: ${{ inputs.apps || 'jq_large,python_data,sort_p4,gxx_compile,git_revlist,sqlite_oltp' }}
           RUNTIME_ENV: ${{ inputs.runtime_env || '' }}
+          CANDIDATE_LIB: ${{ inputs.candidate_lib || 'libfastmalloc2.so' }}
         run: |
           set -o pipefail
           extra=()
@@ -113,7 +130,7 @@ jobs:
           done
           python3 bench/ci/expbench.py \
             --baseline /tmp/fm-base/libfastmalloc2.so \
-            --candidate "$PWD/libfastmalloc2.so" \
+            --candidate "$PWD/$CANDIDATE_LIB" \
             --reps "$REPS" \
             --apps "$APPS" \
             "${extra[@]}" \

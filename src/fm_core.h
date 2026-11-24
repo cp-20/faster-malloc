@@ -725,26 +725,68 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
 
 /* Map and initialise a fresh span for class cls.  Blocks are carved
  * lazily from the span's bump range by the refill path, so creation
- * does not touch every block's memory. */
-static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
+ * does not touch every block's memory.  `first_cap_out` receives the
+ * initial-carve cap for the class's first span (0 when unrestricted).
+ * Small classes own a full 64 KiB dense-extent slot; a one-block large
+ * class gets a tight first mapping holding just its block and header. */
+static inline char *fm_span_new(uint32_t cls, uint32_t *count_out,
+                                uint32_t *first_cap_out)
 {
     size_t bs = kClassSize[cls];
     size_t bytes = SPAN_SIZE;
+    uint32_t first_cap = 0;
 #ifdef FM_SMALL_FIRST_SPAN
-    /* ADR 0060: sparsely used startup classes cap initial carved blocks
-     * while still drawing 64 KiB VA slots from the shared dense extent. */
+    /* ADR 0060 kept startup RSS low by shrinking nblocks on the first
+     * span.  That still consumed a full 64 KiB dense-extent slot, so a
+     * hot startup class opened a *second* slot as soon as its first
+     * 16 KiB was used, exhausting the 2 MiB extent sooner (extra mmap).
+     * Give every span the full slot but cap only the first carve to the
+     * ADR 0060 budget: later refills bump-carve the same mapping, so a
+     * second span is opened only when the first is truly exhausted.
+     * Tail pages stay untouched until blocks from them are handed out. */
     static _Atomic unsigned char started[CLASS_COUNT];
-    bytes = atomic_exchange_explicit(&started[cls], 1, memory_order_relaxed)
-        ? SPAN_SIZE : FM_ALIGN_UP(HEADER_SIZE + (bs > 16320 ? bs : 16320), FM_PAGE_SIZE);
+    if (!atomic_exchange_explicit(&started[cls], 1, memory_order_relaxed)) {
+        uint32_t cap = (uint32_t)((bs > 16320 ? 1u : 16320u / bs));
+        first_cap = cap ? cap : 1;
+    }
 #endif
     size_t n = (bytes - HEADER_SIZE) / bs;
     uintptr_t raw_base = 0;
     size_t raw_len = SPAN_SIZE;
     char *base;
-    if (bs <= FM_PAGE_SIZE) {
+#ifdef FM_SMALL_FIRST_SPAN
+    /* N31 (combined with N2): a class whose first carve is a single large
+     * block does not need a whole 64 KiB slab at startup.  Map just the
+     * block plus its header.  n and map_size stay truthful so census,
+     * mincore, page purge and whole-span release keep working.  N2's
+     * full-slot carve cap still governs the small (dense-extent) classes,
+     * which open a second slot only once the first is exhausted.  The JIT
+     * build does not define this macro, so it keeps full-size first spans
+     * (ADR 0061). */
+    int tight_first = (first_cap == 1 && bs > FM_PAGE_SIZE);
+#else
+    int tight_first = 0;
+#endif
+    if (tight_first) {
+        raw_len = FM_ALIGN_UP(bs + HEADER_SIZE, FM_PAGE_SIZE);
+        base = fm_map_aligned(raw_len - HEADER_SIZE);
+        raw_base = (uintptr_t)base;
+        n = 1;
+    } else if (bs <= FM_PAGE_SIZE) {
         base = fm_map_dense_span();
         raw_base = (uintptr_t)base;
     } else {
+        base = fm_map_large_slab(SPAN_SIZE - HEADER_SIZE, &raw_base, &raw_len);
+        if (!base) {
+            base = fm_map_aligned(SPAN_SIZE - HEADER_SIZE);
+            raw_base = (uintptr_t)base;
+            raw_len = SPAN_SIZE;
+        }
+    }
+    if (!base && tight_first) {
+        /* Tight mapping unavailable: fall back to the normal large slab. */
+        raw_len = SPAN_SIZE;
+        n = (SPAN_SIZE - HEADER_SIZE) / bs;
         base = fm_map_large_slab(SPAN_SIZE - HEADER_SIZE, &raw_base, &raw_len);
         if (!base) {
             base = fm_map_aligned(SPAN_SIZE - HEADER_SIZE);
@@ -769,6 +811,7 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
     sp->withheld_cnt = 0;
 
     *count_out = (uint32_t)n;
+    *first_cap_out = first_cap;
     return base;
 }
 
@@ -935,14 +978,20 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
     char *cur = fm_bump_ptr[cls];
     char *end = fm_bump_end[cls];
     if (cur >= end) {
-        uint32_t total = 0;
-        char *base = fm_span_new(cls, &total);
+        uint32_t total = 0, first_cap = 0;
+        char *base = fm_span_new(cls, &total, &first_cap);
         if (!base)
             return NULL;
         cur = base + HEADER_SIZE;
         end = cur + (size_t)total * bs;
         uint32_t avail0 = (uint32_t)((end - cur) / bs);
         uint32_t keep0 = limit < avail0 ? limit : avail0;
+        /* First span: carve only the ADR 0060 startup budget.  The
+         * remainder stays in this span's bump range, so the next
+         * refill reuses the same 64 KiB mapping instead of opening a
+         * second one. */
+        if (first_cap && keep0 > first_cap)
+            keep0 = first_cap;
 
         void *head = cur;
         void *t = cur;

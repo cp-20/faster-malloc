@@ -816,6 +816,12 @@ static inline uint32_t fm_local_limit(uint32_t cls)
     if (budget > limit)
         limit = budget;
     uint32_t div = FM_CFG()->local_limit_div;
+    /* ADR 0088: classes at or above 1 KiB keep a quarter of the byte
+     * budget.  Their blocks are large enough that a full 64 KiB batch
+     * strands several pages, while the 16-512 B classes that dominate
+     * parsing bursts keep the full batch and the micro fast path. */
+    if (kClassSize[cls] >= 2048 && div < 4)
+        div = 4;
     if (div > 1) {
         limit /= div;
         if (!limit)

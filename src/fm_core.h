@@ -638,11 +638,19 @@ static inline char *fm_map_aligned(size_t bytes)
 /* Carve full, densely packed spans from a common 2 MiB extent. Each span
  * still owns exactly its own mapping range and can be released independently.
  * The central lock also serializes the cursor across fork. */
+/* Startup mapping diet (N12): a short-lived process that touches only a
+ * couple of small-span classes should not open a 2 MiB dense extent on its
+ * first allocation.  Serve that first span from one 64 KiB bootstrap
+ * mapping and open the extent lazily, on the second request.  The bootstrap
+ * mapping is an ordinary 64 KiB-aligned span -- fm_span_new records it in
+ * map_base/map_size, so census, page purge and trim release it like any
+ * other span and it is never wasted. */
 static struct {
     char *cursor;
     unsigned remaining;
     unsigned warmup;
     uint32_t opened_ms;
+    unsigned bootstrapped;
 } fm_dense_extent;
 
 static char *fm_map_dense_span(void)
@@ -650,6 +658,12 @@ static char *fm_map_dense_span(void)
     enum { extent_size = 2 * 1024 * 1024, map_len = 2 * extent_size - FM_PAGE_SIZE };
     enum { burst_ms = 100, warmup_extents = 4 };
     fm_stack_exclusive();
+    if (!fm_dense_extent.bootstrapped) {
+        fm_dense_extent.bootstrapped = 1;
+        char *span = fm_map_aligned(SPAN_SIZE - HEADER_SIZE);
+        fm_stack_resume();
+        return span;
+    }
     if (!fm_dense_extent.remaining) {
         char *raw = mmap(NULL, map_len, PROT_READ | PROT_WRITE,
                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -725,26 +739,68 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
 
 /* Map and initialise a fresh span for class cls.  Blocks are carved
  * lazily from the span's bump range by the refill path, so creation
- * does not touch every block's memory. */
-static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
+ * does not touch every block's memory.  `first_cap_out` receives the
+ * initial-carve cap for the class's first span (0 when unrestricted).
+ * Small classes own a full 64 KiB dense-extent slot; a one-block large
+ * class gets a tight first mapping holding just its block and header. */
+static inline char *fm_span_new(uint32_t cls, uint32_t *count_out,
+                                uint32_t *first_cap_out)
 {
     size_t bs = kClassSize[cls];
     size_t bytes = SPAN_SIZE;
+    uint32_t first_cap = 0;
 #ifdef FM_SMALL_FIRST_SPAN
-    /* ADR 0060: sparsely used startup classes cap initial carved blocks
-     * while still drawing 64 KiB VA slots from the shared dense extent. */
+    /* ADR 0060 kept startup RSS low by shrinking nblocks on the first
+     * span.  That still consumed a full 64 KiB dense-extent slot, so a
+     * hot startup class opened a *second* slot as soon as its first
+     * 16 KiB was used, exhausting the 2 MiB extent sooner (extra mmap).
+     * Give every span the full slot but cap only the first carve to the
+     * ADR 0060 budget: later refills bump-carve the same mapping, so a
+     * second span is opened only when the first is truly exhausted.
+     * Tail pages stay untouched until blocks from them are handed out. */
     static _Atomic unsigned char started[CLASS_COUNT];
-    bytes = atomic_exchange_explicit(&started[cls], 1, memory_order_relaxed)
-        ? SPAN_SIZE : FM_ALIGN_UP(HEADER_SIZE + (bs > 16320 ? bs : 16320), FM_PAGE_SIZE);
+    if (!atomic_exchange_explicit(&started[cls], 1, memory_order_relaxed)) {
+        uint32_t cap = (uint32_t)((bs > 16320 ? 1u : 16320u / bs));
+        first_cap = cap ? cap : 1;
+    }
 #endif
     size_t n = (bytes - HEADER_SIZE) / bs;
     uintptr_t raw_base = 0;
     size_t raw_len = SPAN_SIZE;
     char *base;
-    if (bs <= FM_PAGE_SIZE) {
+#ifdef FM_SMALL_FIRST_SPAN
+    /* N31 (combined with N2): a class whose first carve is a single large
+     * block does not need a whole 64 KiB slab at startup.  Map just the
+     * block plus its header.  n and map_size stay truthful so census,
+     * mincore, page purge and whole-span release keep working.  N2's
+     * full-slot carve cap still governs the small (dense-extent) classes,
+     * which open a second slot only once the first is exhausted.  The JIT
+     * build does not define this macro, so it keeps full-size first spans
+     * (ADR 0061). */
+    int tight_first = (first_cap == 1 && bs > FM_PAGE_SIZE);
+#else
+    int tight_first = 0;
+#endif
+    if (tight_first) {
+        raw_len = FM_ALIGN_UP(bs + HEADER_SIZE, FM_PAGE_SIZE);
+        base = fm_map_aligned(raw_len - HEADER_SIZE);
+        raw_base = (uintptr_t)base;
+        n = 1;
+    } else if (bs <= FM_PAGE_SIZE) {
         base = fm_map_dense_span();
         raw_base = (uintptr_t)base;
     } else {
+        base = fm_map_large_slab(SPAN_SIZE - HEADER_SIZE, &raw_base, &raw_len);
+        if (!base) {
+            base = fm_map_aligned(SPAN_SIZE - HEADER_SIZE);
+            raw_base = (uintptr_t)base;
+            raw_len = SPAN_SIZE;
+        }
+    }
+    if (!base && tight_first) {
+        /* Tight mapping unavailable: fall back to the normal large slab. */
+        raw_len = SPAN_SIZE;
+        n = (SPAN_SIZE - HEADER_SIZE) / bs;
         base = fm_map_large_slab(SPAN_SIZE - HEADER_SIZE, &raw_base, &raw_len);
         if (!base) {
             base = fm_map_aligned(SPAN_SIZE - HEADER_SIZE);
@@ -769,6 +825,7 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
     sp->withheld_cnt = 0;
 
     *count_out = (uint32_t)n;
+    *first_cap_out = first_cap;
     return base;
 }
 
@@ -935,14 +992,35 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
     char *cur = fm_bump_ptr[cls];
     char *end = fm_bump_end[cls];
     if (cur >= end) {
-        uint32_t total = 0;
-        char *base = fm_span_new(cls, &total);
+        uint32_t total = 0, first_cap = 0;
+        char *base = fm_span_new(cls, &total, &first_cap);
         if (!base)
             return NULL;
         cur = base + HEADER_SIZE;
         end = cur + (size_t)total * bs;
         uint32_t avail0 = (uint32_t)((end - cur) / bs);
         uint32_t keep0 = limit < avail0 ? limit : avail0;
+        /* First span: carve only the ADR 0060 startup budget.  The
+         * remainder stays in this span's bump range, so the next
+         * refill reuses the same 64 KiB mapping instead of opening a
+         * second one. */
+        if (first_cap && keep0 > first_cap)
+            keep0 = first_cap;
+        int lazy = FM_CFG()->lazy_bump;
+        if (lazy) {
+            /* N9: linking a fresh span used to write a next pointer into
+             * every one of its first `keep0` blocks, faulting up to a whole
+             * span of pages before a single allocation was made.  With lazy
+             * bump the unlinked tail stays reachable through fm_bump_ptr,
+             * so link only the first page worth of blocks and let the rest
+             * fault in on demand.  Takes the tighter of this and N58's
+             * first-carve cap; span geometry and nblocks are unchanged. */
+            uint32_t warm = (uint32_t)(FM_PAGE_SIZE / bs);
+            if (warm < 1)
+                warm = 1;
+            if (keep0 > warm)
+                keep0 = warm;
+        }
 
         void *head = cur;
         void *t = cur;
@@ -961,7 +1039,7 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
         fm_tls.cnt[cls] = (int32_t)limit;
 
         char *rest_cur = cur + (size_t)keep0 * bs;
-        if (FM_CFG()->lazy_bump) {
+        if (lazy) {
             /* Defer touching/linking the remainder of the span until needed
              * so L1D is not polluted by unused blocks. */
             fm_bump_ptr[cls] = rest_cur;
@@ -1405,6 +1483,17 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
      * previously withheld blocks) in the phases below. */
     const FM_Config *cfg = FM_CFG();
     const size_t bs = kClassSize[cls];
+    /* N24: a fully-free page run is much harder to assemble in a small
+     * class (dozens of tiny blocks must all be free at once) than in a
+     * large one (a handful of blocks per page).  Requiring the default
+     * four new pages kept small classes from ever being purged under
+     * churn, even though two resident pages are 8 KiB the allocator
+     * could return.  Lower the gate for the small-block classes only;
+     * large classes keep the conservative four-page threshold.  A user
+     * override below the default (footprint profile / FM_PURGE_MIN_PAGES)
+     * is never raised. */
+    uint32_t min_pages = (bs <= 512u && cfg->purge_min_pages > 2u)
+                             ? 2u : cfg->purge_min_pages;
     uint32_t now = instant ? 0 : fm_now_ms();
     fm_census_marked = 0;
     fm_census_waiting = 0;
@@ -1458,7 +1547,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
          * minimum-size purge run could exist.  The coverage pass
          * decides whether it really does. */
         if (e->cnt && (uint64_t)e->cnt * bs >=
-                          (uint64_t)(cfg->purge_min_pages - 1) * FM_PAGE_SIZE) {
+                          (uint64_t)(min_pages - 1) * FM_PAGE_SIZE) {
             memset(e->page_free, 0, sizeof(e->page_free));
             memset(e->page_tot, 0, sizeof(e->page_tot));
             memset(e->page_sfree, 0, sizeof(e->page_sfree));
@@ -1567,7 +1656,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             }
             uint16_t new_mask = 0;
             uint32_t new_pages = 0;
-            if (cand_pages >= cfg->purge_min_pages) {
+            if (cand_pages >= min_pages) {
                 unsigned char vec[16];
                 int have_vec = mincore((void *)e->span, sp->map_size, vec) == 0;
                 for (uint32_t pg = 1; pg < 16; pg++) {
@@ -1577,7 +1666,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
                         new_pages++;
                     }
                 }
-                if (new_pages < cfg->purge_min_pages)
+                if (new_pages < min_pages)
                     new_mask = 0, new_pages = 0;
             }
             uint16_t new_withheld = 0;

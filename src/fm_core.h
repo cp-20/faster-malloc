@@ -254,6 +254,16 @@ static FM_Batch *fm_batch_global_head; /* protected by fm_central_lock */
 extern __thread void *fm_lcache_head[FM_LCACHE_BUCKETS]
     __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));
+/* ADR 0087: medium blocks carved from a 4 MiB slab keep their slice in a
+ * per-bucket free list instead of being munmapped one slice at a time.
+ * munmap returns the pages but permanently loses that part of the slab and
+ * forces a fresh slab later; the strace profile of node shows 4287 64 KiB +
+ * 1006 128 KiB + 789 256 KiB munmaps in one run, all from this path. */
+#define FM_LARGE_SLAB 0x80000000u
+#define FM_SLAB_MAX 4096u
+extern __thread uintptr_t fm_slab_head[FM_LCACHE_BUCKETS]
+    __attribute__((tls_model("initial-exec")));
+extern __thread uint32_t fm_slab_n __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_warm_mask __attribute__((tls_model("initial-exec")));
 /* Large-block cache hotness (ADR 0011 follow-up): the cache pays off
  * only for sizes the workload allocates again soon; a bucket that
@@ -2207,6 +2217,16 @@ static inline uint64_t fm_lcache_budget(int b)
 static inline void fm_large_free(FM_Span *sp, void *p)
 {
     fm_ltick++;
+    if ((sp->nblocks & FM_LARGE_SLAB) && sp->align == 0 &&
+        (uintptr_t)p == (uintptr_t)sp + HEADER_SIZE && fm_slab_n < FM_SLAB_MAX) {
+        int b = 63 - __builtin_clzll(fm_large_usable(sp));
+        if (b < FM_LCACHE_BUCKETS) {
+            sp->lnext = fm_slab_head[b];
+            fm_slab_head[b] = (uintptr_t)sp;
+            fm_slab_n++;
+            return;
+        }
+    }
     if (sp->align == 0 && (uintptr_t)p == (uintptr_t)sp + HEADER_SIZE) {
         size_t ms = sp->map_size;
         int b = 63 - __builtin_clzll(fm_large_usable(sp));
@@ -2253,6 +2273,17 @@ static inline size_t fm_large_cache_drain(void)
         }
     }
     fm_lcache_bytes = 0;
+    for (int b = 0; b < FM_LCACHE_BUCKETS; b++) {
+        FM_Span *sp = (FM_Span *)fm_slab_head[b];
+        fm_slab_head[b] = 0;
+        while (sp) {
+            FM_Span *next = (FM_Span *)sp->lnext;
+            released += sp->map_size;
+            munmap((void *)sp->map_base, sp->map_size);
+            sp = next;
+        }
+    }
+    fm_slab_n = 0;
     if (fm_lextent_rem) {
         if (munmap(fm_lextent_cur, fm_lextent_rem) == 0)
             released += fm_lextent_rem;
@@ -2307,6 +2338,22 @@ __attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *z
             link = (FM_Span **)&sp->lnext;
         }
     }
+    for (int b = nb; b < FM_LCACHE_BUCKETS && (wide || b <= nb + 1); b++) {
+        uintptr_t *link = &fm_slab_head[b];
+        for (int i = 0; i < 8 && *link; i++) {
+            FM_Span *sp = (FM_Span *)*link;
+            if (fm_large_usable(sp) >= need_map) {
+                *link = (uintptr_t)sp->lnext;
+                fm_slab_n--;
+                sp->user_size = size;
+                sp->lnext = 0;
+                if (zeroed)
+                    *zeroed = 0;
+                return (void *)((char *)sp + HEADER_SIZE);
+            }
+            link = &sp->lnext;
+        }
+    }
     /* Tail call: keeps the miss path's locals and calls out of the
      * cache-hit path's prologue/epilogue. */
     return fm_large_alloc_map(size, zeroed);
@@ -2356,6 +2403,10 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
                     }
                     sp->user_size = size;
                     sp->lnext = 0;
+                    /* The carved head is an interior piece of a cached
+                     * mapping: never munmap it, reuse it from the slab
+                     * free list instead. */
+                    sp->nblocks |= FM_LARGE_SLAB;
                     if (zeroed)
                         *zeroed = 0;
                     return (void *)((char *)sp + HEADER_SIZE);
@@ -2384,8 +2435,11 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
                      - HEADER_SIZE - SPAN_SIZE;
     }
     char *base = NULL;
-    if (capacity + HEADER_SIZE <= 8 * SPAN_SIZE)
+    int from_slab = 0;
+    if (capacity + HEADER_SIZE <= 8 * SPAN_SIZE) {
         base = fm_map_large_slab(capacity, &raw, &raw_len);
+        from_slab = base != NULL;
+    }
     if (!base)
         base = fm_map_large(capacity, &raw, &raw_len);
     if (!base && capacity != size)
@@ -2401,7 +2455,7 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
     FM_Span *sp = (FM_Span *)base;
     sp->cls = LARGE_CLASS;
     sp->magic = FM_SPAN_MAGIC;
-    sp->nblocks = 1;
+    sp->nblocks = 1u | (from_slab ? FM_LARGE_SLAB : 0u);
     sp->map_base = raw;
     sp->map_size = raw_len;
     sp->user_size = size;

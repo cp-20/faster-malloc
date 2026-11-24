@@ -75,11 +75,21 @@
 #include <stdio.h>
 #endif
 
+#ifdef FM_V4_HYBRID
+#include "size_classes4.h"
+#else
 #include "size_classes2.h"
+#endif
 
 #define FM_SPAN_MAGIC 0x5A6E4C5Au
 #define FM_ALIGNED_MAGIC 0xA110CEDAu
 #define FM_PAGE_SIZE 4096u
+#ifndef FM_ALIGN_UNIT
+#define FM_ALIGN_UNIT SPAN_SIZE
+#endif
+#ifndef FM_SPAN_SHIFT
+#define FM_SPAN_SHIFT 16
+#endif
 #define FM_ALIGN_UP(x, a) (((uintptr_t)(x) + (a)-1) & ~((uintptr_t)(a)-1))
 
 static inline void *fm_malloc(size_t size);
@@ -723,11 +733,115 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
     return aligned;
 }
 
+#ifdef FM_V4_HYBRID
+/* Two reserved VA arenas: 4 KiB spans for cold classes, 64 KiB spans for
+ * hot classes and for classes above 3968 B.  The arenas make the free
+ * path's span lookup a range check (no page map) while keeping the hot
+ * fast path at one class load.  2 MiB chunks are committed on demand. */
+static uintptr_t fm_a4_lo, fm_a4_hi, fm_a4_cur, fm_a4_chunk_end;
+static uintptr_t fm_a64_lo, fm_a64_hi, fm_a64_cur, fm_a64_chunk_end;
+static int fm_v4_arena_ready;
+static _Thread_local uint16_t fm_v4_hot[CLASS_COUNT];
+
+static inline FM_Span *fm_span_base(const void *p)
+{
+    uintptr_t u = (uintptr_t)p;
+    if (__builtin_expect(u >= fm_a4_lo && u < fm_a4_hi, 1))
+        return (FM_Span *)(u & ~(uintptr_t)(FM_SMALL_SPAN_SIZE - 1));
+    if (__builtin_expect(u >= fm_a64_lo && u < fm_a64_hi, 1))
+        return (FM_Span *)(u & ~(uintptr_t)(SPAN_SIZE - 1));
+    return (FM_Span *)(u & ~(uintptr_t)(FM_ALIGN_UNIT - 1));
+}
+
+static void fm_v4_arena_init(void)
+{
+    size_t s4 = 512ull << 20;
+    size_t s64 = 4ull << 30;
+    void *r4 = mmap(NULL, s4 + (2u << 20), PROT_NONE,
+                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    void *r64 = mmap(NULL, s64 + (2u << 20), PROT_NONE,
+                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    if (r4 != MAP_FAILED) {
+        char *b = (char *)FM_ALIGN_UP((uintptr_t)r4, 2u << 20);
+        fm_a4_lo = fm_a4_cur = (uintptr_t)b;
+        fm_a4_hi = (uintptr_t)b + s4;
+        fm_a4_chunk_end = 0;
+    }
+    if (r64 != MAP_FAILED) {
+        char *b = (char *)FM_ALIGN_UP((uintptr_t)r64, 2u << 20);
+        fm_a64_lo = fm_a64_cur = (uintptr_t)b;
+        fm_a64_hi = (uintptr_t)b + s64;
+        fm_a64_chunk_end = 0;
+    }
+    fm_v4_arena_ready = 1;
+}
+
+static char *fm_v4_arena_alloc(int which, size_t size)
+{
+    fm_stack_exclusive();
+    if (!fm_v4_arena_ready)
+        fm_v4_arena_init();
+    uintptr_t *cur = which ? &fm_a64_cur : &fm_a4_cur;
+    uintptr_t end = which ? fm_a64_hi : fm_a4_hi;
+    uintptr_t *chunk = which ? &fm_a64_chunk_end : &fm_a4_chunk_end;
+    if (!end || *cur + size > end) {
+        fm_stack_resume();
+        return NULL;
+    }
+    if (*cur + size > *chunk) {
+        void *r = mmap((void *)*cur, 2u << 20, PROT_READ | PROT_WRITE,
+                       MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (r != (void *)*cur) {
+            fm_stack_resume();
+            return NULL;
+        }
+        *chunk = *cur + (2u << 20);
+    }
+    char *p = (char *)*cur;
+    *cur += size;
+    fm_stack_resume();
+    return p;
+}
+#else
+static inline FM_Span *fm_span_base(const void *p)
+{
+    return (FM_Span *)((uintptr_t)p & SPAN_MASK);
+}
+#endif
+
 /* Map and initialise a fresh span for class cls.  Blocks are carved
  * lazily from the span's bump range by the refill path, so creation
  * does not touch every block's memory. */
 static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
 {
+#ifdef FM_V4_HYBRID
+    size_t bs = kClassSize[cls];
+    int small = (bs <= FM_SMALL_MAX && fm_v4_hot[cls] < 8);
+    size_t span_size = small ? FM_SMALL_SPAN_SIZE : SPAN_SIZE;
+    char *base = fm_v4_arena_alloc(small ? 0 : 1, span_size);
+    if (!base) {
+        span_size = SPAN_SIZE;
+        base = fm_v4_arena_alloc(1, span_size);
+    }
+    if (!base)
+        return NULL;
+    size_t n = (span_size - HEADER_SIZE) / bs;
+    FM_Span *sp = (FM_Span *)base;
+    sp->cls = cls;
+    sp->magic = FM_SPAN_MAGIC;
+    sp->nblocks = (uint32_t)n;
+    sp->dead_mark = 0;
+    sp->map_base = (uintptr_t)base;
+    sp->map_size = span_size;
+    sp->user_size = 0;
+    sp->align = 0;
+    sp->purge_mark = 0;
+    sp->purged_mask = 0;
+    sp->withheld_cnt = 0;
+    *count_out = (uint32_t)n;
+    return base;
+}
+#else
     size_t bs = kClassSize[cls];
     size_t bytes = SPAN_SIZE;
 #ifdef FM_SMALL_FIRST_SPAN
@@ -771,6 +885,8 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
     *count_out = (uint32_t)n;
     return base;
 }
+#endif
+
 
 /* ------------------------------------------------------------------ */
 /* refill / flush                                                      */
@@ -829,7 +945,7 @@ static void *fm_regroup_by_span(void *head, void **tail_out)
     void *p = head;
     while (p) {
         void *next = *(void **)p;
-        uintptr_t sp = (uintptr_t)p & SPAN_MASK;
+        uintptr_t sp = (uintptr_t)fm_span_base(p);
         int found = -1;
         for (int i = 0; i < nb; i++) {
             if (keys[i] == sp) {
@@ -917,7 +1033,7 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
             void *bh = b->head;
             void *bt = b->tail;
             if (b->count & FM_COUNT_PURE) {
-                ((FM_Span *)((uintptr_t)bh & SPAN_MASK))->dead_mark = 0;
+                ((FM_Span *)((uintptr_t)fm_span_base(bh)))->dead_mark = 0;
             } else if (FM_CFG()->locality_sort && bh) {
                 bh = fm_regroup_by_span(bh, &bt);
             }
@@ -935,6 +1051,10 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
     char *cur = fm_bump_ptr[cls];
     char *end = fm_bump_end[cls];
     if (cur >= end) {
+#ifdef FM_V4_HYBRID
+        if (kClassSize[cls] <= FM_SMALL_MAX && fm_v4_hot[cls] < 0xFFFF)
+            fm_v4_hot[cls]++;
+#endif
         uint32_t total = 0;
         char *base = fm_span_new(cls, &total);
         if (!base)
@@ -1024,7 +1144,7 @@ __attribute__((noinline)) static void fm_flush_bin(uint32_t cls)
         uint32_t n = 0;
         void *q = fm_tls.head[cls];
         while (q && n < 100000) {
-            FM_Span *s2 = (FM_Span *)((uintptr_t)q & SPAN_MASK);
+            FM_Span *s2 = (FM_Span *)((uintptr_t)fm_span_base(q));
             uintptr_t off = (uintptr_t)q - ((uintptr_t)s2 + HEADER_SIZE);
             if (s2->cls != cls || off % kClassSize[cls] != 0) {
                 fprintf(stderr, "[fm] LIST HAS FOREIGN BLOCK cls=%u q=%p "
@@ -1164,7 +1284,7 @@ static void fm_census_destroy(FM_Census *c)
 static FM_CensusEnt *fm_census_slot(FM_Census *c, uintptr_t span)
 {
     size_t mask = c->cap - 1;
-    size_t i = (size_t)(span >> 16) & mask;
+    size_t i = (size_t)(span >> FM_SPAN_SHIFT) & mask;
     while (c->ents[i].span != 0 && c->ents[i].span != span)
         i = (i + 1) & mask;
     return &c->ents[i];
@@ -1285,6 +1405,9 @@ static inline void fm_pg_cover(FM_CensusEnt *e, uintptr_t span, void *p,
     uint32_t fp = (uint32_t)((HEADER_SIZE + (size_t)idx * bs) / FM_PAGE_SIZE);
     uint32_t lp = (uint32_t)((HEADER_SIZE + (size_t)(idx + 1) * bs - 1) /
                              FM_PAGE_SIZE);
+    uint32_t pages = (uint32_t)(((FM_Span *)span)->map_size / FM_PAGE_SIZE);
+    if (pages > 16) pages = 16;
+    if (lp >= pages) lp = pages - 1;
     for (uint32_t pg = fp; pg <= lp; pg++)
         e->page_free[pg]++;
     e->page_sfree[fp]++;
@@ -1370,7 +1493,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
     for (FM_Batch *b = all; b; b = b->next) {
         uint32_t cnt = b->count & FM_COUNT_MASK;
         if (cnt && (b->count & FM_COUNT_PURE)) {
-            fm_census_add(&cen, (uintptr_t)b->head & SPAN_MASK, cnt);
+            fm_census_add(&cen, (uintptr_t)fm_span_base(b->head), cnt);
         } else {
             /* Serial pointer chase: overlap the census slot's first
              * touch with the chain hop by prefetching the NEXT block's
@@ -1378,15 +1501,15 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
              * the link word without loading the span header). */
             void *p = b->head;
             if (p) {
-                __builtin_prefetch(&cen.ents[(((uintptr_t)p >> 16)) &
+                __builtin_prefetch(&cen.ents[(((uintptr_t)p >> FM_SPAN_SHIFT)) &
                                              (cen.cap - 1)], 1, 1);
                 for (; p; p = *(void **)p) {
                     void *nx = *(void **)p;
                     if (nx)
-                        __builtin_prefetch(&cen.ents[(((uintptr_t)nx >> 16)) &
+                        __builtin_prefetch(&cen.ents[(((uintptr_t)nx >> FM_SPAN_SHIFT)) &
                                                      (cen.cap - 1)], 1, 1);
                     fm_census_walked++;
-                    fm_census_add(&cen, (uintptr_t)p & SPAN_MASK, 1);
+                    fm_census_add(&cen, (uintptr_t)fm_span_base(p), 1);
                 }
             }
         }
@@ -1499,7 +1622,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             uint32_t cnt = b->count & FM_COUNT_MASK;
             if (cnt && (b->count & FM_COUNT_PURE)) {
                 FM_CensusEnt *e =
-                    fm_census_find(&cen, (uintptr_t)b->head & SPAN_MASK);
+                    fm_census_find(&cen, (uintptr_t)fm_span_base(b->head));
                 if (!e || !(e->pg_flags & FM_PG_CANDIDATE))
                     continue;
                 for (void *p = b->head; p; p = *(void **)p) {
@@ -1510,7 +1633,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
                 for (void *p = b->head; p; p = *(void **)p) {
                     fm_census_walked++;
                     FM_CensusEnt *e =
-                        fm_census_find(&cen, (uintptr_t)p & SPAN_MASK);
+                        fm_census_find(&cen, (uintptr_t)fm_span_base(p));
                     if (e && (e->pg_flags & FM_PG_CANDIDATE))
                         fm_pg_cover(e, e->span, p, bs);
                 }
@@ -1556,7 +1679,9 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             uint32_t nb = sp->nblocks;
             uint16_t cand_mask = 0;
             uint32_t cand_pages = 0;
-            for (uint32_t pg = 1; pg < 16; pg++) {
+            uint32_t pages = (uint32_t)(sp->map_size / FM_PAGE_SIZE);
+            if (pages > 16) pages = 16;
+            for (uint32_t pg = 1; pg < pages; pg++) {
                 if (sp->purged_mask & (uint16_t)(1u << pg))
                     continue;
                 if (e->page_tot[pg] && e->page_free[pg] == e->page_tot[pg] &&
@@ -1570,7 +1695,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             if (cand_pages >= cfg->purge_min_pages) {
                 unsigned char vec[16];
                 int have_vec = mincore((void *)e->span, sp->map_size, vec) == 0;
-                for (uint32_t pg = 1; pg < 16; pg++) {
+                for (uint32_t pg = 1; pg < pages; pg++) {
                     if ((cand_mask & (uint16_t)(1u << pg)) &&
                         (!have_vec || (vec[pg] & 1))) {
                         new_mask |= (uint16_t)(1u << pg);
@@ -1695,7 +1820,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
         FM_CensusEnt *be = NULL;
         int splice = 0;
         if (cnt && (b->count & FM_COUNT_PURE)) {
-            be = fm_census_find(&cen, (uintptr_t)b->head & SPAN_MASK);
+            be = fm_census_find(&cen, (uintptr_t)fm_span_base(b->head));
             /* A batch of a span being purged cannot be spliced
              * wholesale: the blocks inside the purge run must be
              * withheld, so the chain is walked block by block. */
@@ -1723,14 +1848,14 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
         } else {
             void *p = b->head;
             if (p)
-                __builtin_prefetch(&cen.ents[(((uintptr_t)p >> 16)) &
+                __builtin_prefetch(&cen.ents[(((uintptr_t)p >> FM_SPAN_SHIFT)) &
                                              (cen.cap - 1)], 1, 1);
             while (p) {
                 void *nx = *(void **)p;
                 if (nx)
-                    __builtin_prefetch(&cen.ents[(((uintptr_t)nx >> 16)) &
+                    __builtin_prefetch(&cen.ents[(((uintptr_t)nx >> FM_SPAN_SHIFT)) &
                                                  (cen.cap - 1)], 1, 1);
-                FM_CensusEnt *e = fm_census_find(&cen, (uintptr_t)p & SPAN_MASK);
+                FM_CensusEnt *e = fm_census_find(&cen, (uintptr_t)fm_span_base(p));
                 if (e && e->dead) {
                     /* block dies with its span */
                 } else if (e && e->pg_new_mask &&
@@ -2433,7 +2558,11 @@ __attribute__((noinline)) static void *fm_aligned_alloc_impl(size_t align, size_
         size_t req = FM_ALIGN_UP(size ? size : 1, align);
         return fm_malloc(req);
     }
+#ifdef FM_V4_HYBRID
+    if (align < FM_ALIGN_UNIT) {
+#else
     if (align < SPAN_SIZE) {
+#endif
         size_t need = size + align + HEADER_SIZE;
         size_t map_len = need + SPAN_SIZE + FM_PAGE_SIZE;
         char *raw = mmap(NULL, map_len, PROT_READ | PROT_WRITE,
@@ -2489,9 +2618,17 @@ __attribute__((noinline)) static void *fm_aligned_alloc_impl(size_t align, size_
     return (void *)user;
 }
 
+#ifdef FM_V4_HYBRID
+static inline int fm_v4_in_arena(uintptr_t u)
+{
+    return (u >= fm_a4_lo && u < fm_a4_hi) ||
+           (u >= fm_a64_lo && u < fm_a64_hi);
+}
+#endif
+
 static inline int fm_is_aligned_ptr(const void *p)
 {
-    if (((uintptr_t)p & (SPAN_SIZE - 1)) != 0)
+    if (((uintptr_t)p & (FM_ALIGN_UNIT - 1)) != 0)
         return 0;
     const FM_Span *sp = (const FM_Span *)((const char *)p - HEADER_SIZE);
     return sp->magic == FM_ALIGNED_MAGIC;
@@ -2591,7 +2728,7 @@ static inline void *fm_malloc(size_t size)
         if (__builtin_expect(p != NULL, 1)) {
 #ifdef FM_DEBUG
             {
-                FM_Span *sp2 = (FM_Span *)((uintptr_t)p & SPAN_MASK);
+                FM_Span *sp2 = (FM_Span *)((uintptr_t)fm_span_base(p));
                 uintptr_t off = (uintptr_t)p - ((uintptr_t)sp2 + HEADER_SIZE);
                 if (sp2->cls != cls || off % kClassSize[cls] != 0) {
                     fprintf(stderr,
@@ -2603,7 +2740,7 @@ static inline void *fm_malloc(size_t size)
                 }
             }
             if (((uint64_t *)p)[1] != 0xDEADDEADDEADDEADull) {
-                FM_Span *s3 = (FM_Span *)((uintptr_t)p & SPAN_MASK);
+                FM_Span *s3 = (FM_Span *)((uintptr_t)fm_span_base(p));
                 fprintf(stderr,
                         "[fm] CORRUPT HEAD size=%zu cls=%zu bs=%u span_cls=%u "
                         "span_nblocks=%u off=%lu canary=%lx\n",
@@ -2613,7 +2750,7 @@ static inline void *fm_malloc(size_t size)
                 abort();
             }
             {
-                FM_Span *s3 = (FM_Span *)((uintptr_t)p & SPAN_MASK);
+                FM_Span *s3 = (FM_Span *)((uintptr_t)fm_span_base(p));
                 uintptr_t off = (uintptr_t)p - ((uintptr_t)s3 + HEADER_SIZE);
                 if (off % kClassSize[cls] != 0 ||
                     off / kClassSize[cls] >= s3->nblocks ||
@@ -2710,23 +2847,29 @@ static inline void fm_free(void *p)
 {
     /* NULL has low 16 bits == 0 too, so one branch handles both NULL and
      * 64 KiB-aligned over-aligned allocations off the hot path. */
-    if (__builtin_expect(((uintptr_t)p & (SPAN_SIZE - 1)) == 0, 0)) {
+    if (__builtin_expect(((uintptr_t)p & (FM_ALIGN_UNIT - 1)) == 0, 0)) {
         if (!p)
             return;
+#ifdef FM_V4_HYBRID
+        if (!fm_v4_in_arena((uintptr_t)p) && fm_is_aligned_ptr(p)) {
+#else
         if (fm_is_aligned_ptr(p)) {
+#endif
             fm_free_aligned(p);
             return;
         }
     }
     FM_Span *sp;
-#if defined(__x86_64__)
+#ifdef FM_V4_HYBRID
+    sp = fm_span_base(p);
+#elif defined(__x86_64__)
     {
         uintptr_t base = (uintptr_t)p;
         __asm__("andq $-65536, %0" : "+r"(base) : : "cc");
         sp = (FM_Span *)base;
     }
 #else
-    sp = (FM_Span *)((uintptr_t)p & SPAN_MASK);
+    sp = fm_span_base(p);
 #endif
     uint32_t cls32 = sp->cls;
     if (__builtin_expect(cls32 == LARGE_CLASS, 0)) {
@@ -2839,13 +2982,17 @@ static inline size_t fm_usable_size(void *p)
         return 0;
     if (__builtin_expect(u < FM_PAGE_SIZE, 0))
         return 0; /* neither a v2 span nor a valid foreign heap pointer */
-    if (__builtin_expect((u & (SPAN_SIZE - 1)) == 0, 0)) {
+    if (__builtin_expect((u & (FM_ALIGN_UNIT - 1)) == 0, 0)) {
+#ifdef FM_V4_HYBRID
+        if (!fm_v4_in_arena(u) && fm_is_aligned_ptr(p)) {
+#else
         if (fm_is_aligned_ptr(p)) {
+#endif
             const FM_Span *sp = (const FM_Span *)((const char *)p - HEADER_SIZE);
             return sp->user_size;
         }
     }
-    const FM_Span *sp = (const FM_Span *)(u & SPAN_MASK);
+    const FM_Span *sp = (const FM_Span *)(uintptr_t)fm_span_base((void *)u);
     if (__builtin_expect(sp->magic == FM_SPAN_MAGIC, 1)) {
         if (sp->cls == LARGE_CLASS)
             return sp->user_size;
@@ -2861,7 +3008,12 @@ __attribute__((noinline)) static void *fm_realloc_slow(void *p, size_t size)
         fm_free(p);
         return NULL;
     }
-    if (((uintptr_t)p & (SPAN_SIZE - 1)) == 0 && fm_is_aligned_ptr(p)) {
+#ifdef FM_V4_HYBRID
+    if (!fm_v4_in_arena((uintptr_t)p) &&
+        ((uintptr_t)p & (FM_ALIGN_UNIT - 1)) == 0 && fm_is_aligned_ptr(p)) {
+#else
+    if (((uintptr_t)p & (FM_ALIGN_UNIT - 1)) == 0 && fm_is_aligned_ptr(p)) {
+#endif
         const FM_Span *sp = (const FM_Span *)((const char *)p - HEADER_SIZE);
         if (size <= sp->user_size)
             return p;
@@ -2872,7 +3024,7 @@ __attribute__((noinline)) static void *fm_realloc_slow(void *p, size_t size)
         munmap((void *)sp->map_base, sp->map_size);
         return q;
     }
-    FM_Span *sp = (FM_Span *)((uintptr_t)p & SPAN_MASK);
+    FM_Span *sp = (FM_Span *)((uintptr_t)fm_span_base(p));
     if (sp->cls != LARGE_CLASS) {
         size_t old = kClassSize[sp->cls];
         if (size <= old)
@@ -2919,8 +3071,8 @@ static inline void *fm_realloc(void *p, size_t size)
 {
     if (__builtin_expect(!p, 0))
         return fm_malloc(size);
-    if (__builtin_expect(((uintptr_t)p & (SPAN_SIZE - 1)) != 0 && size != 0, 1)) {
-        FM_Span *sp = (FM_Span *)((uintptr_t)p & SPAN_MASK);
+    if (__builtin_expect(((uintptr_t)p & (FM_ALIGN_UNIT - 1)) != 0 && size != 0, 1)) {
+        FM_Span *sp = (FM_Span *)((uintptr_t)fm_span_base(p));
         uint32_t cls = sp->cls;
         if (__builtin_expect(cls != LARGE_CLASS, 1)) {
             if (__builtin_expect(size <= kClassSize[cls], 1))

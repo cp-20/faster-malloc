@@ -23,6 +23,9 @@ libfastmalloc2.so: src/fm_static.c src/fm_core.h src/size_classes2.h
 libjitmalloc.so: src/fm_jit.c src/jit_stubs.S src/fm_core.h src/size_classes2.h
 	$(CC) $(CFLAGS) -shared -Wl,-z,nodelete -o $@ src/fm_jit.c src/jit_stubs.S $(LDFLAGS)
 
+libfastmalloc4.so: src/fm_static.c src/fm_core.h src/size_classes4.h
+	$(CC) $(CFLAGS) -DFM_V4_HYBRID -shared -Wl,-z,nodelete -o $@ src/fm_static.c $(LDFLAGS)
+
 bench/micro: bench/micro.c
 	$(CC) -O2 -g -o $@ bench/micro.c -lpthread -ldl
 

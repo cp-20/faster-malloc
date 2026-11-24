@@ -319,9 +319,13 @@ extern __thread uint32_t fm_lbucket_seen[FM_LCACHE_BUCKETS]
  * VA/header until muzzy_decay_ms, then are munmapped.  The maintenance thread
  * is armed by the internal high-water of cumulative large-block frees (a
  * cold path, so short apps and the exact-Ir micro suite never spawn it);
- * decay_pulse_spans bounds the batches a single census pulse detaches. */
-#define FM_DECAY_DIRTY_MS 500u
-#define FM_DECAY_MUZZY_MS 2000u
+ * decay_pulse_spans bounds the batches a single census pulse detaches.
+ * N134: no idle thread and no high-water arming -- every decay step is
+ * driven by the next flush of a class.  DIRTY ages out in 10 ms, so a
+ * fully-free span is purged on the first flush cadence after that; MUZZY
+ * spans are swept by the same flush path after 100 ms. */
+#define FM_DECAY_DIRTY_MS 10u
+#define FM_DECAY_MUZZY_MS 100u
 #define FM_DECAY_HIGH_WATER (256ull << 20)
 #define FM_DECAY_PULSE_SPANS 32u
 
@@ -1172,10 +1176,10 @@ static FM_Census fm_shared_census; /* protected by fm_census_lock */
  * before being munmapped.  lnext is unused on small spans, so the queue is
  * intrusive.  fm_census_lock guards the queue and every state transition. */
 static FM_Span *fm_muzzy_head;
-/* The muzzy pipeline only runs once the maintenance thread is armed;
- * otherwise fully-free spans keep the original direct-munmap ageing, so an
- * app that never crosses the high-water cannot accumulate muzzy headers. */
-static _Atomic int fm_decay_enabled;
+/* N134: decay is always on and entirely flush-driven -- there is no
+ * maintenance thread to arm, so every app gets the same DIRTY purge on
+ * the flush cadence.  The muzzy queue is swept from that same path. */
+static _Atomic int fm_decay_enabled = 1;
 
 static void fm_muzzy_enqueue(FM_Span *sp)
 {
@@ -2116,12 +2120,14 @@ static void fm_release_maybe(uint32_t cls, uint32_t now, uint32_t flushed_cls)
 }
 
 static void fm_idle_kick(uint32_t now);
+static void fm_muzzy_sweep(uint32_t now, int all);
 
 static void fm_auto_release_tick(uint32_t flushed_cls)
 {
     uint32_t now = fm_now_ms();
-    if (FM_CFG()->idle_release && !fm_in_census)
-        fm_idle_kick(now);
+    /* N134: no idle thread.  The flush cadence IS the decay clock: each
+     * tick ages DIRTY spans into a MADV_DONTNEED purge and retires MUZZY
+     * spans whose 100 ms window has passed. */
     /* Consider every class, not just the one whose flush ticked: a
      * class that stops being flushed would otherwise never be
      * visited again, and its dead spans are exactly the ones worth
@@ -2130,6 +2136,7 @@ static void fm_auto_release_tick(uint32_t flushed_cls)
      * the gates protect. */
     for (uint32_t cls = 0; cls < CLASS_COUNT; cls++)
         fm_release_maybe(cls, now, flushed_cls);
+    fm_muzzy_sweep(now, 0);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2149,10 +2156,6 @@ static void fm_auto_release_tick(uint32_t flushed_cls)
 
 static _Atomic uint32_t fm_last_activity_ms;
 static _Atomic int fm_idle_thread_state; /* -1 disabled in fork child, 0 none, 1 starting/running */
-/* Stage-1 internal arming high-water: cumulative bytes of large blocks
- * freed.  Only the large-free cold path touches it, so the exact-Ir micro
- * suite and sub-100 ms startup apps never arm the maintenance thread. */
-static _Atomic uint64_t fm_decay_freed_bytes;
 
 /* ADR 0040: shipped v2/JIT DSOs require ELF NODELETE, including custom builds.
  * dlclose retains worker code, TLS callbacks and allocator state until exit. */
@@ -2175,7 +2178,8 @@ static void fm_idle_after_fork_child(void)
     /* A multithreaded fork child may only call async-signal-safe
      * functions before exec: never spawn a timer in that window. */
     atomic_store_explicit(&fm_idle_thread_state, -1, memory_order_relaxed);
-    atomic_store_explicit(&fm_decay_enabled, 0, memory_order_relaxed);
+    /* N134: decay is flush-driven, so the fork child keeps it enabled --
+     * no timer is spawned in the child, only allocator-path sweeps. */
     atomic_store_explicit(&fm_last_activity_ms, 0, memory_order_relaxed);
     fm_fork_parent();
 }
@@ -2239,7 +2243,10 @@ static void *fm_idle_thread_main(void *arg)
     return NULL;
 }
 
-static void fm_idle_kick(uint32_t now)
+/* N134: intentionally never called -- no maintenance thread is spawned.
+ * Kept (unused) so the fork-safe idle machinery can be restored by a
+ * follow-up without re-deriving it; the flush path owns all decay now. */
+__attribute__((unused)) static void fm_idle_kick(uint32_t now)
 {
     if (!atomic_load_explicit(&fm_atfork_ready, memory_order_acquire) ||
         atomic_load_explicit(&fm_idle_thread_state, memory_order_relaxed) < 0)
@@ -2385,17 +2392,7 @@ static inline uint64_t fm_lcache_budget(int b)
 static inline void fm_large_free(FM_Span *sp, void *p)
 {
     fm_ltick++;
-    /* Stage 1: arm the maintenance thread only after this process has
-     * churned enough large mappings to be a "large" one.  The counter is
-     * monotonic and lives on a cold path; FM_IDLE_RELEASE=0 keeps its
-     * original meaning (the external knob is unchanged). */
-    const FM_Config *cfg = FM_CFG();
-    uint64_t seen = atomic_fetch_add_explicit(&fm_decay_freed_bytes,
-                                              sp->map_size,
-                                              memory_order_relaxed) + sp->map_size;
-    if (seen >= cfg->decay_high_water &&
-        atomic_load_explicit(&fm_idle_thread_state, memory_order_relaxed) == 0)
-        fm_idle_kick(fm_now_ms());
+    /* N134: no high-water arming -- decay runs on the flush cadence. */
     if (sp->align == 0 && (uintptr_t)p == (uintptr_t)sp + HEADER_SIZE) {
         size_t ms = sp->map_size;
         int b = 63 - __builtin_clzll(fm_large_usable(sp));

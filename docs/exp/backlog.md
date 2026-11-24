@@ -304,6 +304,17 @@ time for up to 58 MiB, cap 128 is neutral.  The residual munmaps are
 aligned allocations (V8 asks for `align=128` buffers) and dedicated
 mappings above the slab cutoff, which cannot join the slab list.
 
+## Round 22: selective large-cache retention (2026-11-25)
+
+| id | branch | result | status |
+|---|---|---|---|
+| C2 | `exp/selective-cache` | on top of the 16 MiB base (ADR 0083): warm buckets (a hit) may keep 4 MiB, cold buckets one block <= 256 KiB, exact per-bucket byte accounting.  Local interleaved vs 16 MiB: python 142.0 -> 138.3 MB, lua 16.3 -> 14.4-15.5, sqlite 11.5 -> 11.1, git 24.0 -> 24.0, node 404.9 -> 404.1, all at unchanged time | **candidate** (11-rep matrices running) |
+
+The flat budget could not distinguish a reused JSON buffer (node) from a
+free-and-forget 1 MiB obmalloc arena (CPython); per-bucket warm/cold
+retention can, and it recovers RSS on python and lua without the node
+time cost that ADR 0083 traded away.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

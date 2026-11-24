@@ -3,7 +3,7 @@
  *
  * Design summary
  * --------------
- * A span is a 64 KiB-aligned region whose first 64 bytes are a header that
+ * A span is a 128 KiB-aligned region whose first 64 bytes are a header that
  * records the size class.  Every small allocation is carved out of a span
  * that serves exactly one size class, so free() recovers the class with one
  * AND and one load: there is no per-block metadata and nothing is stored in
@@ -82,6 +82,25 @@
 #define FM_PAGE_SIZE 4096u
 #define FM_ALIGN_UP(x, a) (((uintptr_t)(x) + (a)-1) & ~((uintptr_t)(a)-1))
 
+/* 128 KiB = 32 x 4 KiB pages.  size_classes2.h is generated and still
+ * declares 64 KiB; override it here so the diff stays inside fm_core.h.
+ * Every span-derived path (free/span mask, dense extent, census, page
+ * purge, trim) picks up the new size from these definitions. */
+#undef SPAN_SIZE
+#define SPAN_SIZE 131072u
+#undef SPAN_MASK
+#define SPAN_MASK (~(uintptr_t)(SPAN_SIZE - 1u))
+#define FM_SPAN_SHIFT 17
+#define FM_SPAN_PAGES (SPAN_SIZE / FM_PAGE_SIZE)
+/* The census purge mask is 16 bits and FM_Span is exactly HEADER_SIZE
+ * (64) bytes, so one purge "page" becomes an 8 KiB unit (two OS pages)
+ * when the span grows to 128 KiB.  The census runs at unit granularity;
+ * MADV_DONTNEED still operates on whole 4 KiB OS pages. */
+#define FM_PURGE_UNITS 16
+#define FM_PURGE_UNIT_SIZE (SPAN_SIZE / FM_PURGE_UNITS)
+#define FM_PURGE_PPU (FM_PURGE_UNIT_SIZE / FM_PAGE_SIZE)
+#define FM_PG_MASK(u) ((uint16_t)1u << (u))
+
 static inline void *fm_malloc(size_t size);
 
 /* Hot thread-local free-list state grouped into one struct with parallel
@@ -134,9 +153,14 @@ typedef struct FM_Span {
      * again when a purge lands (the reclaim age is measured from
      * it). */
     uint32_t purge_mark;
-    uint16_t purged_mask;
+    uint16_t purged_mask; /* one bit per purge unit */
     uint16_t withheld_cnt;
 } FM_Span;
+
+/* Blocks start at HEADER_SIZE; a struct larger than the header would
+ * overwrite the first block's link word (this is a hard ABI invariant). */
+_Static_assert(sizeof(FM_Span) == HEADER_SIZE,
+               "FM_Span must fit exactly in the span header");
 
 typedef struct FM_Batch FM_Batch;
 struct FM_Batch {
@@ -610,7 +634,7 @@ static inline void fm_publish2(void *head, void *tail, uint32_t cls,
 /* spans                                                               */
 /* ------------------------------------------------------------------ */
 
-/* Map `bytes` usable bytes at a 64 KiB-aligned address, with a 64 byte
+/* Map `bytes` usable bytes at a 128 KiB-aligned address, with a 64 byte
  * header in front.  The mapping is trimmed to exactly the pages needed. */
 static inline char *fm_map_aligned(size_t bytes)
 {
@@ -681,7 +705,7 @@ static char *fm_map_dense_span(void)
 /* Per-thread 4 MiB base-page slab for >4 KiB class spans and <=512 KiB
  * large allocations: amortizes mmap/trim syscalls without hinting THP on
  * potentially sparse allocations, and drains on malloc_trim / thread exit.
- * A 4 MiB slab holds twice as many 64 KiB carves as 2 MiB, so g++/jq/xz
+ * A 4 MiB slab holds twice as many 128 KiB carves as 2 MiB, so g++/jq/xz
  * medium-buffer churn crosses the mmap/munmap slow path half as often;
  * untouched tail pages stay non-resident, so RSS is unaffected. */
 static _Thread_local char *fm_lextent_cur __attribute__((tls_model("initial-exec")));
@@ -728,7 +752,7 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
     size_t bytes = SPAN_SIZE;
 #ifdef FM_SMALL_FIRST_SPAN
     /* ADR 0060: sparsely used startup classes cap initial carved blocks
-     * while still drawing 64 KiB VA slots from the shared dense extent. */
+     * while still drawing 128 KiB VA slots from the shared dense extent. */
     static _Atomic unsigned char started[CLASS_COUNT];
     bytes = atomic_exchange_explicit(&started[cls], 1, memory_order_relaxed)
         ? SPAN_SIZE : FM_ALIGN_UP(HEADER_SIZE + (bs > 16320 ? bs : 16320), FM_PAGE_SIZE);
@@ -811,7 +835,7 @@ static inline uint32_t fm_local_limit(uint32_t cls)
     return limit;
 }
 
-/* Group a mixed free-list batch by 64 KiB span so consecutive allocations
+/* Group a mixed free-list batch by 128 KiB span so consecutive allocations
  * stay on the same span/pages and reduce D1/TLB misses (opt-in FM_LOCALITY_SORT=1). */
 static void *fm_regroup_by_span(void *head, void **tail_out)
 {
@@ -1097,10 +1121,10 @@ typedef struct FM_CensusEnt {
      * MADV_DONTNEED is applied to them.  pg_reclaim asks the rebuild
      * to first re-carve the span's previously withheld blocks back
      * into its survivor chain. */
-    uint16_t page_free[16];
-    uint16_t page_tot[16];
-    uint16_t page_sfree[16];
-    uint16_t page_stot[16];
+    uint16_t page_free[FM_PURGE_UNITS];
+    uint16_t page_tot[FM_PURGE_UNITS];
+    uint16_t page_sfree[FM_PURGE_UNITS];
+    uint16_t page_stot[FM_PURGE_UNITS];
     uint16_t pg_new_mask;
     uint16_t pg_new_withheld;
     uint16_t pg_skip_cnt;
@@ -1160,7 +1184,7 @@ static void fm_census_destroy(FM_Census *c)
 static FM_CensusEnt *fm_census_slot(FM_Census *c, uintptr_t span)
 {
     size_t mask = c->cap - 1;
-    size_t i = (size_t)(span >> 16) & mask;
+    size_t i = (size_t)(span >> FM_SPAN_SHIFT) & mask;
     while (c->ents[i].span != 0 && c->ents[i].span != span)
         i = (i + 1) & mask;
     return &c->ents[i];
@@ -1268,9 +1292,10 @@ static _Thread_local uint32_t fm_census_reclaimed;
  * then eligible. */
 static _Thread_local uint32_t fm_census_pg_waiting;
 
-/* ADR 0030: record one free block in a candidate span's per-page
- * coverage counts.  Pages are 4 KiB slices of the 64 KiB span; a
- * block touches the pages between its first and last byte
+/* ADR 0030: record one free block in a candidate span's per-unit
+ * coverage counts.  A unit is FM_PURGE_UNIT_SIZE of the span (one 4 KiB
+ * OS page with 64 KiB spans, two with 128 KiB spans); a block touches
+ * the units between its first and last byte
  * (page_free), and starts in exactly one of them (page_sfree) --
  * the purge decision needs both, for different reasons (see the
  * decision phase in fm_trim_class). */
@@ -1278,9 +1303,9 @@ static inline void fm_pg_cover(FM_CensusEnt *e, uintptr_t span, void *p,
                                size_t bs)
 {
     uint32_t idx = (uint32_t)(((uintptr_t)p - span - HEADER_SIZE) / bs);
-    uint32_t fp = (uint32_t)((HEADER_SIZE + (size_t)idx * bs) / FM_PAGE_SIZE);
+    uint32_t fp = (uint32_t)((HEADER_SIZE + (size_t)idx * bs) / FM_PURGE_UNIT_SIZE);
     uint32_t lp = (uint32_t)((HEADER_SIZE + (size_t)(idx + 1) * bs - 1) /
-                             FM_PAGE_SIZE);
+                             FM_PURGE_UNIT_SIZE);
     for (uint32_t pg = fp; pg <= lp; pg++)
         e->page_free[pg]++;
     e->page_sfree[fp]++;
@@ -1374,12 +1399,12 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
              * the link word without loading the span header). */
             void *p = b->head;
             if (p) {
-                __builtin_prefetch(&cen.ents[(((uintptr_t)p >> 16)) &
+                __builtin_prefetch(&cen.ents[(((uintptr_t)p >> FM_SPAN_SHIFT)) &
                                              (cen.cap - 1)], 1, 1);
                 for (; p; p = *(void **)p) {
                     void *nx = *(void **)p;
                     if (nx)
-                        __builtin_prefetch(&cen.ents[(((uintptr_t)nx >> 16)) &
+                        __builtin_prefetch(&cen.ents[(((uintptr_t)nx >> FM_SPAN_SHIFT)) &
                                                      (cen.cap - 1)], 1, 1);
                     fm_census_walked++;
                     fm_census_add(&cen, (uintptr_t)p & SPAN_MASK, 1);
@@ -1463,10 +1488,10 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             any_candidate = 1;
             for (uint32_t idx = 0; idx < nb; idx++) {
                 uint32_t fp = (uint32_t)((HEADER_SIZE + (size_t)idx * bs) /
-                                         FM_PAGE_SIZE);
+                                         FM_PURGE_UNIT_SIZE);
                 uint32_t lp = (uint32_t)((HEADER_SIZE +
                                           (size_t)(idx + 1) * bs - 1) /
-                                         FM_PAGE_SIZE);
+                                         FM_PURGE_UNIT_SIZE);
                 for (uint32_t pg = fp; pg <= lp; pg++)
                     e->page_tot[pg]++;
                 e->page_stot[fp]++;
@@ -1552,24 +1577,28 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             uint32_t nb = sp->nblocks;
             uint16_t cand_mask = 0;
             uint32_t cand_pages = 0;
-            for (uint32_t pg = 1; pg < 16; pg++) {
-                if (sp->purged_mask & (uint16_t)(1u << pg))
+            for (uint32_t pg = 1; pg < FM_PURGE_UNITS; pg++) {
+                if (sp->purged_mask & FM_PG_MASK(pg))
                     continue;
                 if (e->page_tot[pg] && e->page_free[pg] == e->page_tot[pg] &&
                     e->page_sfree[pg] == e->page_stot[pg]) {
-                    cand_mask |= (uint16_t)(1u << pg);
+                    cand_mask |= FM_PG_MASK(pg);
                     cand_pages++;
                 }
             }
             uint16_t new_mask = 0;
             uint32_t new_pages = 0;
             if (cand_pages >= cfg->purge_min_pages) {
-                unsigned char vec[16];
-                int have_vec = mincore((void *)e->span, sp->map_size, vec) == 0;
-                for (uint32_t pg = 1; pg < 16; pg++) {
-                    if ((cand_mask & (uint16_t)(1u << pg)) &&
-                        (!have_vec || (vec[pg] & 1))) {
-                        new_mask |= (uint16_t)(1u << pg);
+                unsigned char vec[FM_SPAN_PAGES];
+                int have_vec = mincore((void *)e->span, SPAN_SIZE, vec) == 0;
+                for (uint32_t pg = 1; pg < FM_PURGE_UNITS; pg++) {
+                    if (!(cand_mask & FM_PG_MASK(pg)))
+                        continue;
+                    int resident = !have_vec;
+                    for (uint32_t k = 0; k < FM_PURGE_PPU; k++)
+                        resident |= (vec[pg * FM_PURGE_PPU + k] & 1) != 0;
+                    if (resident) {
+                        new_mask |= FM_PG_MASK(pg);
                         new_pages++;
                     }
                 }
@@ -1581,8 +1610,8 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
                 for (uint32_t idx = 0; idx < nb; idx++) {
                     uint32_t fp = (uint32_t)((HEADER_SIZE +
                                               (size_t)idx * bs) /
-                                             FM_PAGE_SIZE);
-                    if (new_mask & (uint16_t)(1u << fp))
+                                             FM_PURGE_UNIT_SIZE);
+                    if (new_mask & FM_PG_MASK(fp))
                         new_withheld++;
                 }
             }
@@ -1653,8 +1682,8 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
         uint32_t total = 0;
         for (uint32_t idx = 0; idx < sp->nblocks; idx++) {
             uint32_t fp = (uint32_t)((HEADER_SIZE + (size_t)idx * bs) /
-                                     FM_PAGE_SIZE);
-            if (!(sp->purged_mask & (uint16_t)(1u << fp)))
+                                     FM_PURGE_UNIT_SIZE);
+            if (!(sp->purged_mask & FM_PG_MASK(fp)))
                 continue;
             void *blk = (void *)(e->span + HEADER_SIZE + (size_t)idx * bs);
 #ifdef FM_DEBUG
@@ -1719,20 +1748,20 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
         } else {
             void *p = b->head;
             if (p)
-                __builtin_prefetch(&cen.ents[(((uintptr_t)p >> 16)) &
+                __builtin_prefetch(&cen.ents[(((uintptr_t)p >> FM_SPAN_SHIFT)) &
                                              (cen.cap - 1)], 1, 1);
             while (p) {
                 void *nx = *(void **)p;
                 if (nx)
-                    __builtin_prefetch(&cen.ents[(((uintptr_t)nx >> 16)) &
+                    __builtin_prefetch(&cen.ents[(((uintptr_t)nx >> FM_SPAN_SHIFT)) &
                                                  (cen.cap - 1)], 1, 1);
                 FM_CensusEnt *e = fm_census_find(&cen, (uintptr_t)p & SPAN_MASK);
                 if (e && e->dead) {
                     /* block dies with its span */
                 } else if (e && e->pg_new_mask &&
                            (e->pg_new_mask &
-                            (uint16_t)(1u << (((uintptr_t)p - e->span) /
-                                              FM_PAGE_SIZE)))) {
+                            FM_PG_MASK((((uintptr_t)p - e->span) /
+                                       FM_PURGE_UNIT_SIZE)))) {
                     /* Block starting in one of this census's newly
                      * purged pages: withhold it -- it joins no
                      * chain, and its link word is about to be
@@ -1780,17 +1809,17 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             abort();
         }
 #endif
-        for (uint32_t a = 1; a < 16;) {
-            if (!(e->pg_new_mask & (uint16_t)(1u << a))) {
+        for (uint32_t a = 1; a < FM_PURGE_UNITS;) {
+            if (!(e->pg_new_mask & FM_PG_MASK(a))) {
                 a++;
                 continue;
             }
             uint32_t b = a + 1;
-            while (b < 16 && (e->pg_new_mask & (uint16_t)(1u << b)))
+            while (b < FM_PURGE_UNITS && (e->pg_new_mask & FM_PG_MASK(b)))
                 b++;
-            madvise((void *)(e->span + (size_t)a * FM_PAGE_SIZE),
-                    (size_t)(b - a) * FM_PAGE_SIZE, MADV_DONTNEED);
-            fm_census_purged += (size_t)(b - a) * FM_PAGE_SIZE;
+            madvise((void *)(e->span + (size_t)a * FM_PURGE_UNIT_SIZE),
+                    (size_t)(b - a) * FM_PURGE_UNIT_SIZE, MADV_DONTNEED);
+            fm_census_purged += (size_t)(b - a) * FM_PURGE_UNIT_SIZE;
             a = b;
         }
         sp->purged_mask |= e->pg_new_mask;
@@ -2146,7 +2175,7 @@ static inline size_t fm_class_of(size_t size)
 /* ------------------------------------------------------------------ */
 
 /* Map memory for a large allocation WITHOUT trimming: the mapping is
- * over-sized by up to one span so the header can sit at a 64 KiB-aligned
+ * over-sized by up to one span so the header can sit at a 128 KiB-aligned
  * base inside it, and the head slack simply stays mapped as part of the
  * block (it is never touched, so it costs address space only).  The
  * header records the raw mapping in map_base/map_size, so free releases
@@ -2417,7 +2446,7 @@ __attribute__((noinline)) static void *fm_aligned_alloc_impl(size_t align, size_
     if (align <= 64 && (align & (align - 1)) == 0 && size <= SMALL_MAX) {
         if (align <= 16)
             return fm_malloc(size);
-        /* Every small span is 64 KiB-aligned and HEADER_SIZE is 64:
+        /* Every small span is 128 KiB-aligned and HEADER_SIZE is 64:
          * rounding up to 32 or 64 selects a class whose block size is a
          * multiple of `align`, so base + 64 + idx * bs is naturally aligned. */
         size_t req = FM_ALIGN_UP(size ? size : 1, align);
@@ -2699,7 +2728,7 @@ static inline void fm_tls_push_free(void *p, size_t cls)
 static inline void fm_free(void *p)
 {
     /* NULL has low 16 bits == 0 too, so one branch handles both NULL and
-     * 64 KiB-aligned over-aligned allocations off the hot path. */
+     * 128 KiB-aligned over-aligned allocations off the hot path. */
     if (__builtin_expect(((uintptr_t)p & (SPAN_SIZE - 1)) == 0, 0)) {
         if (!p)
             return;
@@ -2712,7 +2741,7 @@ static inline void fm_free(void *p)
 #if defined(__x86_64__)
     {
         uintptr_t base = (uintptr_t)p;
-        __asm__("andq $-65536, %0" : "+r"(base) : : "cc");
+        __asm__("andq $-131072, %0" : "+r"(base) : : "cc"); /* -(SPAN_SIZE) */
         sp = (FM_Span *)base;
     }
 #else

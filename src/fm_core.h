@@ -100,6 +100,10 @@ extern __thread char *fm_bump_ptr[CLASS_COUNT] __attribute__((tls_model("initial
 extern __thread char *fm_bump_end[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 /* Exit hook state: 0 = not armed, 1 = armed, 2 = destructor running (disarmed). */
 extern __thread int fm_exit_armed __attribute__((tls_model("initial-exec")));
+/* Set on the allocator's idle maintenance thread so its census flushes do
+ * not make a single-threaded process look multithreaded (N11).  Static so
+ * each DSO build gets its own copy without touching the jit entry file. */
+static _Thread_local int fm_maint_thread __attribute__((tls_model("initial-exec")));
 
 typedef struct FM_Span {
     uint32_t cls;       /* size class, or LARGE_CLASS */
@@ -682,14 +686,18 @@ static char *fm_map_dense_span(void)
     return span;
 }
 
-/* Per-thread 4 MiB base-page slab for >4 KiB class spans and <=512 KiB
- * large allocations: amortizes mmap/trim syscalls without hinting THP on
+/* Per-thread base-page slab for >4 KiB class spans and <=512 KiB large
+ * allocations: amortizes mmap/trim syscalls without hinting THP on
  * potentially sparse allocations, and drains on malloc_trim / thread exit.
- * A 4 MiB slab holds twice as many 64 KiB carves as 2 MiB, so g++/jq/xz
- * medium-buffer churn crosses the mmap/munmap slow path half as often;
- * untouched tail pages stay non-resident, so RSS is unaffected. */
+ * N11: 2 MiB for single-thread/short processes (smaller mapped tail VA),
+ * 4 MiB when more than one application thread is active (fewer refills).
+ * Untouched tail pages stay non-resident, so RSS is unaffected. */
 static _Thread_local char *fm_lextent_cur __attribute__((tls_model("initial-exec")));
 static _Thread_local size_t fm_lextent_rem __attribute__((tls_model("initial-exec")));
+/* Number of distinct application threads seen arming their exit hook.  The
+ * idle maintenance thread is excluded.  N11: single-thread/short processes
+ * get a 2 MiB slab, multithreaded ones keep the 4 MiB slab from ADR 0082. */
+static _Atomic unsigned fm_slab_threads;
 
 static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out)
 {
@@ -707,7 +715,8 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
         fm_lextent_cur = NULL;
         fm_lextent_rem = 0;
     }
-    size_t slab_len = (4u << 20) + SPAN_SIZE;
+    size_t slab_len = (atomic_load_explicit(&fm_slab_threads, memory_order_relaxed) > 1
+                           ? (4u << 20) : (2u << 20)) + SPAN_SIZE;
     char *raw = mmap(NULL, slab_len, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (raw == MAP_FAILED)
@@ -804,6 +813,10 @@ static inline uint32_t fm_local_limit(uint32_t cls)
      * acquisitions and batch round trips -- while retained bytes stay
      * bounded at 64 KiB per class.  The div override still scales it. */
     uint32_t budget = (uint32_t)((64u * 1024u) / kClassSize[cls]);
+    /* N25: classes >= 2 KiB keep the old 64 KiB-derived cap (<= 32 blocks),
+     * so let them retain a 128 KiB byte budget instead. */
+    if (kClassSize[cls] >= 2048)
+        budget = (uint32_t)((128u * 1024u) / kClassSize[cls]);
     if (budget > limit)
         limit = budget;
     uint32_t div = FM_CFG()->local_limit_div;
@@ -2042,6 +2055,7 @@ static void fm_idle_after_fork_child(void)
 static void *fm_idle_thread_main(void *arg)
 {
     (void)arg;
+    fm_maint_thread = 1; /* its census flushes must not count as an app thread */
     uint32_t last_sweep = 0;
     for (;;) {
         struct timespec ts = { 0, 200 * 1000 * 1000 };
@@ -2575,6 +2589,8 @@ static void fm_arm_thread_exit(void)
     if (fm_exit_armed != 0) return;
     /* Mark armed first: pthread initialization can reenter the allocator. */
     fm_exit_armed = 1;
+    if (!fm_maint_thread)
+        atomic_fetch_add_explicit(&fm_slab_threads, 1, memory_order_relaxed);
     pthread_once(&fm_exit_once, fm_exit_make_key);
     pthread_setspecific(fm_exit_key, (const void *)&fm_exit_key);
 }

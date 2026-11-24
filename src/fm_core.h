@@ -726,36 +726,84 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
 #ifdef FM_V6_SLOT
 /* Hybrid span slots: every span starts at a 64 KiB-aligned slot, so the
  * v2 free path's 64 KiB mask still finds the header.  Cold classes map
- * only 4 KiB at the slot base (4 KiB resident pages); hot classes map the
- * full 64 KiB slot.  The slot VA itself is reserved PROT_NONE. */
-static char *fm_v6_arena;
-static char *fm_v6_cursor;
-static size_t fm_v6_remaining;
-static _Thread_local uint16_t fm_v6_hot[CLASS_COUNT];
+ * only 4 KiB at the slot base (4 KiB resident pages); hot classes take
+ * 64 KiB slots out of 2 MiB chunks committed at both ends of a reserved
+ * arena.  The two cursors grow towards each other, so cold 4 KiB
+ * mappings can never be overwritten by a chunk commit. */
+static char *fm_v6_base, *fm_v6_cold, *fm_v6_hot, *fm_v6_hot_lo;
+static size_t fm_v6_len;
+static _Thread_local uint16_t fm_v6_hot_count[CLASS_COUNT];
 
-static char *fm_v6_slot_alloc(void)
+static char *fm_v6_arena_init(void)
+{
+    const size_t arena_len = (size_t)4 << 30, chunk = (size_t)2 << 20;
+    char *raw = mmap(NULL, arena_len + chunk, PROT_NONE,
+                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    if (raw == MAP_FAILED)
+        return NULL;
+    char *base = (char *)FM_ALIGN_UP((uintptr_t)raw, chunk);
+    size_t prefix = (size_t)(base - raw);
+    if (prefix)
+        munmap(raw, prefix);
+    fm_v6_base = fm_v6_cold = base;
+    fm_v6_len = arena_len;
+    fm_v6_hot = base + arena_len;
+    fm_v6_hot_lo = base + arena_len;
+    return base;
+}
+
+static char *fm_v6_cold_alloc(void)
 {
     fm_stack_exclusive();
-    if (!fm_v6_arena) {
-        size_t len = 4ull << 30;
-        char *raw = mmap(NULL, len + SPAN_SIZE, PROT_NONE,
-                         MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-        if (raw == MAP_FAILED) {
-            fm_stack_resume();
-            return NULL;
-        }
-        char *base = (char *)FM_ALIGN_UP((uintptr_t)raw, SPAN_SIZE);
-        fm_v6_arena = base;
-        fm_v6_cursor = base;
-        fm_v6_remaining = len;
-    }
-    if (fm_v6_remaining < SPAN_SIZE) {
+    if (!fm_v6_base && !fm_v6_arena_init()) {
         fm_stack_resume();
         return NULL;
     }
-    char *p = fm_v6_cursor;
-    fm_v6_cursor += SPAN_SIZE;
-    fm_v6_remaining -= SPAN_SIZE;
+    char *p = fm_v6_cold;
+    if (p + SPAN_SIZE > fm_v6_hot) {
+        fm_stack_resume();
+        return NULL;
+    }
+    void *m = mmap(p, 4096, PROT_READ | PROT_WRITE,
+                   MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (m != (void *)p) {
+        fm_stack_resume();
+        return NULL;
+    }
+    fm_v6_cold = p + SPAN_SIZE;
+    fm_stack_resume();
+    return p;
+}
+
+static char *fm_v6_hot_alloc(void)
+{
+    const size_t chunk = (size_t)2 << 20;
+    fm_stack_exclusive();
+    if (!fm_v6_base && !fm_v6_arena_init()) {
+        fm_stack_resume();
+        return NULL;
+    }
+    char *p = fm_v6_hot - SPAN_SIZE;
+    if (p < fm_v6_cold) {
+        fm_stack_resume();
+        return NULL;
+    }
+    if (p < fm_v6_hot_lo) {
+        char *lo = (char *)((uintptr_t)p & ~(uintptr_t)(chunk - 1));
+        if (lo < fm_v6_cold) {
+            fm_stack_resume();
+            return NULL;
+        }
+        void *m = mmap(lo, chunk, PROT_READ | PROT_WRITE,
+                       MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (m != (void *)lo) {
+            fm_stack_resume();
+            return NULL;
+        }
+        (void)madvise(lo, chunk, MADV_HUGEPAGE);
+        fm_v6_hot_lo = lo;
+    }
+    fm_v6_hot = p;
     fm_stack_resume();
     return p;
 }
@@ -768,14 +816,10 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
 {
 #ifdef FM_V6_SLOT
     size_t bs = kClassSize[cls];
-    int small = (bs <= 3968 && fm_v6_hot[cls] < 8);
+    int small = (bs <= 3968 && fm_v6_hot_count[cls] < 8);
     size_t span_size = small ? 4096u : SPAN_SIZE;
-    char *slot = fm_v6_slot_alloc();
+    char *slot = small ? fm_v6_cold_alloc() : fm_v6_hot_alloc();
     if (!slot)
-        return NULL;
-    void *m = mmap(slot, span_size, PROT_READ | PROT_WRITE,
-                   MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (m != (void *)slot)
         return NULL;
     size_t n = (span_size - HEADER_SIZE) / bs;
     FM_Span *sp = (FM_Span *)slot;
@@ -1002,8 +1046,8 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
     char *end = fm_bump_end[cls];
     if (cur >= end) {
 #ifdef FM_V6_SLOT
-        if (kClassSize[cls] <= 3968 && fm_v6_hot[cls] < 0xFFFF)
-            fm_v6_hot[cls]++;
+        if (kClassSize[cls] <= 3968 && fm_v6_hot_count[cls] < 0xFFFF)
+            fm_v6_hot_count[cls]++;
 #endif
         uint32_t total = 0;
         char *base = fm_span_new(cls, &total);

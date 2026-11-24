@@ -2628,7 +2628,6 @@ static inline void *fm_malloc(size_t size)
             }
 #endif
             void *next = *(void **)p;
-            __builtin_prefetch(next, 0, 1);
             fm_tls.head[cls] = next;
             return p;
         }

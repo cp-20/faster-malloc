@@ -174,6 +174,13 @@ These are deliberately smaller and self-contained so the local
 | N118 | all | MADV_FREE for fully-free spans instead of MADV_DONTNEED | med |
 | N119 | all | malloc_trim-like pressure release every 64 large frees when RSS is above high-water | med |
 | N120 | all | combine the best measured RSS mechanisms into one branch, then run the legacy matrix | med |
+| N121 | all | implement Stage 1 of docs/exp/redesign-page-map.md: `muzzy_mark`, dirty/muzzy decay intervals, high-water lazy idle-thread arming, budgeted `fm_trim_class` pulses; no hot-path change | high |
+| N122 | all | Stage 1 tuning on top of N121: dirty 100 ms / muzzy 1 s / 64 MiB high-water / 64-span pulse | med |
+| N123 | all | Stage 2: adjacent fully-free extent coalescing + class reuse via the extent hash (still no hot-path change) | high |
+| N124 | sort/xz | muzzy `MADV_FREE` variant of N121 after the DONTNEED stage is measured | med |
+| N125 | all | add `FM_DIAG_RSS=1` mincore/smaps-classified residency counters for the allocator's own mappings (diagnostic only, no bench edits) | low |
+| N126 | git/sqlite | RSS8 follow-up: use the N125 decomposition to design a single-heap-like startup mechanism; do not guess | high |
+| N127 | all | combine Stage 1 N121 + N105 + PR #3 after Stage 1 is measured | med |
 
 
 

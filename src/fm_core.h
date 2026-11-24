@@ -307,8 +307,9 @@ extern __thread uint32_t fm_lbucket_seen[FM_LCACHE_BUCKETS]
  * keeps ~4k reusable blocks per span, a large class only a handful.
  * Below this block size the two-span quota is worth its RSS premium;
  * at or above it the spans are almost pure footprint with no real
- * reuse benefit, so retain none (N23). */
-#define FM_KEEP_LARGE_MIN 2048u
+ * reuse benefit, so retain none (N23).  N49 raises the cutoff from
+ * 2 KiB to 4 KiB so 2-4 KiB classes keep their two-span quota. */
+#define FM_KEEP_LARGE_MIN 4096u
 #define FM_RELEASE_AGE_MS 100u
 #define FM_RELEASE_INTERVAL_MS 10u
 #define FM_RELEASE_MAX_INTERVAL_MS 5000u

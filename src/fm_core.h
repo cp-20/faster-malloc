@@ -815,6 +815,20 @@ static inline uint32_t fm_local_limit(uint32_t cls)
     return limit;
 }
 
+/* N35: publish a class's local list once three quarters of its byte budget
+ * have been consumed, rather than at the full limit.  Only the cold
+ * arm/refill/flush reset points use this: the free fast path keeps its
+ * single decrement-and-branch on a counter that simply starts smaller, so
+ * micro instruction counts are unchanged.  Flushing earlier moves freed
+ * blocks to the central list (and hence to the release census) sooner and
+ * trims the per-class TLS retention by a quarter, at the price of ~1/3 more
+ * flushes. */
+static inline uint32_t fm_flush_countdown(uint32_t cls)
+{
+    uint32_t n = (fm_local_limit(cls) * 3u) / 4u;
+    return n ? n : 1u;
+}
+
 /* Group a mixed free-list batch by 64 KiB span so consecutive allocations
  * stay on the same span/pages and reduce D1/TLB misses (opt-in FM_LOCALITY_SORT=1). */
 static void *fm_regroup_by_span(void *head, void **tail_out)
@@ -958,7 +972,7 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
 #endif
         fm_tls.head[cls] = *(void **)head;
         fm_tls.tail[cls] = t;
-        fm_tls.cnt[cls] = (int32_t)limit;
+        fm_tls.cnt[cls] = (int32_t)fm_flush_countdown(cls);
 
         char *rest_cur = cur + (size_t)keep0 * bs;
         if (FM_CFG()->lazy_bump) {
@@ -1009,7 +1023,7 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
 
     fm_tls.head[cls] = *(void **)head;
     fm_tls.tail[cls] = t;
-    fm_tls.cnt[cls] = (int32_t)limit;
+    fm_tls.cnt[cls] = (int32_t)fm_flush_countdown(cls);
 
     return head;
 }
@@ -1043,7 +1057,7 @@ __attribute__((noinline)) static void fm_flush_bin(uint32_t cls)
     void *t = fm_tls.tail[cls];
     fm_tls.head[cls] = NULL;
     fm_tls.tail[cls] = NULL;
-    fm_tls.cnt[cls] = (int32_t)fm_local_limit(cls);
+    fm_tls.cnt[cls] = (int32_t)fm_flush_countdown(cls);
     if (!h)
         return;
     /* Publish in O(1) without walking the scattered list (ADR 0014);
@@ -2653,9 +2667,9 @@ __attribute__((noinline)) static void fm_free_cnt_slow(uint32_t cls)
     if (__builtin_expect(fm_tls.cnt[cls] < 0, 0)) {
         /* First free on this thread/class (.tbss 0 decremented to -1). */
         fm_arm_thread_exit();
-        uint32_t limit = fm_local_limit(cls);
-        if (limit > 1) {
-            fm_tls.cnt[cls] = (int32_t)(limit - 1);
+        uint32_t n = fm_flush_countdown(cls);
+        if (n > 1) {
+            fm_tls.cnt[cls] = (int32_t)(n - 1);
             return;
         }
     }

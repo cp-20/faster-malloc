@@ -2204,6 +2204,19 @@ static inline uint64_t fm_lcache_budget(int b)
     return budget;
 }
 
+/* N19 -- lazy-free cold cached large blocks.  MADV_FREE marks the payload
+ * pages reclaimable under memory pressure instead of dropping them on the
+ * spot (MADV_DONTNEED).  A cold block that is reused before the kernel
+ * reclaims its pages writes them in place with no fault, while a process
+ * under pressure still sheds the physical pages.  Cached blocks are never
+ * advertised as zeroed (cache hits set *zeroed = 0), so delayed zeroing is
+ * safe.  Fall back to DONTNEED where MADV_FREE is unavailable. */
+#ifdef MADV_FREE
+#define FM_COLD_ADVICE MADV_FREE
+#else
+#define FM_COLD_ADVICE MADV_DONTNEED
+#endif
+
 static inline void fm_large_free(FM_Span *sp, void *p)
 {
     fm_ltick++;
@@ -2225,7 +2238,7 @@ static inline void fm_large_free(FM_Span *sp, void *p)
                 uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
                 uintptr_t pend = (sp->map_base + sp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);
                 if (pend > pstart)
-                    (void)madvise((void *)pstart, pend - pstart, MADV_DONTNEED);
+                    (void)madvise((void *)pstart, pend - pstart, FM_COLD_ADVICE);
             }
             sp->lnext = (uintptr_t)fm_lcache_head[b];
             fm_lcache_head[b] = sp;

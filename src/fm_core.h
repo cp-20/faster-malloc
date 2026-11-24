@@ -645,6 +645,29 @@ static struct {
     uint32_t opened_ms;
 } fm_dense_extent;
 
+/* N118: one retained VA slot per size class.  When the census finds a
+ * small span provably dead, its data pages are marked with MADV_FREE
+ * instead of munmap: the 64 KiB address range stays mapped, so a later
+ * refill of the same class re-arms the span without a fresh mmap (and
+ * without splitting the shared dense extent's VMA).  Unlike N102's
+ * MADV_DONTNEED, MADV_FREE leaves the physical pages resident until the
+ * kernel reclaims them under pressure, so reuse of a not-yet-reclaimed
+ * slot avoids the re-fault storm (and the RSS still drops when memory is
+ * scarce).  Page 0 holds the FM_Span header and is never advised; a
+ * bump-carve rewrites every handed-out block's link word, so stale
+ * payload contents from a not-yet-reclaimed slot are never read.  One
+ * slot per class bounds the pinned header pages to CLASS_COUNT * 4 KiB. */
+static _Atomic uintptr_t fm_cold_span[CLASS_COUNT];
+
+/* MADV_FREE is Linux >= 4.5 and is not exposed by every libc/kernel.  On
+ * a platform without it, madvise fails and the dead span takes the
+ * original munmap path, so allocator semantics are unchanged. */
+#ifdef MADV_FREE
+#define FM_COLD_ADVICE MADV_FREE
+#else
+#define FM_COLD_ADVICE (-1)
+#endif
+
 static char *fm_map_dense_span(void)
 {
     enum { extent_size = 2 * 1024 * 1024, map_len = 2 * extent_size - FM_PAGE_SIZE };
@@ -728,6 +751,23 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
  * does not touch every block's memory. */
 static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
 {
+    /* N118: prefer a retained cold VA slot over mapping anything new.
+     * Its data pages were MADV_FREE'd, so they are either already
+     * nonresident (re-faulting only what the bump-carve hands out) or
+     * still resident with stale-but-unread link words; the header page
+     * is always intact. */
+    uintptr_t cold = atomic_exchange_explicit(&fm_cold_span[cls], 0,
+                                              memory_order_acq_rel);
+    if (cold) {
+        FM_Span *csp = (FM_Span *)cold;
+        atomic_store_explicit(&csp->dead_mark, 0, memory_order_relaxed);
+        csp->purge_mark = 0;
+        csp->purged_mask = 0;
+        csp->withheld_cnt = 0;
+        *count_out = csp->nblocks;
+        return (char *)cold;
+    }
+
     size_t bs = kClassSize[cls];
     size_t bytes = SPAN_SIZE;
 #ifdef FM_SMALL_FIRST_SPAN
@@ -1803,7 +1843,14 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
                                                          : e->pg_new_withheld));
     }
 
-    /* Unmap the dead spans (once each, from the census). */
+    /* Return the dead spans once each, from the census.  N118: retain one
+     * fully-free span per class as a cold VA slot -- mark its data pages
+     * with MADV_FREE (page 0 keeps the FM_Span header) so fm_span_new can
+     * re-arm it later instead of paying a fresh mmap/VMA.  Unlike N102's
+     * MADV_DONTNEED, the pages stay available to a quick reuse until the
+     * kernel reclaims them; the bump-carve overwrites every link word it
+     * hands out, so no stale free list is ever observed.  If MADV_FREE is
+     * unsupported or fails, fall back to the original munmap path. */
     size_t released = 0;
     for (size_t i = 0; i < cen.cap; i++) {
         FM_CensusEnt *e = &cen.ents[i];
@@ -1812,7 +1859,21 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             uintptr_t base = sp->map_base;
             size_t len = sp->map_size;
             released += len;
-            munmap((void *)base, len);
+            if (len > FM_PAGE_SIZE && base == (uintptr_t)sp &&
+                madvise((void *)(base + FM_PAGE_SIZE),
+                        len - FM_PAGE_SIZE, FM_COLD_ADVICE) == 0) {
+                atomic_store_explicit(&sp->dead_mark, 0, memory_order_relaxed);
+                sp->purge_mark = 0;
+                sp->purged_mask = 0;
+                sp->withheld_cnt = 0;
+                uintptr_t expect = 0;
+                if (!atomic_compare_exchange_strong_explicit(&fm_cold_span[cls],
+                        &expect, (uintptr_t)sp,
+                        memory_order_release, memory_order_relaxed))
+                    munmap((void *)base, len);
+            } else {
+                munmap((void *)base, len);
+            }
         }
     }
 

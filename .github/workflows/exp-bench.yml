@@ -1,0 +1,142 @@
+name: exp-bench
+
+# Screening harness for allocator experiments.  Push an exp/<name> branch
+# (or dispatch this workflow on it) and get, in one job:
+#   * correctness gates (test_basic, stress, abicheck, mtrepeat, memcheck)
+#   * exact callgrind instruction counts for candidate vs the merge-base
+#   * interleaved wall-clock / RSS for candidate vs the merge-base on the
+#     real-application fixtures
+# The candidate and the baseline are built and measured in the same job so
+# runner drift cancels.  Results are uploaded as exp-results.json.
+
+on:
+  push:
+    branches:
+      - "exp/**"
+  workflow_dispatch:
+    inputs:
+      reps:
+        description: "Repetitions per real-app measurement"
+        required: false
+        default: "3"
+      apps:
+        description: "Comma-separated real-app cases (empty = default screen)"
+        required: false
+        default: "jq_large,python_data,sort_p4,gxx_compile,git_revlist,sqlite_oltp"
+      profile:
+        description: "1 = also capture callgrind profiles of jq/python"
+        required: false
+        default: "0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: exp-bench-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  screen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install toolchain and benchmark dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential valgrind jq sqlite3 xz-utils python3 git
+
+      - name: Restore real-app fixtures
+        uses: actions/cache@v4
+        with:
+          path: bench/apps/work/real_suite
+          key: exp-fixtures-v1
+          restore-keys: |
+            exp-fixtures-v1
+
+      - name: Build candidate
+        run: make -j"$(nproc)"
+
+      - name: Build merge-base baseline
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          BASE_SHA=$(git merge-base HEAD origin/main)
+          echo "baseline commit: $BASE_SHA"
+          git worktree add --detach /tmp/fm-base "$BASE_SHA"
+          make -C /tmp/fm-base -j"$(nproc)" libfastmalloc2.so
+
+      - name: Correctness gates
+        run: |
+          set -euo pipefail
+          ./test_basic
+          for lib in libfastmalloc2.so libjitmalloc.so; do
+            echo "--- $lib test_basic ---"
+            LD_PRELOAD="$PWD/$lib" ./test_basic
+            echo "--- $lib stress ---"
+            LD_PRELOAD="$PWD/$lib" ./bench/stress
+          done
+          echo "--- abicheck ---"
+          bash bench/abicheck.sh
+          echo "--- mtrepeat (N=5) ---"
+          N=5 bash bench/mtrepeat.sh
+          echo "--- memcheck stress ---"
+          LD_PRELOAD="$PWD/libfastmalloc2.so" \
+            valgrind --error-exitcode=9 --quiet ./bench/stress
+
+      - name: Screen candidate vs merge-base
+        env:
+          REPS: ${{ inputs.reps || '3' }}
+          APPS: ${{ inputs.apps || 'jq_large,python_data,sort_p4,gxx_compile,git_revlist,sqlite_oltp' }}
+        run: |
+          set -o pipefail
+          python3 bench/ci/expbench.py \
+            --baseline /tmp/fm-base/libfastmalloc2.so \
+            --candidate "$PWD/libfastmalloc2.so" \
+            --reps "$REPS" \
+            --apps "$APPS" \
+            --json exp-results.json | tee exp-results.txt
+          {
+            echo "## exp-bench: ${GITHUB_REF_NAME}"
+            echo '```'
+            cat exp-results.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Capture allocator profiles (optional)
+        if: ${{ inputs.profile == '1' }}
+        run: |
+          set -o pipefail
+          python3 bench/apps/real_suite.py >/dev/null 2>&1 || true
+          for app in jq python; do
+            case "$app" in
+              jq) cmd=(jq -c '[.[] | select(.active) | {id, s: (.val * 2)}] | sort_by(.s) | length' bench/apps/work/real_suite/big_records.json) ;;
+              python) cmd=(python3 bench/apps/work/real_suite/py_pipeline.py) ;;
+            esac
+            LD_PRELOAD="$PWD/libfastmalloc2.so" \
+              valgrind --tool=callgrind --callgrind-out-file="cg-$app.out" --quiet \
+              "${cmd[@]}" >/dev/null 2>&1
+            {
+              echo "### callgrind: $app (allocator + libc allocation symbols)"
+              echo '```'
+              callgrind_annotate --inclusive=yes "cg-$app.out" 2>/dev/null \
+                | grep -E 'fm_|(^|[^a-z])malloc|(^|[^a-z])free|calloc|realloc|operator new|operator delete' \
+                | head -40 || true
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exp-bench-${{ github.run_id }}
+          path: |
+            exp-results.json
+            exp-results.txt
+            cg-*.out
+          if-no-files-found: ignore

@@ -231,6 +231,35 @@ extern __thread int fm_in_census __attribute__((tls_model("initial-exec")));
 extern __thread FM_Batch *fm_batch_pool __attribute__((tls_model("initial-exec")));
 static FM_Batch *fm_batch_global_head; /* protected by fm_central_lock */
 
+/* N16: small per-thread reserve of batch headers.  In a Larson-style
+ * transfer the producer recycles one header per refill while the
+ * consumer needs one per flush.  Today the first release stays in the
+ * local pool but the second already takes the fork-aware central lock,
+ * and the consumer takes it again for each header it fetches.  Keep a
+ * few headers aside so the second (and later) releases stay local and
+ * a grab from the global list amortises the lock over several headers. */
+#define FM_BATCH_RESERVE 8u
+static __thread FM_Batch *fm_batch_reserve[FM_BATCH_RESERVE]
+    __attribute__((tls_model("initial-exec")));
+static __thread unsigned fm_batch_reserve_head, fm_batch_reserve_n
+    __attribute__((tls_model("initial-exec")));
+
+/* Return the whole reserve to the global freelist under one lock. */
+static inline void fm_batch_spill_reserve(void)
+{
+    if (!fm_batch_reserve_n)
+        return;
+    pthread_mutex_lock(&fm_central_lock);
+    for (unsigned i = 0; i < fm_batch_reserve_n; i++) {
+        FM_Batch *r = fm_batch_reserve[
+            (fm_batch_reserve_head + i) & (FM_BATCH_RESERVE - 1u)];
+        r->next = fm_batch_global_head;
+        fm_batch_global_head = r;
+    }
+    pthread_mutex_unlock(&fm_central_lock);
+    fm_batch_reserve_n = 0;
+}
+
 /* Large-block cache (ADR 0011): per-thread cache of freed large blocks,
  * bucketed by the highest set bit of the mapping size, so a cached block
  * is never more than 2x the size of the request it can serve.  Without
@@ -517,15 +546,32 @@ static inline FM_Batch *fm_batch_alloc(void)
         b->next = NULL;
         return b;
     }
-    /* Try global freelist (cross-thread recycling). */
-    /* Recycled nodes can leave and re-enter the stack between a load and
-     * a CAS. Hold the same fork-aware lock as the central batch lists. */
+    if (__builtin_expect(fm_batch_reserve_n != 0, 0)) {
+        b = fm_batch_reserve[fm_batch_reserve_head];
+        fm_batch_reserve_head = (fm_batch_reserve_head + 1u) & (FM_BATCH_RESERVE - 1u);
+        fm_batch_reserve_n--;
+        b->next = NULL;
+        return b;
+    }
+    /* Try global freelist (cross-thread recycling).  Recycled nodes can
+     * leave and re-enter the stack between a load and a CAS, so hold the
+     * same fork-aware lock as the central batch lists.  Take a whole
+     * reserve's worth under that one lock: the peer hands headers back
+     * one at a time, so a single grab amortises the lock N16-style. */
     pthread_mutex_lock(&fm_central_lock);
     b = fm_batch_global_head;
-    if (b)
+    unsigned n = 0;
+    while (b && n < FM_BATCH_RESERVE) {
         fm_batch_global_head = b->next;
+        fm_batch_reserve[(fm_batch_reserve_head + n) & (FM_BATCH_RESERVE - 1u)] = b;
+        n++;
+        b = fm_batch_global_head;
+    }
     pthread_mutex_unlock(&fm_central_lock);
-    if (b) {
+    if (n) {
+        b = fm_batch_reserve[fm_batch_reserve_head];
+        fm_batch_reserve_head = (fm_batch_reserve_head + 1u) & (FM_BATCH_RESERVE - 1u);
+        fm_batch_reserve_n = n - 1;
         b->next = NULL;
         return b;
     }
@@ -554,10 +600,14 @@ static inline void fm_batch_release(FM_Batch *b)
         fm_batch_pool = b;
         return;
     }
-    pthread_mutex_lock(&fm_central_lock);
-    b->next = fm_batch_global_head;
-    fm_batch_global_head = b;
-    pthread_mutex_unlock(&fm_central_lock);
+    /* Second and later releases used to take the central lock right away.
+     * Park them in the reserve and cross that lock only once per batch. */
+    b->next = NULL;
+    fm_batch_reserve[(fm_batch_reserve_head + fm_batch_reserve_n) &
+                     (FM_BATCH_RESERVE - 1u)] = b;
+    if (++fm_batch_reserve_n < FM_BATCH_RESERVE)
+        return;
+    fm_batch_spill_reserve();
 }
 
 /* ------------------------------------------------------------------ */
@@ -2532,6 +2582,8 @@ static void fm_thread_exit_flush(void)
         }
     }
     fm_large_cache_drain();
+    /* Do not strand reserve headers in a dying thread. */
+    fm_batch_spill_reserve();
     if (fm_batch_pool) {
         FM_Batch *tail = fm_batch_pool;
         while (tail->next)

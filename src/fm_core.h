@@ -250,7 +250,7 @@ static FM_Batch *fm_batch_global_head; /* protected by fm_central_lock */
  * still stops retaining after FM_LCACHE_HOT_WINDOW frees and the footprint /
  * shortlived profiles keep their small (or zero) cache.  Page purge stays on:
  * this is a bounded reuse boost, not the whole throughput profile. */
-#define FM_LCACHE_WARM_BUDGET_CAP (32ull << 20)
+#define FM_LCACHE_WARM_BUDGET_CAP (64ull << 20)
 extern __thread void *fm_lcache_head[FM_LCACHE_BUCKETS]
     __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));

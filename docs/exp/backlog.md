@@ -315,6 +315,15 @@ free-and-forget 1 MiB obmalloc arena (CPython); per-bucket warm/cold
 retention can, and it recovers RSS on python and lua without the node
 time cost that ADR 0083 traded away.
 
+## Round 23: quarter local batch for >= 2 KiB classes (2026-11-25)
+
+| id | branch | result | status |
+|---|---|---|---|
+| B2 | `exp/large-class-div` | RSS5: classes >= 2 KiB keep a quarter of the 64 KiB local byte budget (16 KiB).  Local, on top of the selective cache: gcc 351.6 -> 349.3 MB, sqlite 11.0 -> 10.7, git 24.0 -> 23.8, python 138.3 -> 137.9, lua unchanged; time unchanged.  Threshold 2048 keeps `churn 1024` out of the change so the micro set is bit-identical | **candidate** (11-rep matrices running) |
+
+The 1024 threshold was measured too (gcc -2.8 MB) but it moves the
+`churn 1024` micro case, so the shipped threshold is 2048.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

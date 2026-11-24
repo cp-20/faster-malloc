@@ -2200,21 +2200,27 @@ static inline uint64_t fm_lcache_budget(int b)
     return budget;
 }
 
-/* Dedicated reuse bucket for cc1plus obstack chunks (ADR 0078): a 64 KiB
- * obstack chunk maps to a 132 KiB extent, which hashes to bucket 17, and
- * cc1plus cycles ~20 of these per function.  Without a proven cache hit
- * yet this bucket starts cold and the FM_LCACHE_HOT_WINDOW (8) window drops
- * chunks beyond the first few at a function boundary, forcing the mmap /
- * munmap churn the warm window was added to avoid.  Treat this one bucket as
- * permanently warm for the *reuse* decisions (window + cold purge) so the
- * obstack mapping survives between functions.  The byte budget is left on
- * the real warm mask: retention stays bounded by the global lcache cap, so
- * this is reuse shaping, not an RSS increase. */
-#define FM_OBSTACK_REUSE_BUCKET 17u
-static inline int fm_lcache_reuse_warm(int b)
+/* Medium-buffer reuse band (G3 follow-up): G3 gave one hard-coded bucket
+ * (17, the ~132 KiB cc1plus obstack extent) the long proven-warm window,
+ * which did nothing for jq / sqlite medium buffers in the same size range.
+ * Key the reuse window on a size band instead: 64 KiB-1 MiB mappings get a
+ * 16-free window (between the teardown-safe 8 and the 64 kept for buckets
+ * that have actually served a cache hit), so they survive short gaps and can
+ * be reused across phases.  The byte budget stays on the real warm mask, so
+ * retention is still bounded by the global lcache cap -- this is reuse
+ * shaping, not an RSS increase. */
+#define FM_REUSE_BAND_LO (64u << 10)
+#define FM_REUSE_BAND_HI (1u << 20)
+#define FM_REUSE_BAND_WINDOW 16u
+static inline int fm_lcache_reuse_band(size_t usable)
 {
-    return (fm_lcache_warm_mask & (1ULL << (b))) != 0 ||
-           (unsigned)(b) == FM_OBSTACK_REUSE_BUCKET;
+    return usable >= FM_REUSE_BAND_LO && usable <= FM_REUSE_BAND_HI;
+}
+static inline uint32_t fm_lcache_reuse_window(size_t usable)
+{
+    return fm_lcache_reuse_band(usable)
+               ? (uint32_t)FM_REUSE_BAND_WINDOW
+               : FM_LCACHE_HOT_WINDOW;
 }
 
 static inline void fm_large_free(FM_Span *sp, void *p)
@@ -2222,13 +2228,16 @@ static inline void fm_large_free(FM_Span *sp, void *p)
     fm_ltick++;
     if (sp->align == 0 && (uintptr_t)p == (uintptr_t)sp + HEADER_SIZE) {
         size_t ms = sp->map_size;
-        int b = 63 - __builtin_clzll(fm_large_usable(sp));
+        size_t usable = fm_large_usable(sp);
+        int b = 63 - __builtin_clzll(usable);
         if (b < FM_LCACHE_BUCKETS &&
             fm_lcache_bytes + ms <= fm_lcache_budget(b) &&
             fm_ltick - fm_lbucket_seen[b] <=
-                (fm_lcache_reuse_warm(b) ? 64u : FM_LCACHE_HOT_WINDOW)) {
+                ((fm_lcache_warm_mask & (1ULL << b))
+                     ? 64u : fm_lcache_reuse_window(usable))) {
             if (FM_CFG()->lcache_cold_purge &&
-                !fm_lcache_reuse_warm(b)) {
+                !fm_lcache_reuse_band(usable) &&
+                !(fm_lcache_warm_mask & (1ULL << b))) {
                 uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
                 uintptr_t pend = (sp->map_base + sp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);
                 if (pend > pstart)

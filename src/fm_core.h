@@ -168,7 +168,15 @@ typedef struct FM_Central {
     _Atomic uint32_t interval_ms;
     /* Early placement scans are paced in flushes, separately from ageing. */
     _Atomic uint32_t prompt_mask;
-    char pad[64 - sizeof(_Atomic(FM_Batch *)) - 4 * sizeof(_Atomic uint32_t)];
+    /* N1: hint of a span a census newly found entirely free.  A census
+     * republishes such a span as one span-pure batch whose recorded count
+     * equals its whole block count; that batch is a self-contained
+     * proof the span is dead.  The hint lets a later flush re-check just
+     * that one span and unmap it without detaching and walking the whole
+     * central stack again.  0 = no hint. */
+    _Atomic uintptr_t dead_hint;
+    char pad[64 - sizeof(_Atomic(FM_Batch *)) - 4 * sizeof(_Atomic uint32_t)
+             - sizeof(_Atomic uintptr_t)];
 } FM_Central;
 
 extern FM_Central fm_central[CLASS_COUNT];
@@ -1111,6 +1119,8 @@ typedef struct FM_CensusEnt {
 /* FM_CensusEnt.pg_flags bits */
 #define FM_PG_CANDIDATE 1u /* coverage pass should visit this span */
 #define FM_PG_RECLAIM 2u   /* re-carve withheld blocks in the rebuild */
+#define FM_PG_HINT 4u      /* N1: span was newly marked dead this census;
+                            * hint its fully-free batch for cheap release */
 
 typedef struct FM_Census {
     FM_CensusEnt *ents;
@@ -1329,6 +1339,11 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
         pthread_mutex_lock(&fm_census_lock);
     int was_in_census = fm_in_census;
     fm_in_census = 1; /* the flush below must not re-trigger release */
+    /* N1: any hint from a previous census is stale from this point on --
+     * this census may unmap the hinted span (instant trim) or republish it
+     * with fewer blocks.  Drop it before touching the stack so no cheap
+     * release can act on a span that is about to disappear. */
+    atomic_store_explicit(&fm_central[cls].dead_hint, 0, memory_order_relaxed);
     fm_flush_bin(cls);
 
     /* Detach the whole central stack atomically.  Batches published
@@ -1429,6 +1444,11 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             } else if (!sp->dead_mark) {
                 sp->dead_mark = now ? now : 1;
                 fm_census_marked++;
+                /* N1: this census will republish the whole span as one
+                 * span-pure batch; flag it so the rebuild can install a
+                 * hint.  Spans that were already marked (and may be kept
+                 * or released) are deliberately not hinted. */
+                e->pg_flags |= FM_PG_HINT;
             } else if ((uint32_t)(now - sp->dead_mark) >=
                        cfg->release_age_ms) {
                 e->dead = 1;
@@ -1861,6 +1881,13 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
                 nb->tail = e->atail;
                 nb->count = e->acnt | FM_COUNT_PURE;
                 nb->next = NULL;
+                /* N1: all of this span's blocks are in this one batch.
+                 * Publish a hint so a later flush can release it without
+                 * a full census, once its dead mark has aged. */
+                if ((e->pg_flags & FM_PG_HINT) && !e->dead &&
+                    e->acnt == ((FM_Span *)e->span)->nblocks)
+                    atomic_store_explicit(&fm_central[cls].dead_hint,
+                                          e->span, memory_order_relaxed);
                 order[norder++] = nb;
                 continue;
             }
@@ -1907,6 +1934,73 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
     return released;
 }
 
+/* N1: cheap opportunistic release of one dead small span, without a full
+ * census.
+ *
+ * A span-pure central batch whose recorded count equals the span's whole
+ * block count is a self-contained proof the span is entirely free: every
+ * block exists in exactly one place in the allocator, so if all nblocks
+ * blocks sit in that one central batch, none can be in a thread's local
+ * list, a bump range, or another batch.  A census that newly marks a span
+ * (ADR 0020) republishes exactly such a batch and records a per-class hint
+ * to the span.  Once the mark has aged we can unmap the span on a later
+ * flush without the expensive detach/walk/purge/regroup pass of a second
+ * census -- that pass is what this fast path avoids.
+ *
+ * The ageing gate is the same one ADR 0020 uses, so a working set that
+ * cycles faster than the age is never unmapped mid-cycle (the ADR 0014
+ * failure).  The census lock (trylock) and the central-stack lock make
+ * this safe against a concurrent census, refill, or fork. */
+static void fm_hint_release(uint32_t cls, uint32_t now)
+{
+    if (!atomic_load_explicit(&fm_central[cls].dead_hint, memory_order_relaxed))
+        return;
+    /* Automatic release is opportunistic: never wait on another census. */
+    if (pthread_mutex_trylock(&fm_census_lock) != 0)
+        return;
+    uintptr_t hint = atomic_load_explicit(&fm_central[cls].dead_hint,
+                                          memory_order_relaxed);
+    FM_Batch *victim = NULL;
+    FM_Span *sp = (FM_Span *)hint;
+    if (hint && sp->magic == FM_SPAN_MAGIC) {
+        uint32_t mark = atomic_load_explicit(&sp->dead_mark,
+                                             memory_order_relaxed);
+        if (mark && (uint32_t)(now - mark) >= FM_CFG()->release_age_ms) {
+            fm_stack_exclusive();
+            FM_Batch *prev = NULL;
+            for (FM_Batch *b = atomic_load_explicit(&fm_central[cls].head,
+                                                     memory_order_relaxed);
+                 b; b = b->next) {
+                if ((b->count & FM_COUNT_PURE) &&
+                    ((uintptr_t)b->head & SPAN_MASK) == hint &&
+                    (b->count & FM_COUNT_MASK) == sp->nblocks) {
+                    victim = b;
+                    if (prev)
+                        prev->next = b->next;
+                    else
+                        atomic_store_explicit(&fm_central[cls].head, b->next,
+                                              memory_order_relaxed);
+                    atomic_fetch_sub_explicit(&fm_central[cls].depth, 1,
+                                              memory_order_relaxed);
+                    break;
+                }
+                prev = b;
+            }
+            fm_stack_resume();
+        }
+    }
+    /* One attempt per hint: whether or not it fired, retire it.  The next
+     * census will install a fresh one if the span is still a candidate. */
+    atomic_store_explicit(&fm_central[cls].dead_hint, 0, memory_order_relaxed);
+    pthread_mutex_unlock(&fm_census_lock);
+    if (victim) {
+        uintptr_t base = sp->map_base;
+        size_t len = sp->map_size;
+        fm_batch_release(victim);
+        munmap((void *)base, len);
+    }
+}
+
 /* Consider one class for automatic release (ADR 0020): census it
  * in the retaining, ageing form if its central stack is deep enough
  * and its interval has elapsed.  The interval is then re-derived
@@ -1920,6 +2014,9 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
  * release needs. */
 static void fm_release_maybe(uint32_t cls, uint32_t now, uint32_t flushed_cls)
 {
+    /* N1: try the cheap one-span release before considering a full census.
+     * A no-hint class costs one relaxed atomic load here. */
+    fm_hint_release(cls, now);
     const FM_Config *cfg = FM_CFG();
     FM_Central *c = &fm_central[cls];
     if (atomic_load_explicit(&c->depth, memory_order_relaxed) <

@@ -385,7 +385,11 @@ static void fm_config_init(void)
     c.idle_release = 0;
     c.realloc_cache_search = 0;
     c.local_limit_div = 1;
-    c.lcache_cold_purge = 0;
+    /* Drop resident pages of cold (not-recently-reused) large blocks on
+     * free, moving the balanced default partway toward the footprint
+     * profile.  The mapping stays cached, so warm reuse is unchanged;
+     * only the resident pages of teardown-shaped blocks are released. */
+    c.lcache_cold_purge = 1;
     c.lazy_bump = 1;
     c.locality_sort = 0;
 
@@ -2210,7 +2214,13 @@ static inline void fm_large_free(FM_Span *sp, void *p)
             fm_lcache_bytes + ms <= fm_lcache_budget(b) &&
             fm_ltick - fm_lbucket_seen[b] <=
                 ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : FM_LCACHE_HOT_WINDOW)) {
+            /* Only purge cold mappings large enough that the application is
+             * unlikely to reuse them soon (bucket b covers usable sizes in
+             * [2^b, 2^(b+1)), so b >= 24 means >= 16 MiB).  Medium buffers
+             * churned by jq/g++/Python stay resident when re-freed, while
+             * sort's one-shot merge buffers (>= 16 MiB) are still purged. */
             if (FM_CFG()->lcache_cold_purge &&
+                b >= 24 &&
                 !(fm_lcache_warm_mask & (1ULL << b))) {
                 uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
                 uintptr_t pend = (sp->map_base + sp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);

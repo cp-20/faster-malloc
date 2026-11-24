@@ -722,8 +722,9 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
 /* Map and initialise a fresh span for class cls.  Blocks are carved
  * lazily from the span's bump range by the refill path, so creation
  * does not touch every block's memory.  `first_cap_out` receives the
- * initial-carve cap for the class's first span (0 when unrestricted);
- * the span itself always owns a full 64 KiB slot. */
+ * initial-carve cap for the class's first span (0 when unrestricted).
+ * Small classes own a full 64 KiB dense-extent slot; a one-block large
+ * class gets a tight first mapping holding just its block and header. */
 static inline char *fm_span_new(uint32_t cls, uint32_t *count_out,
                                 uint32_t *first_cap_out)
 {
@@ -749,10 +750,39 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out,
     uintptr_t raw_base = 0;
     size_t raw_len = SPAN_SIZE;
     char *base;
-    if (bs <= FM_PAGE_SIZE) {
+#ifdef FM_SMALL_FIRST_SPAN
+    /* N31 (combined with N2): a class whose first carve is a single large
+     * block does not need a whole 64 KiB slab at startup.  Map just the
+     * block plus its header.  n and map_size stay truthful so census,
+     * mincore, page purge and whole-span release keep working.  N2's
+     * full-slot carve cap still governs the small (dense-extent) classes,
+     * which open a second slot only once the first is exhausted.  The JIT
+     * build does not define this macro, so it keeps full-size first spans
+     * (ADR 0061). */
+    int tight_first = (first_cap == 1 && bs > FM_PAGE_SIZE);
+#else
+    int tight_first = 0;
+#endif
+    if (tight_first) {
+        raw_len = FM_ALIGN_UP(bs + HEADER_SIZE, FM_PAGE_SIZE);
+        base = fm_map_aligned(raw_len - HEADER_SIZE);
+        raw_base = (uintptr_t)base;
+        n = 1;
+    } else if (bs <= FM_PAGE_SIZE) {
         base = fm_map_dense_span();
         raw_base = (uintptr_t)base;
     } else {
+        base = fm_map_large_slab(SPAN_SIZE - HEADER_SIZE, &raw_base, &raw_len);
+        if (!base) {
+            base = fm_map_aligned(SPAN_SIZE - HEADER_SIZE);
+            raw_base = (uintptr_t)base;
+            raw_len = SPAN_SIZE;
+        }
+    }
+    if (!base && tight_first) {
+        /* Tight mapping unavailable: fall back to the normal large slab. */
+        raw_len = SPAN_SIZE;
+        n = (SPAN_SIZE - HEADER_SIZE) / bs;
         base = fm_map_large_slab(SPAN_SIZE - HEADER_SIZE, &raw_base, &raw_len);
         if (!base) {
             base = fm_map_aligned(SPAN_SIZE - HEADER_SIZE);

@@ -317,9 +317,10 @@ extern __thread uint32_t fm_lbucket_seen[FM_LCACHE_BUCKETS]
 /* Stage-1 time-based decay defaults.  DIRTY spans have their payload pages
  * dropped with MADV_DONTNEED after dirty_decay_ms; MUZZY spans keep only the
  * VA/header until muzzy_decay_ms, then are munmapped.  The maintenance thread
- * is armed by the internal high-water of cumulative large-block frees (a
- * cold path, so short apps and the exact-Ir micro suite never spawn it);
- * decay_pulse_spans bounds the batches a single census pulse detaches. */
+ * is armed by the internal high-water of cumulative mapped bytes (counted
+ * where fresh VM is handed out, not on large frees, so a large steady heap
+ * arms it too); decay_pulse_spans bounds the batches a single census pulse
+ * detaches. */
 #define FM_DECAY_DIRTY_MS 500u
 #define FM_DECAY_MUZZY_MS 2000u
 #define FM_DECAY_HIGH_WATER (256ull << 20)
@@ -391,6 +392,20 @@ typedef struct FM_Config {
 extern FM_Config fm_cfg;
 extern pthread_once_t fm_cfg_once;
 extern _Atomic int fm_cfg_ready;
+
+/* Stage-1 arming gate: cumulative bytes of fresh mappings.  Counting the
+ * mapping side (new small spans and large allocations) instead of N121's
+ * cumulative large frees lets a large, steady heap arm the decay thread
+ * even when it rarely frees a large block.  The counter is monotonic and
+ * only touched by slow paths, so short apps and the exact-Ir micro suite
+ * do not cross the high-water.  fm_decay_hw caches the config threshold
+ * so the per-mapping check never calls pthread_once. */
+static _Atomic uint64_t fm_decay_mapped_bytes;
+static uint64_t fm_decay_hw = FM_DECAY_HIGH_WATER;
+/* fm_idle_thread_state: -1 disabled in fork child, 0 none, 1 starting/running. */
+static _Atomic int fm_idle_thread_state;
+static void fm_idle_kick(uint32_t now);
+static inline uint32_t fm_now_ms(void);
 
 static void fm_config_init(void)
 {
@@ -513,6 +528,7 @@ static void fm_config_init(void)
     if (c.release_max_interval_ms < c.release_interval_ms)
         c.release_max_interval_ms = c.release_interval_ms;
 
+    fm_decay_hw = c.decay_high_water;
     fm_cfg = c;
     atomic_store_explicit(&fm_cfg_ready, 1, memory_order_release);
 }
@@ -527,6 +543,28 @@ static inline const FM_Config *fm_get_cfg(void)
     return &fm_cfg;
 }
 #define FM_CFG() fm_get_cfg()
+
+/* Crossed the high-water once per process: recheck against the live config
+ * (the env override is applied in fm_config_init) and start the maintenance
+ * thread.  Kept noinline so the per-mapping fast check stays tiny. */
+__attribute__((noinline)) static void fm_decay_arm_slow(uint32_t now)
+{
+    const FM_Config *cfg = FM_CFG();
+    if (atomic_load_explicit(&fm_decay_mapped_bytes, memory_order_relaxed) >=
+            cfg->decay_high_water &&
+        atomic_load_explicit(&fm_idle_thread_state, memory_order_relaxed) == 0)
+        fm_idle_kick(now);
+}
+
+/* Account freshly mapped VM toward the decay arming high-water. */
+static inline void fm_note_decay_mapping(size_t bytes)
+{
+    uint64_t seen = atomic_fetch_add_explicit(&fm_decay_mapped_bytes, bytes,
+                                              memory_order_relaxed) + bytes;
+    if (__builtin_expect(seen >= fm_decay_hw, 0))
+        fm_decay_arm_slow(fm_now_ms());
+}
+
 /* The automatic census sets the class's next interval from how
  * many blocks it had to walk (one ms per 100 walked blocks,
  * doubling when it finds nothing, capped at 5 s): the walk is the
@@ -803,6 +841,7 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
     sp->dead_mark = 0;
     sp->map_base = raw_base;
     sp->map_size = raw_len;
+    fm_note_decay_mapping(raw_len);
     sp->user_size = 0;
     sp->align = 0;
     sp->purge_mark = 0;
@@ -2148,11 +2187,8 @@ static void fm_auto_release_tick(uint32_t flushed_cls)
 /* ------------------------------------------------------------------ */
 
 static _Atomic uint32_t fm_last_activity_ms;
-static _Atomic int fm_idle_thread_state; /* -1 disabled in fork child, 0 none, 1 starting/running */
-/* Stage-1 internal arming high-water: cumulative bytes of large blocks
- * freed.  Only the large-free cold path touches it, so the exact-Ir micro
- * suite and sub-100 ms startup apps never arm the maintenance thread. */
-static _Atomic uint64_t fm_decay_freed_bytes;
+/* fm_idle_thread_state and fm_decay_mapped_bytes are declared above with
+ * the mapping-side gate, before the span/large-map sites that feed them. */
 
 /* ADR 0040: shipped v2/JIT DSOs require ELF NODELETE, including custom builds.
  * dlclose retains worker code, TLS callbacks and allocator state until exit. */
@@ -2385,17 +2421,10 @@ static inline uint64_t fm_lcache_budget(int b)
 static inline void fm_large_free(FM_Span *sp, void *p)
 {
     fm_ltick++;
-    /* Stage 1: arm the maintenance thread only after this process has
-     * churned enough large mappings to be a "large" one.  The counter is
-     * monotonic and lives on a cold path; FM_IDLE_RELEASE=0 keeps its
-     * original meaning (the external knob is unchanged). */
-    const FM_Config *cfg = FM_CFG();
-    uint64_t seen = atomic_fetch_add_explicit(&fm_decay_freed_bytes,
-                                              sp->map_size,
-                                              memory_order_relaxed) + sp->map_size;
-    if (seen >= cfg->decay_high_water &&
-        atomic_load_explicit(&fm_idle_thread_state, memory_order_relaxed) == 0)
-        fm_idle_kick(fm_now_ms());
+    /* Stage 1 arming moved to the mapping side: cumulative mapped bytes
+     * now gate the maintenance thread (see fm_note_decay_mapping).  Large
+     * frees are no longer counted; FM_IDLE_RELEASE=0 keeps its original
+     * meaning (the external knob is unchanged). */
     if (sp->align == 0 && (uintptr_t)p == (uintptr_t)sp + HEADER_SIZE) {
         size_t ms = sp->map_size;
         int b = 63 - __builtin_clzll(fm_large_usable(sp));
@@ -2593,6 +2622,7 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
     sp->nblocks = 1;
     sp->map_base = raw;
     sp->map_size = raw_len;
+    fm_note_decay_mapping(raw_len);
     sp->user_size = size;
     sp->align = 0;
     sp->lnext = 0;
@@ -2649,6 +2679,7 @@ __attribute__((noinline)) static void *fm_aligned_alloc_impl(size_t align, size_
         sp->nblocks = 1;
         sp->map_base = (uintptr_t)base;
         sp->map_size = keep;
+        fm_note_decay_mapping(keep);
         sp->user_size = size;
         sp->align = align;
         return (void *)user;
@@ -2673,6 +2704,7 @@ __attribute__((noinline)) static void *fm_aligned_alloc_impl(size_t align, size_
     sp->nblocks = 1;
     sp->map_base = (uintptr_t)raw;
     sp->map_size = map_len;
+    fm_note_decay_mapping(map_len);
     sp->user_size = size;
     sp->align = align;
     return (void *)user;

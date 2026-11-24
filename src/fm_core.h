@@ -632,10 +632,46 @@ static struct {
     uint32_t opened_ms;
 } fm_dense_extent;
 
+/* Every 64 KiB dense span handout used to take fm_central_lock to advance
+ * the one global extent cursor.  Under xz -T2 / sort --parallel=4 several
+ * threads carve spans at once and serialize on that lock.  Grab a small
+ * batch of virgin spans from the shared extent into thread-local storage so
+ * a burst of span creation from one thread takes the lock once per batch.
+ *
+ * A cached span is private to this thread and has never had a header written
+ * into it (it is not in any central list, bump range or census): no other
+ * thread, trim or fork handler can reach it.  It is therefore safe to discard
+ * the unused remainder with munmap on thread exit and malloc_trim, exactly
+ * like the per-thread large slab.  Each span is 64 KiB-aligned and spans a
+ * whole number of pages, so unmapping a subrange of the 2 MiB extent splits
+ * the VMA cleanly and leaves the other spans (cached or in service) intact. */
+#define FM_DENSE_BATCH 8u
+static _Thread_local char *fm_dense_cache[FM_DENSE_BATCH]
+    __attribute__((tls_model("initial-exec")));
+static _Thread_local unsigned fm_dense_cache_n
+    __attribute__((tls_model("initial-exec")));
+
+/* Release this thread's unused cached spans.  Called from both malloc_trim
+ * (via fm_large_cache_drain) and the thread-exit drain. */
+static inline size_t fm_dense_cache_drain(void)
+{
+    size_t released = 0;
+    unsigned n = fm_dense_cache_n;
+    fm_dense_cache_n = 0;
+    for (unsigned i = 0; i < n; i++) {
+        if (munmap(fm_dense_cache[i], SPAN_SIZE) == 0)
+            released += SPAN_SIZE;
+        fm_dense_cache[i] = NULL;
+    }
+    return released;
+}
+
 static char *fm_map_dense_span(void)
 {
     enum { extent_size = 2 * 1024 * 1024, map_len = 2 * extent_size - FM_PAGE_SIZE };
     enum { burst_ms = 100, warmup_extents = 4 };
+    if (fm_dense_cache_n)
+        return fm_dense_cache[--fm_dense_cache_n];
     fm_stack_exclusive();
     if (!fm_dense_extent.remaining) {
         char *raw = mmap(NULL, map_len, PROT_READ | PROT_WRITE,
@@ -662,11 +698,20 @@ static char *fm_map_dense_span(void)
         fm_dense_extent.cursor = base;
         fm_dense_extent.remaining = extent_size / SPAN_SIZE;
     }
-    char *span = fm_dense_extent.cursor;
-    fm_dense_extent.cursor += SPAN_SIZE;
-    fm_dense_extent.remaining--;
+    /* Reserve up to FM_DENSE_BATCH virgin spans under one lock acquisition.
+     * The first is returned to the caller; the rest stay in this thread's
+     * cache for the next span requests. */
+    unsigned take = fm_dense_extent.remaining < FM_DENSE_BATCH
+                        ? fm_dense_extent.remaining : FM_DENSE_BATCH;
+    for (unsigned i = 0; i < take; i++)
+        fm_dense_cache[i] = fm_dense_extent.cursor + (size_t)i * SPAN_SIZE;
+    fm_dense_extent.cursor += (size_t)take * SPAN_SIZE;
+    fm_dense_extent.remaining -= take;
     fm_stack_resume();
-    return span;
+    /* Cached spans live in [0, take); hand out the top one so the drain
+     * (which walks [0, n)) never unmaps a span already in service. */
+    fm_dense_cache_n = take - 1;
+    return fm_dense_cache[take - 1];
 }
 
 /* Per-thread 2 MiB base-page slab for >4 KiB class spans and <=512 KiB
@@ -2209,6 +2254,7 @@ static inline size_t fm_large_cache_drain(void)
         fm_lextent_cur = NULL;
         fm_lextent_rem = 0;
     }
+    released += fm_dense_cache_drain();
     return released;
 }
 

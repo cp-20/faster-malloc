@@ -140,8 +140,8 @@ def parse_r3time(stderr: bytes) -> tuple[float, int] | None:
     return None
 
 
-def run_real(spec: dict, lib: str) -> tuple[float, int, str]:
-    env = real_suite.build_env(lib, None)
+def run_real(spec: dict, lib: str, extra_env: dict[str, str] | None = None) -> tuple[float, int, str]:
+    env = real_suite.build_env(lib, extra_env)
     stdin_bytes = None
     if spec.get("stdin_file"):
         stdin_bytes = Path(spec["stdin_file"]).read_bytes()
@@ -169,7 +169,8 @@ def run_real(spec: dict, lib: str) -> tuple[float, int, str]:
     return elapsed, rss_kb, digest
 
 
-def micro_instr(lib: str, mode: str, n: int, size: int | None) -> int:
+def micro_instr(lib: str, mode: str, n: int, size: int | None,
+                extra_env: dict[str, str] | None = None) -> int:
     with tempfile.NamedTemporaryFile(prefix="cg-", suffix=".out", delete=False) as fh:
         out = Path(fh.name)
     try:
@@ -186,6 +187,8 @@ def micro_instr(lib: str, mode: str, n: int, size: int | None) -> int:
             cmd.append(str(size))
         env = os.environ.copy()
         env["LD_PRELOAD"] = lib
+        if extra_env:
+            env.update(extra_env)
         subprocess.run(cmd, env=env, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         text = out.read_text(errors="replace")
         for line in text.splitlines():
@@ -206,10 +209,24 @@ def fmt_ratio(x: float) -> str:
     return f"{x:.4f}"
 
 
+def parse_env(pairs: list[str]) -> dict[str, str]:
+    out = {}
+    for pair in pairs:
+        if not pair:
+            continue
+        if "=" not in pair:
+            raise SystemExit(f"expected KEY=VALUE, got {pair!r}")
+        k, v = pair.split("=", 1)
+        out[k] = v
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--baseline", required=True)
     ap.add_argument("--candidate", required=True)
+    ap.add_argument("--runtime-env", action="append", default=[],
+                    help="KEY=VALUE applied to both libraries (repeatable)")
     ap.add_argument("--reps", type=int, default=3)
     ap.add_argument("--apps", default=DEFAULT_APPS)
     ap.add_argument("--skip-micro", action="store_true")
@@ -218,6 +235,7 @@ def main() -> int:
     ap.add_argument("--fail-on-regression", action="store_true")
     args = ap.parse_args()
 
+    runtime_env = parse_env(args.runtime_env)
     baseline = str(Path(args.baseline).resolve())
     candidate = str(Path(args.candidate).resolve())
     for label, lib in (("baseline", baseline), ("candidate", candidate)):
@@ -241,6 +259,7 @@ def main() -> int:
     result: dict = {
         "baseline": baseline,
         "candidate": candidate,
+        "runtime_env": runtime_env,
         "reps": args.reps,
         "micro": {},
         "real": {},
@@ -252,8 +271,8 @@ def main() -> int:
         ratios = []
         for mode, n, size in MICRO:
             label = f"{mode} {n}" + (f" {size}" if size is not None else "")
-            b = micro_instr(baseline, mode, n, size)
-            c = micro_instr(candidate, mode, n, size)
+            b = micro_instr(baseline, mode, n, size, runtime_env)
+            c = micro_instr(candidate, mode, n, size, runtime_env)
             ratio = c / b
             ratios.append(ratio)
             result["micro"][label] = {"baseline": b, "candidate": c, "ratio": ratio}
@@ -276,7 +295,7 @@ def main() -> int:
                 order = ("baseline", "candidate") if rep % 2 == 0 else ("candidate", "baseline")
                 for who in order:
                     lib = baseline if who == "baseline" else candidate
-                    elapsed, rss, digest = run_real(spec, lib)
+                    elapsed, rss, digest = run_real(spec, lib, runtime_env)
                     if ref_digest is None:
                         ref_digest = digest
                     elif digest != ref_digest:

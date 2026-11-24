@@ -27,12 +27,20 @@ on:
         description: "1 = also capture callgrind profiles of jq/python"
         required: false
         default: "0"
+      runtime_env:
+        description: "Extra KEY=VALUE env applied to both libraries (space separated)"
+        required: false
+        default: ""
+      tag:
+        description: "Unique tag for the concurrency group (sweeps on one ref)"
+        required: false
+        default: "push"
 
 permissions:
   contents: read
 
 concurrency:
-  group: exp-bench-${{ github.ref }}
+  group: exp-bench-${{ github.ref }}-${{ inputs.tag || 'push' }}
   cancel-in-progress: true
 
 jobs:
@@ -95,13 +103,20 @@ jobs:
         env:
           REPS: ${{ inputs.reps || '3' }}
           APPS: ${{ inputs.apps || 'jq_large,python_data,sort_p4,gxx_compile,git_revlist,sqlite_oltp' }}
+          RUNTIME_ENV: ${{ inputs.runtime_env || '' }}
         run: |
           set -o pipefail
+          extra=()
+          read -r -a env_pairs <<< "$RUNTIME_ENV" || true
+          for kv in "${env_pairs[@]}"; do
+            [ -n "$kv" ] && extra+=(--runtime-env "$kv")
+          done
           python3 bench/ci/expbench.py \
             --baseline /tmp/fm-base/libfastmalloc2.so \
             --candidate "$PWD/libfastmalloc2.so" \
             --reps "$REPS" \
             --apps "$APPS" \
+            "${extra[@]}" \
             --json exp-results.json | tee exp-results.txt
           {
             echo "## exp-bench: ${GITHUB_REF_NAME}"

@@ -2204,6 +2204,10 @@ static inline size_t fm_large_usable(const FM_Span *sp)
 static inline uint64_t fm_lcache_budget(int b)
 {
     uint64_t budget = FM_CFG()->lcache_max_bytes;
+    /* Huge buckets get the warm budget even on a first free: a 16-64 MiB
+     * payload is worth one slot and the outer budget still bounds it. */
+    if (b >= 24 && budget < (32ull << 20))
+        budget = 32ull << 20;
     if ((fm_lcache_warm_mask & (1ULL << b)) &&
         budget < FM_LCACHE_WARM_BUDGET_CAP) {
         budget <<= 1;

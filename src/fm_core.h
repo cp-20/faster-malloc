@@ -634,11 +634,19 @@ static inline char *fm_map_aligned(size_t bytes)
 /* Carve full, densely packed spans from a common 2 MiB extent. Each span
  * still owns exactly its own mapping range and can be released independently.
  * The central lock also serializes the cursor across fork. */
+/* Startup mapping diet (N12): a short-lived process that touches only a
+ * couple of small-span classes should not open a 2 MiB dense extent on its
+ * first allocation.  Serve that first span from one 64 KiB bootstrap
+ * mapping and open the extent lazily, on the second request.  The bootstrap
+ * mapping is an ordinary 64 KiB-aligned span -- fm_span_new records it in
+ * map_base/map_size, so census, page purge and trim release it like any
+ * other span and it is never wasted. */
 static struct {
     char *cursor;
     unsigned remaining;
     unsigned warmup;
     uint32_t opened_ms;
+    unsigned bootstrapped;
 } fm_dense_extent;
 
 static char *fm_map_dense_span(void)
@@ -646,6 +654,12 @@ static char *fm_map_dense_span(void)
     enum { extent_size = 2 * 1024 * 1024, map_len = 2 * extent_size - FM_PAGE_SIZE };
     enum { burst_ms = 100, warmup_extents = 4 };
     fm_stack_exclusive();
+    if (!fm_dense_extent.bootstrapped) {
+        fm_dense_extent.bootstrapped = 1;
+        char *span = fm_map_aligned(SPAN_SIZE - HEADER_SIZE);
+        fm_stack_resume();
+        return span;
+    }
     if (!fm_dense_extent.remaining) {
         char *raw = mmap(NULL, map_len, PROT_READ | PROT_WRITE,
                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);

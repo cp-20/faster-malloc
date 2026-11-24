@@ -175,7 +175,11 @@ typedef struct FM_Central {
      * that one span and unmap it without detaching and walking the whole
      * central stack again.  0 = no hint. */
     _Atomic uintptr_t dead_hint;
-    char pad[64 - sizeof(_Atomic(FM_Batch *)) - 4 * sizeof(_Atomic uint32_t)
+    /* N47: last time this class refilled a batch from its central list
+     * (ms, same clock as fm_now_ms).  A class reused within
+     * FM_HINT_REUSE_WINDOW_MS is skipped by the cheap N1 span release. */
+    _Atomic uint32_t last_reuse_ms;
+    char pad[64 - sizeof(_Atomic(FM_Batch *)) - 5 * sizeof(_Atomic uint32_t)
              - sizeof(_Atomic uintptr_t)];
 } FM_Central;
 
@@ -311,6 +315,11 @@ extern __thread uint32_t fm_lbucket_seen[FM_LCACHE_BUCKETS]
 #define FM_RELEASE_MIN_DEPTH 4u
 #define FM_RELEASE_KEEP 2u
 #define FM_RELEASE_AGE_MS 100u
+/* N47: a class that has refilled a batch from its central list within this
+ * window is "reused recently".  Its N1 span hints are ignored until the
+ * class goes quiet, so a span is never unmapped out from under a live
+ * working set (the jq DOM-churn regression). */
+#define FM_HINT_REUSE_WINDOW_MS 100u
 #define FM_RELEASE_INTERVAL_MS 10u
 #define FM_RELEASE_MAX_INTERVAL_MS 5000u
 
@@ -916,6 +925,15 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
         fm_stack_resume();
 #endif
         if (b) {
+            /* N47: taking a batch back into service is a reuse of this
+             * class.  Record it (only while a hint is pending -- the hint
+             * path is the only consumer, so keep the clock read off the
+             * common refill path) so the cheap span release can leave a
+             * recently-active class alone. */
+            if (atomic_load_explicit(&fm_central[cls].dead_hint,
+                                     memory_order_relaxed))
+                atomic_store_explicit(&fm_central[cls].last_reuse_ms,
+                                      fm_now_ms(), memory_order_relaxed);
             /* A span-pure batch going back into service witnesses
              * its span alive: cancel any dead mark (ADR 0020). */
             void *bh = b->head;
@@ -1953,6 +1971,15 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
  * this safe against a concurrent census, refill, or fork. */
 static void fm_hint_release(uint32_t cls, uint32_t now)
 {
+    /* N47: never release from a class that has reused a central batch
+     * recently.  Such a class (jq's DOM churn, Python arena bursts) still
+     * has a live working set, so unmapping one of its dead spans here only
+     * forces an mmap when the next batch is taken back into service.  A
+     * single relaxed load gates the path before any lock is taken. */
+    uint32_t last = atomic_load_explicit(&fm_central[cls].last_reuse_ms,
+                                         memory_order_relaxed);
+    if (last && (uint32_t)(now - last) < FM_HINT_REUSE_WINDOW_MS)
+        return;
     if (!atomic_load_explicit(&fm_central[cls].dead_hint, memory_order_relaxed))
         return;
     /* Automatic release is opportunistic: never wait on another census. */

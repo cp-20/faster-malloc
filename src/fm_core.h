@@ -781,6 +781,9 @@ static void fm_arm_thread_exit(void);
 /* Automatic span release (ADR 0020): defined with the trim census
  * below; called from fm_flush_bin on its cadence. */
 static void fm_auto_release_tick(uint32_t flushed_cls);
+/* N42: lazy per-thread idle drain (defined with the thread-exit drain
+ * below); called only from the two cold slow paths. */
+static void fm_idle_drain_maybe(void);
 
 /*
  * (Historical note: publishing used to be a private O(1) hand-off,
@@ -886,6 +889,7 @@ static void *fm_regroup_by_span(void *head, void **tail_out)
 __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t cls)
 {
     fm_arm_thread_exit();
+    fm_idle_drain_maybe();
 
     /* Try the central list first: take a whole batch, O(1). */
     {
@@ -2580,6 +2584,65 @@ static void fm_arm_thread_exit(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* lazy idle drain for long-lived worker threads (N42)                 */
+/*                                                                     */
+/* ADR 0017 hands a thread's local bins, bump remainders and large     */
+/* cache back only when the thread EXITS.  A worker in a pool that     */
+/* finishes a task and then sits idle keeps all of that resident for   */
+/* the whole idle period, and across many tasks the caches accumulate  */
+/* until the process high-water mark is set.  A timer thread cannot    */
+/* touch another thread's initial-exec TLS, so detect the gap lazily:  */
+/* sample CLOCK_MONOTONIC on the two allocator slow paths (which are   */
+/* already out of line and cold), and on the first activity after a    */
+/* >= 1 ms gap run the very same thread-exit drain while the thread is  */
+/* still alive.  This bounds how long a worker's cache can stay        */
+/* stranded to one task plus one idle gap instead of its whole life.   */
+/* No signal handler, no new thread, no change to the exit destructor. */
+/* ------------------------------------------------------------------ */
+
+#define FM_IDLE_DRAIN_MS 1u
+static __thread uint32_t fm_idle_last_ms
+    __attribute__((tls_model("initial-exec")));
+static __thread int fm_in_idle_drain
+    __attribute__((tls_model("initial-exec")));
+
+/* Cheap check so a thread with nothing cached does not pay for the full
+ * drain loop and its publish/munmap work. */
+static int fm_thread_has_cached(void)
+{
+    if (fm_lcache_bytes || fm_batch_pool || fm_lextent_rem)
+        return 1;
+    for (uint32_t c = 0; c < CLASS_COUNT; c++) {
+        if (fm_tls.head[c] || fm_bump_ptr[c] < fm_bump_end[c])
+            return 1;
+    }
+    return 0;
+}
+
+static void fm_idle_drain_maybe(void)
+{
+    if (fm_in_idle_drain || fm_in_census)
+        return;
+    uint32_t now = fm_now_ms();
+    uint32_t last = fm_idle_last_ms;
+    fm_idle_last_ms = now;
+    /* last == 0 is the TLS zero-initialised "no sample yet" state. */
+    if (last == 0 || (uint32_t)(now - last) < FM_IDLE_DRAIN_MS)
+        return;
+    if (!fm_thread_has_cached())
+        return;
+    fm_in_idle_drain = 1;
+    /* Same drain the pthread_key destructor runs (ADR 0017): local
+     * bins and bump remainders go back to the central lists and the
+     * large-block cache is unmapped.  We never touch fm_exit_armed, so
+     * the real destructor still fires at thread exit (and then finds
+     * empty caches).  Safe here: both callers are cold paths with no
+     * local-list state held and no census in progress. */
+    fm_thread_exit_flush();
+    fm_in_idle_drain = 0;
+}
+
+/* ------------------------------------------------------------------ */
 /* exported entry points                                               */
 /* ------------------------------------------------------------------ */
 
@@ -2650,6 +2713,7 @@ __attribute__((noinline, cold)) static void fm_free_aligned(const void *p)
 
 __attribute__((noinline)) static void fm_free_cnt_slow(uint32_t cls)
 {
+    fm_idle_drain_maybe();
     if (__builtin_expect(fm_tls.cnt[cls] < 0, 0)) {
         /* First free on this thread/class (.tbss 0 decremented to -1). */
         fm_arm_thread_exit();

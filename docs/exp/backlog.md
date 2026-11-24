@@ -181,6 +181,11 @@ These are deliberately smaller and self-contained so the local
 | N125 | all | add `FM_DIAG_RSS=1` mincore/smaps-classified residency counters for the allocator's own mappings (diagnostic only, no bench edits) | low |
 | N126 | git/sqlite | RSS8 follow-up: use the N125 decomposition to design a single-heap-like startup mechanism; do not guess | high |
 | N127 | all | combine Stage 1 N121 + N105 + PR #3 after Stage 1 is measured | med |
+| N128 | all | Stage 1 tuning on `exp/auto-n121`: high-water 64 MiB, dirty 100 ms, muzzy 1 s, pulse 64 spans | med |
+| N129 | sort/xz | muzzy `MADV_FREE` variant of N121 after the DONTNEED stage is measured | med |
+| N130 | all | combine N121 (decay) + N123 (extent hash / VA slot reuse) | med |
+| N131 | all | N121 with a mapped-bytes high-water instead of cumulative large frees | med |
+| N132 | all | use N125 `FM_DIAG_RSS=1` decomposition on redis/node/gcc/python to pick the next decay target | low |
 
 
 

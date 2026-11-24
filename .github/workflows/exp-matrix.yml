@@ -1,0 +1,66 @@
+name: exp-matrix
+
+# Lean full-matrix check for an experiment branch: v2 vs glibc, mimalloc,
+# jemalloc and tcmalloc on the real-application fixtures.  apps-bench does
+# the same with the dashboard, but pulls in redis/node/lua and is slow to
+# provision; this job installs only what real_suite.py needs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      reps:
+        description: "Repetitions per app"
+        required: false
+        default: "5"
+      apps:
+        description: "Space-separated app names (empty = all)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: exp-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install lean benchmark dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential jq sqlite3 xz-utils python3 git libjemalloc2
+          sudo apt-get install -y libmimalloc3 || sudo apt-get install -y libmimalloc2.0
+          sudo apt-get install -y libtcmalloc-minimal4t64 || sudo apt-get install -y libtcmalloc-minimal4
+
+      - name: Build and run the matrix
+        env:
+          REPS: ${{ inputs.reps || '5' }}
+          APPS: ${{ inputs.apps || '' }}
+          MATRIX: "0"
+        run: |
+          set -o pipefail
+          make -j"$(nproc)"
+          python3 bench/apps/real_suite.py | tee matrix.txt
+          {
+            echo "## exp-matrix: ${GITHUB_REF_NAME}"
+            echo '```'
+            cat matrix.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload matrix
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exp-matrix-${{ github.run_id }}
+          path: |
+            matrix.txt
+            bench/apps/work/real_suite/results.json
+          if-no-files-found: ignore

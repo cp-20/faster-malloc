@@ -379,6 +379,19 @@ moving live blocks is impossible without breaking user pointers.  The
 only architectural answer is byte-granular pages, which the 11-rep matrix
 rejected on the micro (Round 20).
 
+## Round 26b: medium-bucket cold cap (2026-11-25)
+
+| id | branch | result | status |
+|---|---|---|---|
+| C6 | `exp/selective7` | allow up to 512 KiB of cold retention in buckets 14-18 (16-512 KiB) to capture node's Buffer churn: local node munmap 7107 -> 6924, RSS and time unchanged | rejected |
+
+Node's 64 KiB churn does not reach the cache insertion: the hot-window
+gate (`FM_LCACHE_HOT_WINDOW` large frees since the bucket was last
+allocated from) or the free-path preconditions reject it, so widening the
+cold cap cannot help.  The remaining node time is the 27 MiB payload and
+the munmap/mmap pairs that the window refuses, neither of which is a cap
+tuning problem.
+
 ## Round 26: exempting >= 16 MiB buckets from the caps (2026-11-25)
 
 Node's only time loss under the selective cache is its 27 MiB JSON payload

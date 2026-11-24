@@ -2628,7 +2628,6 @@ static inline void *fm_malloc(size_t size)
             }
 #endif
             void *next = *(void **)p;
-            __builtin_prefetch(next, 0, 1);
             fm_tls.head[cls] = next;
             return p;
         }
@@ -2785,7 +2784,6 @@ static inline void *fm_calloc(size_t n, size_t sz)
         void *p = fm_tls.head[cls];
         if (__builtin_expect(p != NULL, 1)) {
             void *next = *(void **)p;
-            __builtin_prefetch(next, 0, 1);
             fm_tls.head[cls] = next;
             if (total <= 16) {
                 __builtin_memset(p, 0, 16);
@@ -3000,7 +2998,6 @@ static inline void *fm_operator_new(size_t size)
         void *p = fm_tls.head[cls];
         if (__builtin_expect(p != NULL, 1)) {
             void *next = *(void **)p;
-            __builtin_prefetch(next, 0, 1);
             fm_tls.head[cls] = next;
             return p;
         }
@@ -3017,7 +3014,6 @@ static inline void *fm_operator_new_nothrow(size_t size)
         void *p = fm_tls.head[cls];
         if (__builtin_expect(p != NULL, 1)) {
             void *next = *(void **)p;
-            __builtin_prefetch(next, 0, 1);
             fm_tls.head[cls] = next;
             return p;
         }
@@ -3037,7 +3033,6 @@ static inline void *fm_operator_new_aligned(size_t size, size_t align)
         void *p = fm_tls.head[cls];
         if (__builtin_expect(p != NULL, 1)) {
             void *next = *(void **)p;
-            __builtin_prefetch(next, 0, 1);
             fm_tls.head[cls] = next;
             return p;
         }

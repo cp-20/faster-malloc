@@ -66,6 +66,24 @@ python_legacy/node/gcc/git rows are stale and must be re-baselined with
 | X13 | 256 MiB flat large-cache budget | sweep | real 0.9918 at 3 reps; warm-split adopted instead |
 | X14 | halve local limits (`FM_LOCAL_LIMIT_DIV=2`) | sweep | real 1.0081, gxx +4.8% |
 
+## RSS wave 1 (2026-11-24)
+
+| id | branch | result | status |
+|---|---|---|---|
+| RSS0 | `exp/rss-balanced2` | cold large-cache purge in balanced defaults: sort RSS 45 -> 35 MiB (11 reps), jq/Python -1 to -2%, but jq time +1.8%, Python +1.4% | **candidate**, needs a size threshold |
+| RSS2 | `exp/rss-sort-cache` | custom cold purge: sort RSS flat, time neutral | rejected |
+| RSS3 | `exp/rss-gxx` | 32-128 KiB warm cap 8 MiB: g++ RSS 199 -> 199, no effect | rejected |
+| RSS4 | `exp/rss-startup` | 4 KiB first spans: git 13 -> 16, sqlite 13 -> 16, worse | rejected |
+| RSS6 | `exp/rss-python` | 128 KiB-1 MiB cap 4 MiB: jq RSS -1.7% but jq +2.5%, sort +2.2%, sqlite +1.6% | rejected |
+| RSS7 | `exp/rss-close` | jq is within noise (tied); xz +0.68% is structural, every one-line knob is a no-op | jq tied, xz needs RSS8 |
+| FIX1 | `fix/foreign-mus` | Redis 8 + jemalloc crash in `malloc_usable_size`; magic-check + `dlsym(RTLD_NEXT)` fallback; merged as PR #2 | **merged** |
+
+The lesson so far: the RSS gap is **not** the large-cache byte cap.  It is
+resident pages of cold/huge mappings (cold purge works), plus structural
+startup mappings (smaller spans made it worse).  `RSS8` (per-app
+smaps/massif decomposition) is the next measurement, and the size-band
+threshold on RSS0 is the next code step.
+
 ## Open hypotheses
 
 | id | area | hypothesis | risk |

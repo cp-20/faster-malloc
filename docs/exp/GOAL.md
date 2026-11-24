@@ -54,6 +54,14 @@ The legacy dashboard rows are stale (rounds 5/6/10).  `exp-legacy.yml`
 must be run on current main before claiming anything there; its results
 become part of the same scoreboard.
 
+Update after the first RSS wave: a cold large-cache purge in the balanced
+defaults (`exp/rss-balanced2`) measured **sort 45 -> 35 MiB** and jq
+262 -> 257 MiB (v2 first), with jq +1.8% / Python +1.4% time.  A size-band
+threshold is in flight to keep the sort win without the medium-buffer
+time cost.  Shrinking the first spans made git/sqlite worse; the startup
+gap needs a different mechanism (fewer mappings, not smaller ones).  The
+Redis 8 / jemalloc `malloc_usable_size` crash is fixed (PR #2).
+
 ## Baseline
 
 The campaign starts from whatever is on `main`.  Accepted mechanisms so

@@ -2,15 +2,15 @@
 #pragma once
 #include <stdint.h>
 
-#define SMALL_MAX 3968
+#define SMALL_MAX 7936
 #define CLASS_COUNT 145
 #define ARITH_MAX 1024
 #define ARITH_CLASSES 64
 #define BIG_TABLE_SIZE 2049
-#define SPAN_SIZE 4096u
+#define SPAN_SIZE 8192u
 #define HEADER_SIZE 64u
 #define SPAN_MASK (~(uintptr_t)(SPAN_SIZE - 1u))
-#define FM_SPAN_SHIFT 12
+#define FM_SPAN_SHIFT 13
 #define LARGE_CLASS 0xFFFFFFFFu
 #define SPAN_MAGIC 0x5A6E4C5Au
 #define ALIGNED_MAGIC 0xA110CEDAu

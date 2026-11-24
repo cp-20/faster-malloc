@@ -2237,8 +2237,12 @@ static inline void fm_large_free(FM_Span *sp, void *p)
                     (void)madvise((void *)pstart, pend - pstart, MADV_DONTNEED);
             }
             int warm = (fm_lcache_warm_mask & (1ULL << b)) != 0;
-            int take = warm ? (fm_lbucket_bytes[b] + ms <= FM_LCACHE_BUCKET_WARM)
-                            : (fm_lbucket_bytes[b] == 0 && ms <= FM_LCACHE_BUCKET_COLD);
+            /* Huge blocks (>= 16 MiB) are exempt from the warm/cold caps:
+             * they are single large payloads whose reuse is worth the
+             * bytes, and the base budget still bounds them. */
+            int take = (b >= 24) ? 1
+                       : (warm ? (fm_lbucket_bytes[b] + ms <= FM_LCACHE_BUCKET_WARM)
+                               : (fm_lbucket_bytes[b] == 0 && ms <= FM_LCACHE_BUCKET_COLD));
             if (take) {
                 sp->lnext = (uintptr_t)fm_lcache_head[b];
                 fm_lcache_head[b] = sp;

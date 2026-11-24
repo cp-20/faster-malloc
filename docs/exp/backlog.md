@@ -99,6 +99,26 @@ These are deliberately smaller and self-contained so the local
 | N43 | redis | avoid the first dense extent for single-threaded servers: first span from `mmap` | med |
 | N44 | gcc | reuse 64 KiB obstack chunks from a dedicated bucket across functions | med |
 | N45 | all | cold-purge 8 MiB blocks only when the large-cache budget is above 32 MiB | low |
+| N46 | all | combine warm-huge + G3 + N23 + N12 on one branch; measure interactions | med |
+| N47 | python | N1 span release gated on the class not being reused recently; remove the jq +1.8% regression | med |
+| N48 | node | N10 8 MiB cold purge gated on an RSS high-water (N14) but only for >16 MiB blocks | med |
+| N49 | all | N23 dead large-span threshold 2 KiB -> 4 KiB | low |
+| N50 | all | N24 2-page purge only for classes < 256 B, 4 pages above | low |
+| N51 | jq/sqlite | G3 window 16 keyed on size band instead of the hard-coded bucket 17 | low |
+| N52 | g++/jq | N26 medium window 16 combined with warm-huge | low |
+| N53 | sort/xz | N29 THP slab gate after the second refill; confirm with 11 reps | med |
+| N54 | sort/xz | N39 huge-bucket 32 MiB cap combined with warm-huge | low |
+| N55 | micro | N5 prefetch removal; check the rand/cross Ir and real apps | low |
+| N56 | all | N8 128 KiB spans: fix the sort +1.6% and python +2% outliers | high |
+| N57 | git/sqlite | N2 startup mapping + N12 lazy dense extent | med |
+| N58 | git/sqlite | N31 one-block first span + N2 | med |
+| N59 | redis | N43 exact first span + N2 for the libc-built Redis | med |
+| N60 | node | warm-huge + 8 MiB cold purge, measured on the legacy node row | med |
+| N61 | g++ | adaptive slab + 128 KiB local budget for >=2 KiB classes | med |
+| N62 | python | N1 span release + N24 page purge | med |
+| N63 | git | N2 + N12 + N31 | med |
+| N64 | sqlite | N2 + N12 + N24 | med |
+| N65 | all | combine warm-huge + G3 + N23 + N26 | med |
 
 
 

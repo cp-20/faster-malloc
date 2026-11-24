@@ -1405,16 +1405,16 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
      * previously withheld blocks) in the phases below. */
     const FM_Config *cfg = FM_CFG();
     const size_t bs = kClassSize[cls];
-    /* N24: a fully-free page run is much harder to assemble in a small
-     * class (dozens of tiny blocks must all be free at once) than in a
-     * large one (a handful of blocks per page).  Requiring the default
-     * four new pages kept small classes from ever being purged under
-     * churn, even though two resident pages are 8 KiB the allocator
-     * could return.  Lower the gate for the small-block classes only;
-     * large classes keep the conservative four-page threshold.  A user
-     * override below the default (footprint profile / FM_PURGE_MIN_PAGES)
-     * is never raised. */
-    uint32_t min_pages = (bs <= 512u && cfg->purge_min_pages > 2u)
+    /* N24/N50: a fully-free page run is much harder to assemble in a
+     * small class (dozens of tiny blocks must all be free at once) than
+     * in a large one (a handful of blocks per page).  N24 lowered the
+     * default four-page gate to two for all small-block classes; N50
+     * narrows that to classes below 256 B, where two resident pages are
+     * a cheap, genuinely reclaimable win under churn.  Classes >= 256 B
+     * keep the conservative four-page threshold.  A user override below
+     * the default (footprint profile / FM_PURGE_MIN_PAGES) is never
+     * raised. */
+    uint32_t min_pages = (bs < 256u && cfg->purge_min_pages > 2u)
                              ? 2u : cfg->purge_min_pages;
     uint32_t now = instant ? 0 : fm_now_ms();
     fm_census_marked = 0;

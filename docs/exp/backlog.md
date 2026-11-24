@@ -220,6 +220,11 @@ Two measurements that correct earlier conclusions:
   4.4-4.8 s against v2's 0.04-0.57 s.  Span geometry experiments on that
   header (v3, v4, v6) are therefore not evidence about 4 KiB spans.
 
+| M1 | measurement | `livepeak` LD_PRELOAD wrapper: peak live bytes through malloc are **11.65 MB (glibc) vs 11.81 MB (v2)** on the legacy git fixture while RSS is 19.6 vs 23.9 MB.  The gap is page fragmentation across size classes, not rounding and not whole-block retention. | evidence |
+| M2 | measurement | Lua churn on the legacy workload (local, 11.6 vs 16.4 MB) decomposes into lcache 1.7 MB, eager release 1.1 MB, div16 0.9 MB, page purge 0.6 MB; only the combination reaches 13.7 MB, so no single knob closes it. | evidence |
+| M3 | `exp/warm64` | warm-bucket cap 64 MiB with a 16 MiB base: node 468 MB at 3 reps, identical to the 32 MiB cap; the cap is not the constraint | rejected |
+| M4 | lcache8 re-run | 8 MiB base at 11 reps incl. xz: micro 1.0000, paired 1.0012, worst 1.0168 (sqlite **+1.7%**, second independent run +2.2%); node RSS 466 vs 471 at 16 MiB.  Time is the hard constraint, so 16 MiB stays. | 8 MiB rejected |
+
 Still open from this round: a phase-reuse test (`mixpack` mode 1) shows v2
 retaining freed spans across a size-phase change (166 MB vs glibc 119 MB)
 until `FM_RELEASE_AGE_MS=0` releases them (118 MB); git does not respond to

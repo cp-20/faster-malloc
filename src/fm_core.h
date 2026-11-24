@@ -66,6 +66,7 @@
 #include <stdatomic.h>
 #include <sched.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -2200,6 +2201,22 @@ static inline uint64_t fm_lcache_budget(int b)
         budget <<= 1;
         if (budget > FM_LCACHE_WARM_BUDGET_CAP)
             budget = FM_LCACHE_WARM_BUDGET_CAP;
+    }
+    /* N77: cap retention by the process's RSS high-water mark instead of
+     * trusting the mapped-byte counter alone.  ru_maxrss is the kernel's
+     * peak-RSS watermark (KiB on Linux); tying the budget to half of it stops
+     * a small-footprint process (git/sqlite) from inflating its peak with
+     * retained mappings, while a large-footprint process keeps the full
+     * configured budget.  getrusage does not allocate, so it is safe on this
+     * large-free slow path.  The warm boost above is applied first, so the
+     * RSS cap also bounds buckets that proved reuse. */
+    if (budget) {
+        struct rusage ru;
+        if (getrusage(RUSAGE_SELF, &ru) == 0 && ru.ru_maxrss > 0) {
+            uint64_t rss_cap = (uint64_t)ru.ru_maxrss * 1024ull / 2ull;
+            if (rss_cap < budget)
+                budget = rss_cap;
+        }
     }
     return budget;
 }

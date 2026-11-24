@@ -690,6 +690,8 @@ static char *fm_map_dense_span(void)
  * untouched tail pages stay non-resident, so RSS is unaffected. */
 static _Thread_local char *fm_lextent_cur __attribute__((tls_model("initial-exec")));
 static _Thread_local size_t fm_lextent_rem __attribute__((tls_model("initial-exec")));
+static _Thread_local uint32_t fm_lextent_opened_ms;
+static _Thread_local uint16_t fm_lextent_warmup;
 
 static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out)
 {
@@ -707,19 +709,32 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
         fm_lextent_cur = NULL;
         fm_lextent_rem = 0;
     }
-    size_t slab_len = (4u << 20) + SPAN_SIZE;
+    /* 2 MiB-aligned so the extent can back huge pages; the extra 2 MiB
+     * pays for the alignment slack of any mmap placement. */
+    enum { extent_len = 4u << 20, huge = 2u << 20, burst_ms = 100,
+           warmup_extents = 4 };
+    size_t slab_len = extent_len + huge;
     char *raw = mmap(NULL, slab_len, PROT_READ | PROT_WRITE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (raw == MAP_FAILED)
         return NULL;
-    char *aligned = (char *)FM_ALIGN_UP((uintptr_t)raw, SPAN_SIZE);
+    char *aligned = (char *)FM_ALIGN_UP((uintptr_t)raw, huge);
     size_t head_slack = (size_t)(aligned - raw);
     if (head_slack)
         munmap(raw, head_slack);
+    /* Classes above 4 KiB use one 64 KiB span at a time; when the process
+     * is consuming a slab per burst, huge pages pay for the TLB pressure
+     * without committing 2 MiB pages for sparse startup heaps. */
+    uint32_t now = fm_now_ms();
+    if (fm_lextent_warmup < warmup_extents)
+        fm_lextent_warmup++;
+    else if (now - fm_lextent_opened_ms < burst_ms && fm_lextent_opened_ms)
+        (void)madvise(aligned, extent_len, MADV_HUGEPAGE);
+    fm_lextent_opened_ms = now;
     *raw_out = (uintptr_t)aligned;
     *len_out = need;
     fm_lextent_cur = aligned + need;
-    fm_lextent_rem = slab_len - head_slack - need;
+    fm_lextent_rem = extent_len + huge - head_slack - need;
     return aligned;
 }
 

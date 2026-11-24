@@ -251,6 +251,18 @@ static FM_Batch *fm_batch_global_head; /* protected by fm_central_lock */
  * throughput preset's 256 MiB and page purge stays on: this is a bounded
  * reuse boost, not the whole throughput profile. */
 #define FM_LCACHE_WARM_BUDGET_CAP (128ull << 20)
+/* RSS experiment (exp/rss-python): CPython's list/arena churn lives in the
+ * 128 KiB-1 MiB large-cache buckets (17..20).  A sticky warm bit lets those
+ * buckets keep the whole 128 MiB warm cap after the phase that warmed them,
+ * which is the likely source of python_data's ~4.5 MiB peak-RSS excess over
+ * glibc.  Bound just that band at 4 MiB in the default (balanced) profile:
+ * enough for a few live medium buffers, but cold intermediates are unmapped
+ * instead of staying resident.  Other buckets, all small-class budgets and
+ * both malloc/free hot paths are untouched; throughput (256 MiB) and the
+ * other profiles keep their configured budgets. */
+#define FM_LCACHE_RSS_BAND_LO 17u
+#define FM_LCACHE_RSS_BAND_HI 20u
+#define FM_LCACHE_RSS_BAND_CAP (4ull << 20)
 extern __thread void *fm_lcache_head[FM_LCACHE_BUCKETS]
     __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));
@@ -2190,13 +2202,22 @@ static inline size_t fm_large_usable(const FM_Span *sp)
  * slow path, after the bucket-range check. */
 static inline uint64_t fm_lcache_budget(int b)
 {
-    uint64_t budget = FM_CFG()->lcache_max_bytes;
+    uint64_t base = FM_CFG()->lcache_max_bytes;
+    uint64_t budget = base;
     if ((fm_lcache_warm_mask & (1ULL << b)) &&
         budget < FM_LCACHE_WARM_BUDGET_CAP) {
         budget <<= 1;
         if (budget > FM_LCACHE_WARM_BUDGET_CAP)
             budget = FM_LCACHE_WARM_BUDGET_CAP;
     }
+    /* Applied after the warm doubling, so a bucket that has served a hit
+     * cannot grow its way past the band cap.  Gated on the default budget
+     * so the throughput/shortlived/footprint profiles and explicit
+     * FM_LCACHE_MAX_BYTES overrides keep exactly their old behaviour. */
+    if (base == FM_LCACHE_MAX_BYTES &&
+        (unsigned)b >= FM_LCACHE_RSS_BAND_LO && (unsigned)b <= FM_LCACHE_RSS_BAND_HI &&
+        budget > FM_LCACHE_RSS_BAND_CAP)
+        budget = FM_LCACHE_RSS_BAND_CAP;
     return budget;
 }
 

@@ -251,6 +251,14 @@ static FM_Batch *fm_batch_global_head; /* protected by fm_central_lock */
  * throughput preset's 256 MiB and page purge stays on: this is a bounded
  * reuse boost, not the whole throughput profile. */
 #define FM_LCACHE_WARM_BUDGET_CAP (128ull << 20)
+/* RSS experiment (exp/rss-gxx): the medium bands that cc1plus's obstack
+ * chunks and other phase-local buffers pile into.  A slab-carved 64 KiB
+ * request has a 128 KiB usable length -> bucket 17; 16-32 KiB requests
+ * land in bucket 16.  Band [15,17] therefore covers 32-128 KiB and the
+ * obstack chunks that motivated this experiment. */
+#define FM_LCACHE_BAND_LO 15
+#define FM_LCACHE_BAND_HI 17
+#define FM_LCACHE_BAND_CAP (8ull << 20)
 extern __thread void *fm_lcache_head[FM_LCACHE_BUCKETS]
     __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));
@@ -2187,7 +2195,17 @@ static inline size_t fm_large_usable(const FM_Span *sp)
  * capped at 128 MiB; cold buckets keep the configured cap.  Doubling keeps
  * the footprint profile's 8 MiB small, shortlived's 0 off, and leaves the
  * throughput preset's 256 MiB untouched.  Called only on the large-free
- * slow path, after the bucket-range check. */
+ * slow path, after the bucket-range check.
+ *
+ * RSS experiment (exp/rss-gxx): a warm medium bucket can otherwise retain
+ * up to 128 MiB of freed-but-not-yet-reused blocks.  Compilation workloads
+ * (cc1plus) cycle only a handful of 64 KiB obstack chunks (~20, ~1.3 MiB),
+ * so that retention is pure resident waste at the peak: g++ sits 3.5% above
+ * glibc in RSS.  Cap the 32-128 KiB bands at 8 MiB -- comfortably above
+ * any observed reuse window, so allocation still hits the cache and no
+ * mmap/munmap churn is introduced, while the excess returns to the OS.
+ * The small classes (which carry the micro win) and the large buckets are
+ * deliberately left untouched. */
 static inline uint64_t fm_lcache_budget(int b)
 {
     uint64_t budget = FM_CFG()->lcache_max_bytes;
@@ -2197,6 +2215,9 @@ static inline uint64_t fm_lcache_budget(int b)
         if (budget > FM_LCACHE_WARM_BUDGET_CAP)
             budget = FM_LCACHE_WARM_BUDGET_CAP;
     }
+    if (b >= FM_LCACHE_BAND_LO && b <= FM_LCACHE_BAND_HI &&
+        budget > FM_LCACHE_BAND_CAP)
+        budget = FM_LCACHE_BAND_CAP;
     return budget;
 }
 

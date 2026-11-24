@@ -2830,10 +2830,11 @@ __attribute__((noinline)) static void *fm_realloc_slow(void *p, size_t size)
         size_t old = kClassSize[sp->cls];
         if (size <= old)
             return p;
-        /* Incremental growth across the densely spaced medium classes
-         * otherwise strands the previous buffer in each class in turn. */
+        /* Incremental growth across the densely spaced small/medium classes
+         * otherwise strands the previous buffer in each class in turn.  From
+         * 128 B, reserve a geometric capacity instead of the next class. */
         size_t capacity = size;
-        if (old >= 512 && size <= SMALL_MAX && size - old < old)
+        if (old >= 128 && size <= SMALL_MAX && size - old < old)
             capacity = (size_t)1 << (32 - __builtin_clz((unsigned)size - 1));
         void *q = fm_malloc(capacity);
         if (!q && capacity != size)

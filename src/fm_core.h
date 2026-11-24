@@ -802,8 +802,12 @@ static inline uint32_t fm_local_limit(uint32_t cls)
      * 16 B blocks, 32 KiB for 128 B blocks).  Spend the full budget: a
      * larger local limit means fewer flushes -- fewer central-lock
      * acquisitions and batch round trips -- while retained bytes stay
-     * bounded at 64 KiB per class.  The div override still scales it. */
-    uint32_t budget = (uint32_t)((64u * 1024u) / kClassSize[cls]);
+     * bounded at 64 KiB per class.  The div override still scales it.
+     * For classes >= 2 KiB the generated limit already follows that 64 KiB
+     * byte rule exactly, so doubling the budget to 128 KiB is what actually
+     * raises their limit; below 2 KiB the 256-block cap binds instead. */
+    uint32_t bs = kClassSize[cls];
+    uint32_t budget = (uint32_t)((bs >= 2048 ? 128u * 1024u : 64u * 1024u) / bs);
     if (budget > limit)
         limit = budget;
     uint32_t div = FM_CFG()->local_limit_div;

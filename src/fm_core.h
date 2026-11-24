@@ -629,13 +629,14 @@ static struct {
     char *cursor;
     unsigned remaining;
     unsigned warmup;
+    unsigned fast_streak;
     uint32_t opened_ms;
 } fm_dense_extent;
 
 static char *fm_map_dense_span(void)
 {
     enum { extent_size = 2 * 1024 * 1024, map_len = 2 * extent_size - FM_PAGE_SIZE };
-    enum { burst_ms = 100, warmup_extents = 4 };
+    enum { burst_ms = 100, warmup_extents = 4, fast_streak_hint = 2 };
     fm_stack_exclusive();
     if (!fm_dense_extent.remaining) {
         char *raw = mmap(NULL, map_len, PROT_READ | PROT_WRITE,
@@ -651,13 +652,25 @@ static char *fm_map_dense_span(void)
             munmap(raw, prefix);
         if (suffix)
             munmap(base + extent_size, suffix);
-        /* A rapidly consumed extent predicts dense demand for the next.
-         * Sparse/startup heaps get demand-paged base pages. */
+        /* A burst of rapidly consumed extents predicts genuinely dense
+         * demand for the next one.  A single fast extent is not enough:
+         * with FM_SMALL_FIRST_SPAN a startup wave of many capped first
+         * spans drains extents quickly while touching only a few blocks
+         * each, and hinting those makes the fault path/khugepaged back a
+         * sparse heap with full 2 MiB folios (RSS + split_folio cost on
+         * the CI runner).  Require a consecutive streak after warmup;
+         * sparse/startup heaps keep demand-paged base pages. */
         uint32_t now = fm_now_ms();
-        if (fm_dense_extent.warmup < warmup_extents)
+        int fast = fm_dense_extent.cursor &&
+                   (uint32_t)(now - fm_dense_extent.opened_ms) < burst_ms;
+        if (fm_dense_extent.warmup < warmup_extents) {
             fm_dense_extent.warmup++;
-        else if (now - fm_dense_extent.opened_ms < burst_ms && fm_dense_extent.cursor)
-            (void)madvise(base, extent_size, MADV_HUGEPAGE);
+            fm_dense_extent.fast_streak = 0;
+        } else {
+            fm_dense_extent.fast_streak = fast ? fm_dense_extent.fast_streak + 1 : 0;
+            if (fm_dense_extent.fast_streak >= fast_streak_hint)
+                (void)madvise(base, extent_size, MADV_HUGEPAGE);
+        }
         fm_dense_extent.opened_ms = now;
         fm_dense_extent.cursor = base;
         fm_dense_extent.remaining = extent_size / SPAN_SIZE;

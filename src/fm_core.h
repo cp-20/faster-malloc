@@ -2265,22 +2265,30 @@ __attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *z
 static void *fm_large_alloc_map(size_t size, int *zeroed)
 {
     size_t growing_from = fm_grow_from;
-    /* Before mapping fresh pages, carve from a larger cached block (up to
-     * 4 MiB) so medium-large bursts and sub-4 MiB growth reuse already-
-     * resident mappings left by earlier phases. */
-    if (size <= (2u << 20) && !(growing_from && FM_CFG()->realloc_cache_search)) {
+    /* Before mapping fresh pages, carve from a larger cached block so
+     * medium-large bursts and growth reuse already-resident mappings left
+     * by earlier phases.  The direct cache search already covers buckets
+     * nb and nb+1, so start two buckets above the request.  Widen the old
+     * 2 MiB/4 MiB window to 16 MiB requests and 32 MiB sources: a JSON
+     * input buffer, compression block buffer or compiler scratch buffer
+     * freed by one phase is exactly the kind of mapping a later medium
+     * phase wants, and reusing its resident prefix avoids both an mmap
+     * and re-faulting the pages.  The remainder is re-bucketed, so the
+     * request is not pinned to the whole capacity and RSS is unchanged
+     * (the source mapping was already cached and resident). */
+    if (size <= (16u << 20) && !(growing_from && FM_CFG()->realloc_cache_search)) {
         size_t need_map = FM_ALIGN_UP(size + HEADER_SIZE, FM_PAGE_SIZE);
         int nb = 63 - __builtin_clzll(need_map);
         size_t want = size;
         if (growing_from && size - growing_from < growing_from)
             want += size;
         size_t carve = FM_ALIGN_UP(want + HEADER_SIZE, SPAN_SIZE);
-        for (int b = nb + 2; b <= 22 && b < FM_LCACHE_BUCKETS; b++) {
+        for (int b = nb + 2; b <= 25 && b < FM_LCACHE_BUCKETS; b++) {
             FM_Span **link = (FM_Span **)&fm_lcache_head[b];
             for (int i = 0; i < 8 && *link; i++) {
                 FM_Span *sp = *link;
                 size_t usable = fm_large_usable(sp);
-                if (usable <= (4u << 20) && usable >= need_map) {
+                if (usable <= (33u << 20) && usable >= need_map) {
                     *link = (FM_Span *)sp->lnext;
                     fm_lcache_bytes -= sp->map_size;
                     if (usable >= carve + SPAN_SIZE + FM_PAGE_SIZE) {

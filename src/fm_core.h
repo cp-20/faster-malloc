@@ -254,6 +254,11 @@ static FM_Batch *fm_batch_global_head; /* protected by fm_central_lock */
 extern __thread void *fm_lcache_head[FM_LCACHE_BUCKETS]
     __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));
+/* Observed reuse of the large-block cache.  A process whose large frees and
+ * allocations never hit the cache is not served by retaining multi-MiB
+ * buffers: shrink the budget for it without touching apps that do hit. */
+extern __thread uint32_t fm_lc_hits __attribute__((tls_model("initial-exec")));
+extern __thread uint32_t fm_lc_misses __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_warm_mask __attribute__((tls_model("initial-exec")));
 /* Large-block cache hotness (ADR 0011 follow-up): the cache pays off
  * only for sizes the workload allocates again soon; a bucket that
@@ -2195,6 +2200,13 @@ static inline size_t fm_large_usable(const FM_Span *sp)
 static inline uint64_t fm_lcache_budget(int b)
 {
     uint64_t budget = FM_CFG()->lcache_max_bytes;
+    /* ADR 0085: a thread that has mostly missed keeps at most 2 MiB.  The
+     * counters are cumulative, so a workload that reuses buffers keeps its
+     * full budget; a free-and-forget churn (JSON strings, temp stores)
+     * stops pinning multi-MiB mappings it will never touch again. */
+    if (fm_lc_misses > 128 && (uint64_t)fm_lc_hits * 8 < fm_lc_misses &&
+        budget > (2ull << 20))
+        budget = 2ull << 20;
     if ((fm_lcache_warm_mask & (1ULL << b)) &&
         budget < FM_LCACHE_WARM_BUDGET_CAP) {
         budget <<= 1;
@@ -2298,6 +2310,7 @@ __attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *z
                     fm_lcache_warm_mask |= (1ULL << b);
                 *link = (FM_Span *)sp->lnext;
                 fm_lcache_bytes -= sp->map_size;
+                fm_lc_hits++;
                 sp->user_size = size;
                 sp->lnext = 0;
                 if (zeroed)
@@ -2336,6 +2349,7 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
                 if (usable <= (4u << 20) && usable >= need_map) {
                     *link = (FM_Span *)sp->lnext;
                     fm_lcache_bytes -= sp->map_size;
+                    fm_lc_hits++;
                     if (usable >= carve + SPAN_SIZE + FM_PAGE_SIZE) {
                         uintptr_t map_end = sp->map_base + sp->map_size;
                         uintptr_t rem_addr = (uintptr_t)sp + carve;
@@ -2364,6 +2378,7 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
             }
         }
     }
+    fm_lc_misses++;
     uintptr_t raw = 0;
     size_t raw_len = 0;
     /* A growing buffer would otherwise copy and fault a new mapping at

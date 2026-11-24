@@ -2734,9 +2734,21 @@ static inline void *fm_calloc(size_t n, size_t sz)
             } else if (total <= 32) {
                 __builtin_memset(p, 0, 32);
             } else {
+                /* 33..64: class 3 (48 B) for 33..48, class 4 (64 B) for
+                 * 49..64.  Zero the whole block with aligned 16-byte SSE
+                 * stores at offsets 0/16/32/48 instead of the old pair of
+                 * 32-byte stores ending at p+total (whose tail store was
+                 * unaligned, e.g. p+1 for total=33, and overlapped the
+                 * first one).  Zeroing the block tail beyond `total` is
+                 * harmless: the caller only owns `total` bytes but the
+                 * whole block belongs to this allocation. */
                 __builtin_memset(p, 0, 32);
-                __builtin_memset((char *)p + total - 32, 0, 32);
+                __builtin_memset((char *)p + 32, 0, 16);
+                if (cls == 3)
+                    goto fm_calloc_zero_done;
+                __builtin_memset((char *)p + 48, 0, 16);
             }
+        fm_calloc_zero_done:
             return p;
         }
     }

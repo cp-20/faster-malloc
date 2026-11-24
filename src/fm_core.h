@@ -385,7 +385,13 @@ static void fm_config_init(void)
     c.idle_release = 0;
     c.realloc_cache_search = 0;
     c.local_limit_div = 1;
-    c.lcache_cold_purge = 0;
+    /* Drop resident payload pages of cold large blocks on cache admission.
+     * With the 8 MiB V8 band in fm_large_free this targets the external
+     * ArrayBuffer/Buffer churn that leaves node's RSS far above glibc's;
+     * the mapping stays cached, so warm reuse is untouched.  The throughput
+     * profile still disables it, and FM_LCACHE_COLD_PURGE=0 restores the old
+     * behaviour. */
+    c.lcache_cold_purge = 1;
     c.lazy_bump = 1;
     c.locality_sort = 0;
 
@@ -2210,7 +2216,14 @@ static inline void fm_large_free(FM_Span *sp, void *p)
             fm_lcache_bytes + ms <= fm_lcache_budget(b) &&
             fm_ltick - fm_lbucket_seen[b] <=
                 ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : FM_LCACHE_HOT_WINDOW)) {
+            /* V8 external/Buffer churn cycles 8-16 MiB backing stores that
+             * the 16 MiB default leaves resident.  Purge cold blocks from
+             * 8 MiB upward (bucket b covers [2^b, 2^(b+1)), so b >= 23 means
+             * >= 8 MiB); smaller buckets keep their payload so medium
+             * jq/g++/Python buffers stay fast on reuse.  Only cold buckets
+             * are advised -- a demonstrated reuse still keeps its pages. */
             if (FM_CFG()->lcache_cold_purge &&
+                b >= 23 &&
                 !(fm_lcache_warm_mask & (1ULL << b))) {
                 uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
                 uintptr_t pend = (sp->map_base + sp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);

@@ -251,6 +251,15 @@ static FM_Batch *fm_batch_global_head; /* protected by fm_central_lock */
  * throughput preset's 256 MiB and page purge stays on: this is a bounded
  * reuse boost, not the whole throughput profile. */
 #define FM_LCACHE_WARM_BUDGET_CAP (128ull << 20)
+/* Huge buckets (those covering usable sizes >= 8 MiB, b >= 23) hold the
+ * one-shot merge/compression buffers of sort and xz.  ADR 0081 lets a warm
+ * bucket retain up to 128 MiB, which inflates peak RSS on those apps (sort
+ * is +39% vs glibc).  Cap the effective budget for huge buckets at 32 MiB
+ * even when warm: the reuse win is kept, but a huge bucket can no longer
+ * pin a quarter of a gigabyte of resident pages.  Smaller buckets keep the
+ * configured budget and the full adaptive warm boost. */
+#define FM_LCACHE_HUGE_BUCKET 23u
+#define FM_LCACHE_HUGE_BUDGET_CAP (32ull << 20)
 extern __thread void *fm_lcache_head[FM_LCACHE_BUCKETS]
     __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));
@@ -2190,8 +2199,10 @@ static inline size_t fm_large_usable(const FM_Span *sp)
  * (fm_lcache_warm_mask) may retain twice the configured per-thread budget,
  * capped at 128 MiB; cold buckets keep the configured cap.  Doubling keeps
  * the footprint profile's 8 MiB small, shortlived's 0 off, and leaves the
- * throughput preset's 256 MiB untouched.  Called only on the large-free
- * slow path, after the bucket-range check. */
+ * throughput preset's 256 MiB untouched.  Huge buckets (>= 8 MiB) are then
+ * clamped to FM_LCACHE_HUGE_BUDGET_CAP (32 MiB), so the warm boost cannot
+ * pin the large one-shot buffers that drive sort/xz peak RSS.  Called only
+ * on the large-free slow path, after the bucket-range check. */
 static inline uint64_t fm_lcache_budget(int b)
 {
     uint64_t budget = FM_CFG()->lcache_max_bytes;
@@ -2201,6 +2212,9 @@ static inline uint64_t fm_lcache_budget(int b)
         if (budget > FM_LCACHE_WARM_BUDGET_CAP)
             budget = FM_LCACHE_WARM_BUDGET_CAP;
     }
+    if ((unsigned)b >= FM_LCACHE_HUGE_BUCKET &&
+        budget > FM_LCACHE_HUGE_BUDGET_CAP)
+        budget = FM_LCACHE_HUGE_BUDGET_CAP;
     return budget;
 }
 

@@ -291,6 +291,19 @@ rose 18% and jq, whose string buffers land in the band, lost 21% of its
 time and 8.6% of its RSS.  Lesson: screen allocator-layout changes on the
 paired 11-rep matrix, never on a single local fixture.
 
+## Round 21: medium-block slab free-list (2026-11-25)
+
+| id | branch | result | status |
+|---|---|---|---|
+| S4 | `exp/slab-free` | freed 32-512 KiB slab slices and carved interior pieces go to a per-thread free list instead of `munmap` (cap sweep on node): cap 0 munmap 6888 / 1.04-1.09 s / 401-405 MiB; cap 128 6725 / ~1.05 s / ~405 MiB; cap 512 5399; cap 4096 **4690 / 0.99-1.02 s / 437-463 MiB** | rejected |
+
+The free-list does what it says -- node's 64 KiB munmap storm shrinks -- but
+every retained slice is a resident page range, so the change is the same
+RSS-for-time trade as the large-cache budget: cap 4096 buys ~5% of node's
+time for up to 58 MiB, cap 128 is neutral.  The residual munmaps are
+aligned allocations (V8 asks for `align=128` buffers) and dedicated
+mappings above the slab cutoff, which cannot join the slab list.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

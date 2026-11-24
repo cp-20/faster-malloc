@@ -240,8 +240,8 @@ static FM_Batch *fm_batch_global_head; /* protected by fm_central_lock */
 /* Byte budget for the per-thread large-block cache.  ADR 0019 found the old
  * 4 GiB budget was the main driver of peak-RSS excess and settled on
  * 64 MiB; ADR 0083 measured Node's JSON/Buffer churn, which frees multi-MiB
- * buffers and never reuses them, at 527 MiB with 64 MiB against glibc's
- * 448, and 468 with 16 MiB at no time cost on the real-app matrix. */
+ * buffers and never reuses them, at 515 MiB with 64 MiB against glibc's
+ * 438, and 460 with 16 MiB at no time cost on the real-app matrix. */
 #define FM_LCACHE_MAX_BYTES (16ull << 20)
 /* Adaptive budget (large-cache slow path only): a bucket already proven to
  * reuse cached blocks (fm_lcache_warm_mask, set on a cache hit) may retain

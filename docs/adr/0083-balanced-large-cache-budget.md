@@ -7,8 +7,8 @@ Accepted 2026-11-25.
 ADR 0019 lowered the per-thread large-block cache from 4 GiB to 64 MiB and
 ADR 0081 lets a bucket that has served a hit keep up to 128 MiB.  The
 11-rep legacy matrix on main shows that the remaining RSS gaps are
-dominated by Node: 527 MiB against glibc's 448 MiB (+17.5%), the largest
-absolute gap in the set (+83 MiB).
+dominated by Node: 515 MiB against glibc's 438 MiB (+17.5%), the largest
+absolute gap in the set (+77 MiB).
 
 RSS wave 1 concluded that the large-cache byte cap was not a lever, but
 that work measured jq, sort, g++, Python and xz -- applications whose
@@ -27,10 +27,11 @@ parentheses) is monotone:
 
 | budget | node | python | gcc | redis |
 |---|---:|---:|---:|---:|
-| 64 MiB (main) | 527 | 458 | 373 | 6.4 |
-| 32 MiB | 476 | 453 | 374 | 6.5 |
-| 16 MiB | 468 | 457 | 374 | 6.3 |
-| 8 MiB | 463 | 448 | 372 | 6.4 |
+| 64 MiB (main) | 515 | 447 | 365 | 6.2 |
+| 32 MiB | 470 | 443 | 366 | 6.3 |
+| 16 MiB | 460 | 447 | 365 | 6.2 |
+| 8 MiB | 455 | 438 | 363 | 6.3 |
+| glibc | 438 | 430 | 342 | 5.3 |
 
 ## Decision
 

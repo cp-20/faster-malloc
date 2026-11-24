@@ -60,6 +60,7 @@
 
 #define _GNU_SOURCE
 #include <errno.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -2200,9 +2201,108 @@ static inline uint64_t fm_lcache_budget(int b)
     return budget;
 }
 
+/* N7 -- memory-pressure trim.
+ *
+ * The large-cache byte cap is a *retention* policy: it bounds how much a
+ * thread keeps, but it never reacts to the process actually running out of
+ * memory.  On short/large-burst workloads (sort, xz, jq) the cached payload
+ * pages are still resident at the moment the app sets its peak RSS, so a
+ * cap that is generous enough for speed is also generous enough to inflate
+ * the peak.
+ *
+ * Sample the process RSS from /proc/self/statm on the large-free slow path,
+ * but only every FM_RSS_TRIM_SAMPLE_EVERY frees so the three syscalls are
+ * amortised.  Keep a process-wide high-water mark (peak RSS observed so far).
+ * The first sample only seeds the mark.  Once RSS grows past the mark by
+ * FM_RSS_TRIM_HEADROOM we have positive evidence that the process is climbing
+ * to a new peak; raise the mark and drop the resident payload pages of cold
+ * cached large blocks.  MADV_DONTNEED keeps the mapping, so this is a genuine
+ * trim (not a cache eviction) and a later reuse only faults pages back in.
+ * Warm buckets are left alone, so a reuse-driven workload keeps its speed.
+ * The mark is monotonic with head-room hysteresis, so a settled process is
+ * trimmed at most once per FM_RSS_TRIM_HEADROOM of real growth.
+ *
+ * All of this lives on the large-free slow path and touches only free cached
+ * blocks: no hot path, no ABI change, no allocator semantics change. */
+#define FM_RSS_TRIM_SAMPLE_EVERY 64u
+#define FM_RSS_TRIM_HEADROOM (16ull << 20)
+#define FM_RSS_TRIM_FLOOR (8ull << 20)
+
+static __thread uint32_t fm_rss_sample_ctr;
+static _Atomic uint64_t fm_rss_peak;
+
+/* Current RSS in bytes from /proc/self/statm field 2 (resident pages), or 0
+ * if the file cannot be read (e.g. a sandbox without procfs). */
+static inline uint64_t fm_read_rss_bytes(void)
+{
+    int fd = open("/proc/self/statm", O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return 0;
+    char buf[128];
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n <= 0)
+        return 0;
+    buf[n] = '\0';
+    const char *s = buf;
+    char *end;
+    (void)strtoul(s, &end, 10);   /* field 1: total program size */
+    if (end == s)
+        return 0;
+    s = end;
+    unsigned long resident = strtoul(s, &end, 10); /* field 2: RSS pages */
+    if (end == s)
+        return 0;
+    return (uint64_t)resident * (uint64_t)FM_PAGE_SIZE;
+}
+
+/* MADV_DONTNEED the payload pages of cold cached large blocks.  The mapping
+ * and header stay, so reuse is still cheap; only resident pages are shed. */
+static inline void fm_lcache_cold_trim(void)
+{
+    for (int b = 0; b < FM_LCACHE_BUCKETS; b++) {
+        if (fm_lcache_warm_mask & (1ULL << b))
+            continue;
+        for (FM_Span *sp = (FM_Span *)fm_lcache_head[b]; sp;
+             sp = (FM_Span *)sp->lnext) {
+            uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
+            uintptr_t pend = (sp->map_base + sp->map_size) &
+                             ~(uintptr_t)(FM_PAGE_SIZE - 1);
+            if (pend > pstart)
+                (void)madvise((void *)pstart, pend - pstart, MADV_DONTNEED);
+        }
+    }
+}
+
+static inline void fm_maybe_pressure_trim(void)
+{
+    if (++fm_rss_sample_ctr < FM_RSS_TRIM_SAMPLE_EVERY)
+        return;
+    fm_rss_sample_ctr = 0;
+
+    uint64_t rss = fm_read_rss_bytes();
+    if (rss < FM_RSS_TRIM_FLOOR)
+        return;
+
+    uint64_t peak = atomic_load_explicit(&fm_rss_peak, memory_order_relaxed);
+    if (peak == 0) {
+        uint64_t expected = 0;
+        (void)atomic_compare_exchange_strong_explicit(
+            &fm_rss_peak, &expected, rss,
+            memory_order_relaxed, memory_order_relaxed);
+        return;
+    }
+    if (rss <= peak + FM_RSS_TRIM_HEADROOM)
+        return;
+
+    atomic_store_explicit(&fm_rss_peak, rss, memory_order_relaxed);
+    fm_lcache_cold_trim();
+}
+
 static inline void fm_large_free(FM_Span *sp, void *p)
 {
     fm_ltick++;
+    fm_maybe_pressure_trim();
     if (sp->align == 0 && (uintptr_t)p == (uintptr_t)sp + HEADER_SIZE) {
         size_t ms = sp->map_size;
         int b = 63 - __builtin_clzll(fm_large_usable(sp));

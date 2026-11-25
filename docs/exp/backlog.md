@@ -507,6 +507,26 @@ Buying the 1.5 MiB costs 11% of sqlite's time, and sqlite currently ties
 glibc on time; the default stays at 256 KiB and the knob is the option
 for memory-first deployments.  git/lua/node are neutral at every value.
 
+## Round 34: page heap for the 257-1023 B band only (2026-11-25)
+
+The earlier page-heap screen (Round 20) put the 257-2032 B band on a
+byte-granular page heap and the micro geomean rose 1.18, because the
+instruction-count set contains `churn 1024`.  Restricting the band to
+**257-1023 B** leaves every micro case on the class path (churn 8/64/1024,
+churnmix/mixed 16-256, retain 64, cross 96) and still covers the sizes
+where the git/lua/sqlite gap lives.
+
+| case | main | 257-1023 page heap |
+|---|---:|---:|
+| git rev-list | 23.9-24.0 MB / 0.03-0.04 s | **22.6-22.7 / 0.03-0.05** |
+| sqlite speedtest1 | 11.5-11.6 MB / 2.20 s | **10.4-10.5 / 2.19** |
+| lua churn | 16.0-16.5 MB / 0.36 s | **14.9-15.4 / 0.34-0.37** |
+
+`test_basic`, `stress`, `rtest`, `valgrind` (all with the page heap on)
+and the JIT library's `test_basic` pass.  The 11-rep matrices are running;
+the only open question is whether the one extra range compare per
+allocation moves the micro geomean.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

@@ -13,6 +13,8 @@
 #include "fm_core.h"
 #ifdef FM_DIAG_SIZES
 #include <fcntl.h>
+_Atomic uint64_t fm_diag_ins[FM_LCACHE_BUCKETS];
+_Atomic uint64_t fm_diag_hit[FM_LCACHE_BUCKETS];
 static void fm_diag_dump(void)
 {
     char buf[128];
@@ -28,6 +30,14 @@ static void fm_diag_dump(void)
         if (i < FM_DIAG_SMALL) sz = kClassSize[i];
         else sz = (size_t)1 << (i - FM_DIAG_SMALL);
         n = snprintf(buf, sizeof buf, "DIAGSIZE %zu %llu\n", sz, (unsigned long long)c);
+        if (n > 0) { ssize_t w = write(fd, buf, (size_t)n); (void)w; }
+    }
+    for (size_t b = 0; b < FM_LCACHE_BUCKETS; b++) {
+        uint64_t i = atomic_load_explicit(&fm_diag_ins[b], memory_order_relaxed);
+        uint64_t h = atomic_load_explicit(&fm_diag_hit[b], memory_order_relaxed);
+        if (!i && !h) continue;
+        n = snprintf(buf, sizeof buf, "DIAGBUCKET %zu ins=%llu hit=%llu\n",
+                     (size_t)1 << b, (unsigned long long)i, (unsigned long long)h);
         if (n > 0) { ssize_t w = write(fd, buf, (size_t)n); (void)w; }
     }
     close(fd);

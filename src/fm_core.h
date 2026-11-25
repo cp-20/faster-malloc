@@ -254,6 +254,10 @@ static FM_Batch *fm_batch_global_head; /* protected by fm_central_lock */
 extern __thread void *fm_lcache_head[FM_LCACHE_BUCKETS]
     __attribute__((tls_model("initial-exec")));
 extern __thread uint64_t fm_lcache_bytes __attribute__((tls_model("initial-exec")));
+#ifdef FM_DIAG_SIZES
+extern _Atomic uint64_t fm_diag_ins[FM_LCACHE_BUCKETS];
+extern _Atomic uint64_t fm_diag_hit[FM_LCACHE_BUCKETS];
+#endif
 /* Selective retention: a bucket that has served a hit keeps up to 4 MiB;
  * a cold bucket keeps at most one small block.  A free-and-forget arena
  * (CPython's 1 MiB obmalloc arenas) is cold by construction, so it is
@@ -2326,6 +2330,9 @@ __attribute__((noinline)) static void *fm_large_alloc_search(size_t size, int *z
             if (fm_large_usable(sp) >= need_map) {
                 if (b < 64)
                     fm_lcache_warm_mask |= (1ULL << b);
+#ifdef FM_DIAG_SIZES
+                atomic_fetch_add_explicit(&fm_diag_hit[b], 1, memory_order_relaxed);
+#endif
                 *link = (FM_Span *)sp->lnext;
                 fm_lcache_bytes -= sp->map_size;
                 fm_lbucket_bytes[b] -= (uint32_t)sp->map_size;

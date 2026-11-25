@@ -663,6 +663,7 @@ static struct {
     unsigned remaining;
     unsigned warmup;
     uint32_t opened_ms;
+    unsigned char first_done; /* N43: one-shot exact first span served */
 } fm_dense_extent;
 
 static char *fm_map_dense_span(void)
@@ -670,6 +671,20 @@ static char *fm_map_dense_span(void)
     enum { extent_size = 2 * 1024 * 1024, map_len = 2 * extent_size - FM_PAGE_SIZE };
     enum { burst_ms = 100 };
     fm_stack_exclusive();
+#ifdef FM_SMALL_FIRST_SPAN
+    /* N43: the process's very first small span (necessarily requested while
+     * it is still single-threaded in practice) does not justify a 2 MiB
+     * extent; give it an exact 64 KiB mapping and open the extent from the
+     * second span on.  On failure fall through to the dense path. */
+    if (!fm_dense_extent.first_done) {
+        fm_dense_extent.first_done = 1;
+        char *first = fm_map_aligned(SPAN_SIZE - HEADER_SIZE);
+        if (first) {
+            fm_stack_resume();
+            return first;
+        }
+    }
+#endif
     if (!fm_dense_extent.remaining) {
         char *raw = mmap(NULL, map_len, PROT_READ | PROT_WRITE,
                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -745,21 +760,40 @@ static char *fm_map_large_slab(size_t bytes, uintptr_t *raw_out, size_t *len_out
     return aligned;
 }
 
+#ifdef FM_SMALL_FIRST_SPAN
+/* 0: no span yet, 1: first span in service, 2: a later span was opened.
+ * Footprint policy only: a relaxed race merely changes a carve size. */
+static _Atomic unsigned char fm_first_span[CLASS_COUNT];
+#endif
+
+/* ADR 0060 startup budget applied to carving instead of geometry (N2/N71).
+ * N2 and N59 capped only the first carve and linked the rest on refill two.
+ * The first span of a class owns its whole 64 KiB slot, but every refill
+ * from it links at most 16 KiB worth of blocks: linking is what faults
+ * pages in, so a class that stops early never touches the slot's tail, and
+ * no second slot is opened until the first is exhausted. */
+static inline uint32_t fm_carve_limit(uint32_t cls, uint32_t limit)
+{
+#ifdef FM_SMALL_FIRST_SPAN
+    if (atomic_load_explicit(&fm_first_span[cls], memory_order_relaxed) == 1) {
+        uint32_t cap = 16320u / kClassSize[cls];
+        if (!cap)
+            cap = 1;
+        return limit < cap ? limit : cap;
+    }
+#else
+    (void)cls;
+#endif
+    return limit;
+}
+
 /* Map and initialise a fresh span for class cls.  Blocks are carved
  * lazily from the span's bump range by the refill path, so creation
  * does not touch every block's memory. */
 static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
 {
     size_t bs = kClassSize[cls];
-    size_t bytes = SPAN_SIZE;
-#ifdef FM_SMALL_FIRST_SPAN
-    /* ADR 0060: sparsely used startup classes cap initial carved blocks
-     * while still drawing 64 KiB VA slots from the shared dense extent. */
-    static _Atomic unsigned char started[CLASS_COUNT];
-    bytes = atomic_exchange_explicit(&started[cls], 1, memory_order_relaxed)
-        ? SPAN_SIZE : FM_ALIGN_UP(HEADER_SIZE + (bs > 16320 ? bs : 16320), FM_PAGE_SIZE);
-#endif
-    size_t n = (bytes - HEADER_SIZE) / bs;
+    size_t n = (SPAN_SIZE - HEADER_SIZE) / bs;
     uintptr_t raw_base = 0;
     size_t raw_len = SPAN_SIZE;
     char *base;
@@ -790,6 +824,11 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
     sp->purged_mask = 0;
     sp->withheld_cnt = 0;
 
+#ifdef FM_SMALL_FIRST_SPAN
+    atomic_store_explicit(&fm_first_span[cls],
+        atomic_load_explicit(&fm_first_span[cls], memory_order_relaxed) ? 2 : 1,
+        memory_order_relaxed);
+#endif
     *count_out = (uint32_t)n;
     return base;
 }
@@ -964,7 +1003,8 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
         cur = base + HEADER_SIZE;
         end = cur + (size_t)total * bs;
         uint32_t avail0 = (uint32_t)((end - cur) / bs);
-        uint32_t keep0 = limit < avail0 ? limit : avail0;
+        uint32_t carve0 = fm_carve_limit(cls, limit);
+        uint32_t keep0 = carve0 < avail0 ? carve0 : avail0;
 
         void *head = cur;
         void *t = cur;
@@ -983,7 +1023,7 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
         fm_tls.cnt[cls] = (int32_t)limit;
 
         char *rest_cur = cur + (size_t)keep0 * bs;
-        if (FM_CFG()->lazy_bump) {
+        if (FM_CFG()->lazy_bump || carve0 < limit) {
             /* Defer touching/linking the remainder of the span until needed
              * so L1D is not polluted by unused blocks. */
             fm_bump_ptr[cls] = rest_cur;
@@ -1013,7 +1053,8 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
         return head;
     }
     uint32_t avail = (uint32_t)((end - cur) / bs);
-    uint32_t keep = limit < avail ? limit : avail;
+    uint32_t carve = fm_carve_limit(cls, limit);
+    uint32_t keep = carve < avail ? carve : avail;
 
     void *head = cur;
     void *t = cur;

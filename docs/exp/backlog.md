@@ -560,6 +560,32 @@ allocations, span path) and the warm 64/128 KiB buckets -- are already at
 their measured Pareto point.  Any further RSS cut there is the same
 1 MiB-for-time trade the campaign has now measured four ways.
 
+## Round 38: the 32 KiB class pays one extra page per block (2026-11-25)
+
+The Round 36 shapes show gcc's dominant request is 32 KiB (22,357
+allocations).  For `bs = 32768` the ladder gives
+
+    nblocks = (SPAN_SIZE - HEADER) / bs = (65536 - 64) / 32768 = 1
+
+so every block lives alone in a 64 KiB span, at offset 64, and a 32768-byte
+payload touches pages 0..8: **9 pages = 36,864 bytes for 32,768 bytes of
+data, +12.5%**.  glibc puts an 8-byte chunk header inside the same page,
+so it pays ~0.
+
+The extra page is structural: any in-band metadata shifts the payload off
+a page boundary, and moving the block to offset 0 with the header after it
+still touches the header's page.  Only out-of-band metadata (a span/page
+map) removes it, and that adds a lookup to `fm_free`.  The campaign has
+measured that cost twice: a two-compare range check on the free path costs
+~7 instructions of the 44-instruction malloc/free pair, and the
+instruction-count micro moved to 1.12-1.16 (Round 34).  A page-map load is
+in the same class.
+
+For gcc, if ~3,000 32 KiB blocks are live at the peak, the spill alone is
+about 12 MiB of its 16 MiB gap -- the largest single explanation found for
+any app.  It cannot be removed without the micro-fatal lookup, so the
+32 KiB class is at its Pareto point too.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

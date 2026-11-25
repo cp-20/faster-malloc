@@ -634,6 +634,20 @@ static inline void fm_publish2(void *head, void *tail, uint32_t cls,
 /* spans                                                               */
 /* ------------------------------------------------------------------ */
 
+/* N22: single-thread server footprint mode.  A libc-built Redis runs its
+ * command loop on one thread.  A second thread reaching the allocator slow
+ * path means a multi-threaded workload, where deeper TLS free lists and a
+ * fuller fresh-span carve amortise cross-thread cache traffic and must stay
+ * as they are.  Each thread arms its exit hook exactly once (fm_arm_thread_exit,
+ * a cold path), so this signal needs no new TLS state and adds no hot-path
+ * instruction.  Both decisions below are cold-path only. */
+static _Atomic unsigned fm_alloc_threads;
+
+static inline int fm_single_thread_server(void)
+{
+    return atomic_load_explicit(&fm_alloc_threads, memory_order_relaxed) <= 1;
+}
+
 /* Map `bytes` usable bytes at a 64 KiB-aligned address, with a 64 byte
  * header in front.  The mapping is trimmed to exactly the pages needed. */
 static inline char *fm_map_aligned(size_t bytes)
@@ -834,6 +848,13 @@ static inline uint32_t fm_local_limit(uint32_t cls)
         if (!limit)
             limit = 1;
     }
+    /* N22: a single-thread server has no cross-thread contention for deep
+     * per-class TLS free lists to amortise.  Halve the block capacity of each
+     * local list: the head/tail/cnt arrays keep their layout, but retain half
+     * as many recycled blocks per class, trimming the resident working set.
+     * Multi-threaded workloads keep the full budget. */
+    if (fm_single_thread_server() && limit > 1)
+        limit >>= 1;
     return limit;
 }
 
@@ -965,6 +986,19 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
         end = cur + (size_t)total * bs;
         uint32_t avail0 = (uint32_t)((end - cur) / bs);
         uint32_t keep0 = limit < avail0 ? limit : avail0;
+        /* N22: on a single-thread server, link only the first 8 KiB worth of
+         * blocks of a fresh span.  Linking writes a next pointer into each
+         * block, faulting its page; the untouched tail pages stay
+         * non-resident.  The blocks remain in this span's bump range and are
+         * linked on later refills, so no extra span is opened and nblocks /
+         * map_size (and therefore the census proof) are unchanged. */
+        if (fm_single_thread_server()) {
+            uint32_t warm = (uint32_t)((8u << 10) / bs);
+            if (warm < 1)
+                warm = 1;
+            if (keep0 > warm)
+                keep0 = warm;
+        }
 
         void *head = cur;
         void *t = cur;
@@ -2608,6 +2642,10 @@ static void fm_arm_thread_exit(void)
     if (fm_exit_armed != 0) return;
     /* Mark armed first: pthread initialization can reenter the allocator. */
     fm_exit_armed = 1;
+    /* N22: one increment per thread, on the same cold path that already
+     * registers its exit hook.  The count drives both single-thread-server
+     * footprint decisions; it is never read on a malloc/free fast path. */
+    atomic_fetch_add_explicit(&fm_alloc_threads, 1, memory_order_relaxed);
     pthread_once(&fm_exit_once, fm_exit_make_key);
     pthread_setspecific(fm_exit_key, (const void *)&fm_exit_key);
 }

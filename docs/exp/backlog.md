@@ -660,3 +660,10 @@ exists; check `git ls-remote origin 'refs/heads/exp/*'`.
 | `exp/auto-n62` (N62) | micro 1.0000, paired 0.9923, worst 1.0000, RSS flat | REJECTED (N1+N24 combination is a no-op) |
 | `exp/auto-n33` (N33) | micro 0.9817, worst 0.9879, paired 0.9965, worst 1.0067 | INCONCLUSIVE (micro near-win, but real gate fails and diff touched fm_jit.c/jit_stubs.S outside allowed scope; follow-up must be confined to fm_core.h/fm_static.c) |
 | `exp/auto-n135` (N135) | run 45540416774 (3 reps): micro 1.0003, worst 1.0017, paired 0.9880, paired worst 1.0040, RSS ~-1 MiB on every app (coarse rounding); diff only src/fm_core.h | INCONCLUSIVE (micro gate fails by 0.0003 while paired passes; paired win is driven by the noisy 17 ms git row; 11-rep rerun dispatched, run 45541015077, tag n135-rerun11) |
+
+## Campaign harvest 2026-11-25 cycle 5 (N135 rerun + N114)
+
+| branch | CI | status |
+|---|---|---|
+| `exp/auto-n135` (N135) | 11-rep rerun run 45541015077: micro 1.0003, worst 1.0017, paired 0.9934, paired worst 1.0186, RSS ~-1 MiB on every app (coarse rounding) | REJECTED (final: at 11 reps both the micro gate (<=1.00) and the paired gate (<=0.99) fail; the 3-rep paired win did not hold; supersedes the cycle-3 INCONCLUSIVE entry) |
+| `exp/auto-n114` (N114) | run 45541747441 (3 reps): micro 1.0008, worst 1.0023, paired 0.9918, paired worst 1.0071, RSS flat on every app | REJECTED (N58+N63+N68 startup-mapping combination is a no-op on the CI matrix; git/sqlite RSS unchanged at 13 MiB) |

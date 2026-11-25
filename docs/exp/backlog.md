@@ -667,3 +667,13 @@ exists; check `git ls-remote origin 'refs/heads/exp/*'`.
 |---|---|---|
 | `exp/auto-n135` (N135) | 11-rep rerun run 45541015077: micro 1.0003, worst 1.0017, paired 0.9934, paired worst 1.0186, RSS ~-1 MiB on every app (coarse rounding) | REJECTED (final: at 11 reps both the micro gate (<=1.00) and the paired gate (<=0.99) fail; the 3-rep paired win did not hold; supersedes the cycle-3 INCONCLUSIVE entry) |
 | `exp/auto-n114` (N114) | run 45541747441 (3 reps): micro 1.0008, worst 1.0023, paired 0.9918, paired worst 1.0071, RSS flat on every app | REJECTED (N58+N63+N68 startup-mapping combination is a no-op on the CI matrix; git/sqlite RSS unchanged at 13 MiB) |
+
+## Campaign harvest 2026-11-25 cycle 6 (N33f/N18/N94/N96/N120)
+
+| branch | CI | status |
+|---|---|---|
+| `exp/auto-n120` (N120) | run 45545423101 (3 reps): micro 0.9626, worst 0.9770, paired 0.9846, paired worst 1.0041, RSS down on every app (jq 258.1->257.5, python 147.8->147.4, sort 35.9->34.5, gxx 204.7->203.1, git 13.5->12.5, sqlite 13.7->12.5 MiB); diff only src/fm_core.h | INCONCLUSIVE (passes all adoption-gate numbers at 3 reps, but Round 14 lesson requires 11-rep confirmation; rerun dispatched run 45552689984, tag n120-rerun11) |
+| `exp/auto-n96` (N96) | run 45542534172 (3 reps): micro 0.9624, worst 0.9768, paired 0.9934, paired worst 1.0085, RSS down on every app (similar profile to N120) | INCONCLUSIVE (micro near-win but paired fails the <=0.99 gate at 3 reps; overlaps N120's mechanisms, so held pending the N120 11-rep rerun) |
+| `exp/auto-n33f` (N33-followup) | run 45542991391 (3 reps): micro 0.9817, worst 0.9879, paired 0.9965, paired worst 1.0075, RSS flat | REJECTED (final: static-only TLS packing confined to fm_core.h/fm_static.c reproduces N33's exact Ir win but the real paired gate still fails; supersedes the cycle-3 INCONCLUSIVE for the N33 family) |
+| `exp/auto-n18` (N18) | run 45542157650 (3 reps): micro 1.0000, paired 1.0082, paired worst 1.0652, RSS up (git 13.6->16.8, sqlite 13.7->16.8 MiB) | REJECTED (128 KiB spans worsen small-process RSS and real time) |
+| `exp/auto-n94` (N94) | run 45542764776 (3 reps): micro 1.0001, paired 0.9961, paired worst 1.0084, RSS up on python/gxx | REJECTED (THP slab gate + 32 MiB huge-bucket cap combination is a no-op on time and worse on RSS) |

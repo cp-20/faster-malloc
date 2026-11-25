@@ -10,6 +10,12 @@
 #include <unistd.h>
 
 #define FM_SMALL_FIRST_SPAN /* ADR 0060; JIT guard rejected in ADR 0061. */
+/* N33: pack each class's head/tail/cnt into one 16-byte TLS cell.  The JIT
+ * build keeps the 8-byte-strided head array its generated dispatcher bakes
+ * in, so the layout switch is per translation unit and the ABI is the same. */
+#if defined(__x86_64__)
+#define FM_TLS_CELLS 1
+#endif
 #include "fm_core.h"
 
 FM_Config fm_cfg;

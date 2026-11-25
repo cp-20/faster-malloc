@@ -85,14 +85,23 @@
 static inline void *fm_malloc(size_t size);
 
 /* Hot thread-local free-list state grouped into one struct with parallel
- * arrays inside it: head sits at offset 0 so %fs:(base,cls,8) has zero
+ * arrays inside it: head sits at offset 0 so %fs:(base,slot,8) has zero
  * displacement in malloc/free, while cnt and tail share the SAME TLS base
- * register in free via constant SIB displacements (%fs:disp(base,cls,4/8))
- * instead of loading three separate GOT/tpoff values. */
+ * register in free via constant SIB displacements (%fs:disp(base,slot,4/8))
+ * instead of loading three separate GOT/tpoff values.
+ *
+ * The arrays are indexed by the low byte of the span's class word.  Real
+ * classes are < CLASS_COUNT (145); LARGE_CLASS (0xffffffff) maps to the
+ * reserved slot 0xff, whose head is always empty.  free() therefore needs
+ * no LARGE_CLASS compare on its hot path: the large case falls out of the
+ * empty-head branch, where the class byte and the head load are folded into
+ * the same dispatch. */
+#define FM_TLS_SLOTS 256u
+#define FM_LARGE_SLOT 0xffu
 typedef struct FM_HotTls {
-    void *head[CLASS_COUNT];
-    int32_t cnt[CLASS_COUNT];
-    void *tail[CLASS_COUNT];
+    void *head[FM_TLS_SLOTS];
+    int32_t cnt[FM_TLS_SLOTS];
+    void *tail[FM_TLS_SLOTS];
 } FM_HotTls;
 
 extern __thread FM_HotTls fm_tls __attribute__((tls_model("initial-exec")));
@@ -2695,7 +2704,11 @@ __attribute__((noinline)) static void fm_free_cnt_slow(uint32_t cls)
     fm_flush_bin(cls);
 }
 
-static inline void fm_tls_push_free(void *p, size_t cls)
+/* `slot` is the low byte of the span's class word, used directly as the
+ * index of all three parallel TLS arrays.  FM_LARGE_SLOT (0xff) is the low
+ * byte of LARGE_CLASS; its head is always empty, so the large-free dispatch
+ * is folded into the empty-head branch below and costs no hot-path branch. */
+static inline void fm_tls_push_free(void *p, size_t slot)
 {
 #if defined(__x86_64__) && !defined(FM_DEBUG) && \
     !defined(__SANITIZE_ADDRESS__) && !defined(__SANITIZE_THREAD__) && \
@@ -2705,37 +2718,48 @@ static inline void fm_tls_push_free(void *p, size_t cls)
     _Bool le;
     __asm__(
         "movq fm_tls@GOTTPOFF(%%rip), %[off]\n\t"
-        "movq %%fs:(%[off],%[cls],8), %[old]\n\t"
+        "movq %%fs:(%[off],%[slot],8), %[old]\n\t"
         "movq %[old], (%[p])\n\t"
-        "movq %[p], %%fs:(%[off],%[cls],8)"
+        "movq %[p], %%fs:(%[off],%[slot],8)"
         : [off] "=&r"(tp_off), [old] "=&r"(old_h)
-        : [cls] "r"(cls), [p] "r"(p)
+        : [slot] "r"(slot), [p] "r"(p)
         : "memory");
     if (__builtin_expect(!old_h, 0)) {
-        __asm__("movq %[p], %%fs:%c[toff](%[off],%[cls],8)"
+        if (__builtin_expect(slot == FM_LARGE_SLOT, 0)) {
+            /* Undo the speculative push into the reserved empty slot and
+             * take the large/munmap path; never touch cnt or tail there. */
+            fm_tls.head[slot] = NULL;
+            fm_free_slow_large((FM_Span *)((uintptr_t)p & SPAN_MASK), p);
+            return;
+        }
+        __asm__("movq %[p], %%fs:%c[toff](%[off],%[slot],8)"
                 :
-                : [off] "r"(tp_off), [cls] "r"(cls), [p] "r"(p),
+                : [off] "r"(tp_off), [slot] "r"(slot), [p] "r"(p),
                   [toff] "i"(offsetof(FM_HotTls, tail))
                 : "memory");
     }
-    __asm__("subl $1, %%fs:%c[coff](%[off],%[cls],4)"
+    __asm__("subl $1, %%fs:%c[coff](%[off],%[slot],4)"
             : "=@ccle"(le)
-            : [off] "r"(tp_off), [cls] "r"(cls),
+            : [off] "r"(tp_off), [slot] "r"(slot),
               [coff] "i"(offsetof(FM_HotTls, cnt))
             : "memory", "cc");
     if (__builtin_expect(le, 0))
-        fm_free_cnt_slow((uint32_t)cls);
+        fm_free_cnt_slow(slot);
 #else
-    void *old_h = fm_tls.head[cls];
+    if (__builtin_expect(slot == FM_LARGE_SLOT, 0)) {
+        fm_free_slow_large((FM_Span *)((uintptr_t)p & SPAN_MASK), p);
+        return;
+    }
+    void *old_h = fm_tls.head[slot];
     *(void **)p = old_h;
 #ifdef FM_DEBUG
     ((uint64_t *)p)[1] = 0xDEADDEADDEADDEADull;
 #endif
-    fm_tls.head[cls] = p;
+    fm_tls.head[slot] = p;
     if (__builtin_expect(!old_h, 0))
-        fm_tls.tail[cls] = p;
-    if (__builtin_expect(--fm_tls.cnt[cls] <= 0, 0))
-        fm_free_cnt_slow((uint32_t)cls);
+        fm_tls.tail[slot] = p;
+    if (__builtin_expect(--fm_tls.cnt[slot] <= 0, 0))
+        fm_free_cnt_slow(slot);
 #endif
 }
 
@@ -2761,16 +2785,24 @@ static inline void fm_free(void *p)
 #else
     sp = (FM_Span *)((uintptr_t)p & SPAN_MASK);
 #endif
-    uint32_t cls32 = sp->cls;
-    if (__builtin_expect(cls32 == LARGE_CLASS, 0)) {
-        fm_free_slow_large(sp, p);
-        return;
-    }
-    size_t cls = cls32;
+    /* The low byte of the span's class word is the TLS head-array slot:
+     * small classes occupy 0..CLASS_COUNT-1, LARGE_CLASS's low byte is
+     * FM_LARGE_SLOT (head kept empty), so no LARGE_CLASS test is needed on
+     * the hot path.  The byte load zero-extends into the 64-bit index
+     * register the TLS asm needs, making this the only class instruction. */
+    size_t slot = *(const uint8_t *)sp;
 #ifdef FM_DEBUG
     {
         /* The block must lie inside its span, at a block boundary of its
-         * class.  If this ever fails the class mapping is inconsistent. */
+         * class.  If this ever fails the class mapping is inconsistent.
+         * Debug builds keep the explicit large test: the checks below need
+         * a real class to index kClassSize. */
+        uint32_t cls32 = sp->cls;
+        if (cls32 == LARGE_CLASS) {
+            fm_free_slow_large(sp, p);
+            return;
+        }
+        size_t cls = cls32;
         uintptr_t base = (uintptr_t)sp;
         uintptr_t off = (uintptr_t)p - (base + HEADER_SIZE);
         if (off % kClassSize[cls] != 0 || off / kClassSize[cls] >= sp->nblocks) {
@@ -2783,7 +2815,7 @@ static inline void fm_free(void *p)
         }
     }
 #endif
-    fm_tls_push_free(p, cls);
+    fm_tls_push_free(p, slot);
 }
 
 __attribute__((noinline, cold)) static void *fm_calloc_overflow(void)

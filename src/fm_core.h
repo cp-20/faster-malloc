@@ -2249,6 +2249,16 @@ static inline void fm_large_free(FM_Span *sp, void *p)
             int take = warm ? (fm_lbucket_bytes[b] + ms <= cap)
                             : (fm_lbucket_bytes[b] == 0 && ms <= cap);
             if (take) {
+                /* A cold bucket's single block is a guess; keep the mapping
+                 * (so a later reuse skips mmap) but return its pages now.
+                 * Page 0 holds the header and stays resident. */
+                if (!warm) {
+                    uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
+                    uintptr_t pend = (sp->map_base + sp->map_size) &
+                                     ~(uintptr_t)(FM_PAGE_SIZE - 1);
+                    if (pend > pstart)
+                        (void)madvise((void *)pstart, pend - pstart, MADV_DONTNEED);
+                }
                 sp->lnext = (uintptr_t)fm_lcache_head[b];
                 fm_lcache_head[b] = sp;
                 fm_lcache_bytes += ms;

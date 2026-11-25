@@ -2613,6 +2613,28 @@ static void fm_arm_thread_exit(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* process-exit release (N41)                                          */
+/* ------------------------------------------------------------------ */
+
+/* CPython drops its whole object graph in Py_FinalizeEx and only then
+ * reaches the C exit chain (Py_Exit -> exit), so a libc atexit handler is
+ * the first quiet point where the freed spans are visible.  Run the same
+ * census malloc_trim uses, with keep == 0: every span whose blocks are all
+ * back in the central lists is unmapped.  Registering from a constructor
+ * puts this handler at the bottom of the atexit stack -- it runs *after*
+ * application finalizers that may still allocate or free.  Nothing on the
+ * hot path changes: the census is a one-shot teardown cost. */
+static void fm_process_exit_release(void)
+{
+    (void)fm_trim_spans();
+}
+
+__attribute__((constructor)) static void fm_register_exit_release(void)
+{
+    (void)atexit(fm_process_exit_release);
+}
+
+/* ------------------------------------------------------------------ */
 /* exported entry points                                               */
 /* ------------------------------------------------------------------ */
 

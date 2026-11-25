@@ -373,6 +373,7 @@ typedef struct FM_Config {
     uint32_t lcache_cold_purge;
     uint32_t lazy_bump;
     uint32_t locality_sort;
+    uint32_t dense_thp_warmup; /* extents before MADV_HUGEPAGE; 0 = never */
 } FM_Config;
 
 extern FM_Config fm_cfg;
@@ -405,6 +406,7 @@ static void fm_config_init(void)
     c.lcache_cold_purge = 1;
     c.lazy_bump = 1;
     c.locality_sort = 0;
+    c.dense_thp_warmup = 4;
 
     const char *prof = getenv("FM_PROFILE");
     if (prof) {
@@ -461,6 +463,7 @@ static void fm_config_init(void)
         { "FM_LCACHE_BUCKET_COLD", &c.lbucket_cold, 0, 4u << 20 },
         { "FM_LAZY_BUMP", &c.lazy_bump, 0, 1 },
         { "FM_LOCALITY_SORT", &c.locality_sort, 0, 1 },
+        { "FM_DENSE_THP_WARMUP", &c.dense_thp_warmup, 0, 4096 },
     };
     for (size_t i = 0; i < sizeof(num) / sizeof(num[0]); i++) {
         const char *v = getenv(num[i].name);
@@ -665,7 +668,7 @@ static struct {
 static char *fm_map_dense_span(void)
 {
     enum { extent_size = 2 * 1024 * 1024, map_len = 2 * extent_size - FM_PAGE_SIZE };
-    enum { burst_ms = 100, warmup_extents = 4 };
+    enum { burst_ms = 100 };
     fm_stack_exclusive();
     if (!fm_dense_extent.remaining) {
         char *raw = mmap(NULL, map_len, PROT_READ | PROT_WRITE,
@@ -684,9 +687,11 @@ static char *fm_map_dense_span(void)
         /* A rapidly consumed extent predicts dense demand for the next.
          * Sparse/startup heaps get demand-paged base pages. */
         uint32_t now = fm_now_ms();
-        if (fm_dense_extent.warmup < warmup_extents)
+        uint32_t warmup = FM_CFG()->dense_thp_warmup;
+        if (fm_dense_extent.warmup < warmup)
             fm_dense_extent.warmup++;
-        else if (now - fm_dense_extent.opened_ms < burst_ms && fm_dense_extent.cursor)
+        else if (warmup && now - fm_dense_extent.opened_ms < burst_ms &&
+                 fm_dense_extent.cursor)
             (void)madvise(base, extent_size, MADV_HUGEPAGE);
         fm_dense_extent.opened_ms = now;
         fm_dense_extent.cursor = base;

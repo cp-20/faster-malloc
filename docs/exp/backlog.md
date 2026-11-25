@@ -507,6 +507,15 @@ Buying the 1.5 MiB costs 11% of sqlite's time, and sqlite currently ties
 glibc on time; the default stays at 256 KiB and the knob is the option
 for memory-first deployments.  git/lua/node are neutral at every value.
 
+## Round 33: dense THP warmup as a knob (2026-11-25)
+
+| id | branch | result | status |
+|---|---|---|---|
+| T4 | `exp/thp-knob` | `FM_DENSE_THP_WARMUP` (extents before `MADV_HUGEPAGE`, default 4, 0 disables): git 23.9 -> 22.0 MiB and lua 16.4 -> 14.4 at 0, jq 268.8 -> 257.1 MiB but +7.9% time at 0; 8 also disables it for jq because its dense demand is 8-16 MiB, overlapping git/lua's | **knob accepted** (default unchanged) |
+
+The hint cannot be made size-selective: jq's dense-extent demand sits
+between git's and lua's, so any threshold that drops git/lua drops jq too.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

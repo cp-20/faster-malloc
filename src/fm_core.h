@@ -84,6 +84,16 @@
 
 static inline void *fm_malloc(size_t size);
 
+#ifdef FM_DEBUG
+/* Free blocks carry a canary in their second word; class 0 blocks are a
+ * single word (the list link) and have no room for one. */
+static inline void fm_canary_set(void *p, size_t bs)
+{
+    if (bs >= 16)
+        ((uint64_t *)p)[1] = 0xDEADDEADDEADDEADull;
+}
+#endif
+
 /* Hot thread-local free-list state grouped into one struct with parallel
  * arrays inside it: head sits at offset 0 so %fs:(base,cls,8) has zero
  * displacement in malloc/free, while cnt and tail share the SAME TLS base
@@ -976,7 +986,7 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
         *(void **)t = NULL;
 #ifdef FM_DEBUG
         for (uint32_t i = 0; i < keep0; i++)
-            ((uint64_t *)(cur + (size_t)i * bs))[1] = 0xDEADDEADDEADDEADull;
+            fm_canary_set(cur + (size_t)i * bs, bs);
 #endif
         fm_tls.head[cls] = *(void **)head;
         fm_tls.tail[cls] = t;
@@ -1002,7 +1012,7 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
                 *(void **)rt = NULL;
 #ifdef FM_DEBUG
                 for (uint32_t i = 0; i < rcount; i++)
-                    ((uint64_t *)(rest_cur + (size_t)i * bs))[1] = 0xDEADDEADDEADDEADull;
+                    fm_canary_set(rest_cur + (size_t)i * bs, bs);
 #endif
                 fm_publish2(rhead, rt, cls, rcount, 1);
             }
@@ -1025,7 +1035,7 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
     *(void **)t = NULL;
 #ifdef FM_DEBUG
     for (uint32_t i = 0; i < keep; i++)
-        ((uint64_t *)(cur + (size_t)i * bs))[1] = 0xDEADDEADDEADDEADull;
+        fm_canary_set(cur + (size_t)i * bs, bs);
 #endif
     fm_bump_ptr[cls] = cur + (size_t)keep * bs;
 
@@ -1684,7 +1694,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
                 continue;
             void *blk = (void *)(e->span + HEADER_SIZE + (size_t)idx * bs);
 #ifdef FM_DEBUG
-            ((uint64_t *)blk)[1] = 0xDEADDEADDEADDEADull;
+            fm_canary_set(blk, bs);
 #endif
             if (e->atail)
                 *(void **)e->atail = blk;
@@ -2158,10 +2168,21 @@ static inline size_t fm_trim_spans(void)
 /* class dispatch                                                      */
 /* ------------------------------------------------------------------ */
 
+/* TINY_MAX < size <= ARITH_MAX.  Requests of at most TINY_MAX bytes use
+ * class 0, whose blocks are 8 bytes and only 8-byte aligned.  That is the
+ * one 8-byte step the ABI permits: from 16 bytes up, compilers emit aligned
+ * SSE stores into malloc/new results (clang does so for a 24-byte `new`),
+ * so 24/40/.../120-byte blocks would fault. */
+#define FM_ARITH_SIZE(size) \
+    ((size_t)(size) - (TINY_MAX + 1u) <= (size_t)(ARITH_MAX - (TINY_MAX + 1u)))
+
 static inline size_t fm_class_of(size_t size)
 {
-    if (__builtin_expect(size <= ARITH_MAX, 1))
+    /* One range check covers both ends of the 16-byte-granular range. */
+    if (__builtin_expect(FM_ARITH_SIZE(size), 1))
         return (size_t)((size + 15) >> 4);
+    if (size <= TINY_MAX)
+        return 0;
     if (__builtin_expect(size <= SMALL_MAX, 1))
         return kClassBig[(size + 15) >> 4];
     return LARGE_CLASS;
@@ -2458,10 +2479,10 @@ __attribute__((noinline)) static void *fm_large_alloc(size_t size)
 __attribute__((noinline)) static void *fm_aligned_alloc_impl(size_t align, size_t size)
 {
     if (align <= 64 && (align & (align - 1)) == 0 && size <= SMALL_MAX) {
-        if (align <= 16)
+        if (align < 16)
             return fm_malloc(size);
         /* Every small span is 64 KiB-aligned and HEADER_SIZE is 64:
-         * rounding up to 32 or 64 selects a class whose block size is a
+         * rounding up to 16, 32 or 64 selects a class whose block size is a
          * multiple of `align`, so base + 64 + idx * bs is naturally aligned. */
         size_t req = FM_ALIGN_UP(size ? size : 1, align);
         return fm_malloc(req);
@@ -2558,7 +2579,7 @@ static void fm_thread_exit_flush(void)
                 *(void **)rt = NULL;
 #ifdef FM_DEBUG
                 for (uint32_t i = 0; i < rcount; i++)
-                    ((uint64_t *)(cur + (size_t)i * bs))[1] = 0xDEADDEADDEADDEADull;
+                    fm_canary_set(cur + (size_t)i * bs, bs);
 #endif
                 fm_publish2(rhead, rt, c, rcount, 1);
             }
@@ -2635,7 +2656,7 @@ static inline void *fm_malloc(size_t size)
                     abort();
                 }
             }
-            if (((uint64_t *)p)[1] != 0xDEADDEADDEADDEADull) {
+            if (kClassSize[cls] >= 16 && ((uint64_t *)p)[1] != 0xDEADDEADDEADDEADull) {
                 FM_Span *s3 = (FM_Span *)((uintptr_t)p & SPAN_MASK);
                 fprintf(stderr,
                         "[fm] CORRUPT HEAD size=%zu cls=%zu bs=%u span_cls=%u "
@@ -2729,7 +2750,7 @@ static inline void fm_tls_push_free(void *p, size_t cls)
     void *old_h = fm_tls.head[cls];
     *(void **)p = old_h;
 #ifdef FM_DEBUG
-    ((uint64_t *)p)[1] = 0xDEADDEADDEADDEADull;
+    fm_canary_set(p, kClassSize[cls]);
 #endif
     fm_tls.head[cls] = p;
     if (__builtin_expect(!old_h, 0))
@@ -2804,6 +2825,10 @@ __attribute__((noinline)) static void *fm_calloc_slow(size_t total)
     void *p = fm_malloc(total);
     if (__builtin_expect(!p, 0))
         return NULL;
+    if (total <= TINY_MAX) {
+        *(uint64_t *)p = 0;
+        return p;
+    }
     return memset(p, 0, total);
 }
 
@@ -2813,7 +2838,7 @@ static inline void *fm_calloc(size_t n, size_t sz)
     if (__builtin_expect(__builtin_mul_overflow(n, sz, &total), 0))
         return fm_calloc_overflow();
 #ifndef FM_DEBUG
-    if (__builtin_expect(total <= 64, 1)) {
+    if (__builtin_expect(total - (TINY_MAX + 1u) <= 64 - (TINY_MAX + 1u), 1)) {
         size_t cls = (total + 15) >> 4;
         void *p = fm_tls.head[cls];
         if (__builtin_expect(p != NULL, 1)) {
@@ -2969,6 +2994,13 @@ static inline void *fm_realloc(void *p, size_t size)
     return fm_realloc_slow(p, size);
 }
 
+/* C++ promises __STDCPP_DEFAULT_NEW_ALIGNMENT__ (16): operator new serves
+ * 1..8 bytes from the 16-byte class, as its inline fast path does. */
+static inline size_t fm_new_size(size_t size)
+{
+    return size - 1 < TINY_MAX ? 16 : size;
+}
+
 /* C++ operator new OOM slow path: resolves libstdc++/libc++ new_handler and
  * __cxa_throw_bad_alloc lazily via dlsym so libfastmalloc2.so stays pure C
  * with no libstdc++ dependency while preserving C++ exception semantics. */
@@ -2998,7 +3030,8 @@ __attribute__((noinline, cold)) static void *fm_new_oom(size_t size, size_t alig
             return NULL;
         }
         nh();
-        void *p = align ? fm_aligned_alloc_impl(align, size) : fm_malloc(size);
+        void *p = align ? fm_aligned_alloc_impl(align, size)
+                        : fm_malloc(fm_new_size(size));
         if (p)
             return p;
     }
@@ -3006,7 +3039,7 @@ __attribute__((noinline, cold)) static void *fm_new_oom(size_t size, size_t alig
 
 __attribute__((noinline)) static void *fm_new_slow(size_t size, int nothrow)
 {
-    void *p = fm_malloc(size);
+    void *p = fm_malloc(fm_new_size(size));
     if (__builtin_expect(p != NULL, 1))
         return p;
     return fm_new_oom(size, 0, nothrow);
@@ -3100,7 +3133,10 @@ static inline void fm_delete_sized(void *p, size_t size)
     if (__builtin_expect(!p, 0))
         return;
 #ifndef FM_DEBUG
-    if (__builtin_expect(size <= ARITH_MAX, 1)) {
+    /* A program may replace operator new with one that calls malloc but not
+     * the sized delete, so a tiny block's class depends on who allocated it:
+     * let the span header decide. */
+    if (__builtin_expect(FM_ARITH_SIZE(size), 1)) {
         size_t cls = (size + 15) >> 4;
         fm_tls_push_free(p, cls);
         return;

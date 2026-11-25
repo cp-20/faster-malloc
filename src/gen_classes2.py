@@ -6,14 +6,15 @@ Class numbering
 The class index is chosen so that the *common* dispatch needs no
 correction at all:
 
-    class = (size + 15) >> 4        for size <= 1024
+    class = (size + 15) >> 4        for 8 < size <= 1024
 
-Class 0 exists only to serve a request for 0 bytes; class c >= 1 serves the
-sizes (16*(c-1), 16*c].  Above 1024 the ladder coarsens and a byte lookup
-table is used.
+Class 0 serves requests of 0..8 bytes with 8-byte blocks; class 1 serves
+9..16 and class c >= 2 serves (16*(c-1), 16*c].  Above 1024 the ladder
+coarsens and a byte lookup table is used.
 
-The ladder (all sizes are multiples of 16, so every returned pointer is
-16-byte aligned as the C standard requires):
+The ladder (all sizes from class 1 up are multiples of 16, so every pointer
+that can hold a 16-byte-aligned object is 16-byte aligned; a block of at most
+8 bytes cannot hold one, so 8-byte alignment is enough for class 0):
 
     16 .. 1024   step 16    -> 64 classes   (idx  1..64)
     1088 .. 2048 step 64    -> 16 classes   (idx 65..80)
@@ -21,7 +22,7 @@ The ladder (all sizes are multiples of 16, so every returned pointer is
     4352 .. 8192 step 256   -> 16 classes   (idx 97..112)
     8704 .. 16384 step 512  -> 16 classes   (idx 113..128)
     17408 .. 32768 step 1024-> 16 classes   (idx 129..144)
-    = 145 classes in total (index 0 is the size-0 class)
+    = 145 classes in total (index 0 is the 8-byte class)
 """
 import os
 import sys
@@ -30,6 +31,7 @@ SMALL_MAX = 32768
 HEADER = 64
 SPAN = 65536
 ARITH_MAX = 1024
+TINY_MAX = 8
 
 SEGMENTS = [
     (16, 16, 1024),
@@ -42,9 +44,9 @@ SEGMENTS = [
 
 
 def build():
-    """Return the class ladder: index 0 is the size-0 class, index c>=1 has
-    block size 16*c for the first 32 classes and then follows the ladder."""
-    sizes = [16]  # class 0: a request for 0 bytes
+    """Return the class ladder: index 0 is the 8-byte class, index c>=1 has
+    block size 16*c for the first 64 classes and then follows the ladder."""
+    sizes = [TINY_MAX]  # class 0: requests of 0..TINY_MAX bytes
     for step, first, last in SEGMENTS:
         v = first
         while v <= last:
@@ -58,34 +60,31 @@ def main():
     sizes = build()
     n = len(sizes)
     assert n <= 256, n
-    assert all(s % 16 == 0 for s in sizes), "class sizes must be 16B multiples"
+    assert all(s % 16 == 0 for s in sizes[1:]), "class sizes must be 16B multiples"
     assert sizes[-1] == SMALL_MAX, sizes[-1]
 
     def cls_of(sz):
         """Class that serves a request of `sz` bytes."""
-        if sz == 0:
-            return 0
         for i, s in enumerate(sizes):
-            if i == 0:
-                continue
             if s >= sz:
                 return i
         raise AssertionError("no class for %d" % sz)
 
     # The arithmetic range must be exactly 16-byte granular so that
-    # class == (size + 15) >> 4 holds for every size in 1..ARITH_MAX.
+    # class == (size + 15) >> 4 holds for every size in TINY_MAX+1..ARITH_MAX.
     n_arith = 0
     for i, s in enumerate(sizes):
         if i >= 1 and s <= ARITH_MAX:
             n_arith = i
-    for sz in range(1, ARITH_MAX + 1):
+    for sz in range(TINY_MAX + 1, ARITH_MAX + 1):
         assert cls_of(sz) == (sz + 15) >> 4, (sz, cls_of(sz))
 
     # Every class must be able to hold every size that maps to it.  This is
     # the invariant that a mis-indexed table breaks: a block smaller than
     # the request means the caller writes past the end of its allocation.
+    prev = sizes[0]
     for i in range(1, n):
-        lo = 1 if i == 1 else prev + 1
+        lo = prev + 1
         assert sizes[i] >= lo, (i, lo, sizes[i])
         prev = sizes[i]
 
@@ -97,8 +96,8 @@ def main():
     big_n = ((SMALL_MAX + 15) >> 4) + 1
     big = [0] * big_n
     for i in range(big_n):
-        if i == 0:
-            big[0] = 0  # a request for 0 bytes
+        if 16 * i <= ARITH_MAX:
+            big[i] = i  # unreachable: served by the arithmetic dispatch
             continue
         hi = 16 * i
         lo = max(1, hi - 15)
@@ -131,7 +130,8 @@ def main():
     for i, s in enumerate(sizes):
         if i == 0:
             lo[0] = 0
-            hi[0] = 0
+            hi[0] = s
+            prev = s
             continue
         lo[i] = prev + 1
         hi[i] = s
@@ -142,6 +142,7 @@ def main():
         f.write("#pragma once\n#include <stdint.h>\n\n")
         f.write(f"#define SMALL_MAX {SMALL_MAX}\n")
         f.write(f"#define CLASS_COUNT {n}\n")
+        f.write(f"#define TINY_MAX {TINY_MAX}\n")
         f.write(f"#define ARITH_MAX {ARITH_MAX}\n")
         f.write(f"#define ARITH_CLASSES {n_arith}\n")
         f.write(f"#define BIG_TABLE_SIZE {big_n}\n")

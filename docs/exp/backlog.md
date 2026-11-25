@@ -193,6 +193,320 @@ These are deliberately smaller and self-contained so the local
 
 
 
+## Round 16: large-cache budget and span geometry (2026-11-25)
+
+| id | branch | result | status |
+|---|---|---|---|
+| L2 | `exp/lcache16b` | balanced large-cache budget 64 -> 16 MiB (warm cap 32): legacy node RSS 515 -> 460 MiB, python 447 -> 447, gcc 365 -> 365, redis 6.2 -> 6.2; 11-rep exp-bench micro 1.0000, paired 0.9972, worst 1.0000 | **accepted** |
+| L3 | `exp/lcache32b` | same at 32 MiB: node 470 MiB; 11-rep micro 1.0000, paired 1.0013, worst 1.0075 | alternative |
+| L4 | `exp/lcache8b` | same at 8 MiB: node 455 MiB; two 11-rep runs pair sqlite at 1.0168 / 1.0224 while 16 MiB is neutral | rejected (time) |
+| B1 | `exp/first-batch` | first refill takes 1 block, then 4, then the limit: git 8.43 -> 8.36 MiB, no micro change | rejected |
+| T1 | `v7/slab-thp` | adaptive THP on the >4 KiB slab, 2 MiB-aligned extent: 11-rep neutral (micro 1.0000, RSS flat); THP never fires in the real apps | rejected |
+| T2 | `v6/c` | 4 KiB cold spans in 64 KiB slots + always-THP hot chunks: jq tied, git/sqlite 13 -> 16 MiB | rejected |
+| G1 | `v6/slot-hybrid` | 4 KiB spans in 64 KiB slots + 8-refill promotion: micro 0.9996, jq +10%, git 14 MiB | rejected |
+| R1 | `exp/mremap-grow` | in-place `mremap` on large realloc: correct, RSS flat (adjacent VA occupied); `MREMAP_MAYMOVE` moves the block off the 64 KiB span mask | rejected |
+| R2 | `exp/mremap-fixed` | reserve a 64 KiB-aligned destination, then `mremap(MREMAP_FIXED|MAYMOVE)`: RSS `grow` 139.7 -> 132.8 MiB and python JSON 142.0 -> 138.0 MiB, but python is **+15% locally and +2.2% at 11-rep CI**; sort +6.1% | rejected (time) |
+| D1 | div2 screen | `FM_LOCAL_LIMIT_DIV=2`: git/sqlite 13 -> 12 MiB but micro 1.0239 and jq +2.5% | rejected as default |
+
+Two measurements that correct earlier conclusions:
+
+* the large-cache **byte cap is** the dominant RSS lever for Node.  The RSS
+  wave 1 apps (jq, sort, g++, Python, xz) never exercised the multi-MiB
+  free-and-forget band, so the knob looked inert.  Node's legacy row moved
+  527 -> 468 MiB with a 16 MiB budget at zero time cost.
+* v3's 4 KiB-span time losses were an artefact: `size_classes3.h` set
+  `SMALL_MAX` to 3968 while keeping 145 classes, so every 3969..32768 B
+  request fell into the large path.  Live 4-24 KiB allocation measured
+  4.4-4.8 s against v2's 0.04-0.57 s.  Span geometry experiments on that
+  header (v3, v4, v6) are therefore not evidence about 4 KiB spans.
+
+| M1 | measurement | `livepeak` LD_PRELOAD wrapper: peak live bytes through malloc are **11.65 MB (glibc) vs 11.81 MB (v2)** on the legacy git fixture while RSS is 19.6 vs 23.9 MB.  The gap is page fragmentation across size classes, not rounding and not whole-block retention. | evidence |
+| M2 | measurement | Lua churn on the legacy workload (local, 11.6 vs 16.4 MB) decomposes into lcache 1.7 MB, eager release 1.1 MB, div16 0.9 MB, page purge 0.6 MB; only the combination reaches 13.7 MB, so no single knob closes it. | evidence |
+| M3 | `exp/warm64` | warm-bucket cap 64 MiB with a 16 MiB base: node 468 MB at 3 reps, identical to the 32 MiB cap; the cap is not the constraint | rejected |
+| M4 | lcache8 re-run | 8 MiB base at 11 reps incl. xz: micro 1.0000, paired 1.0012, worst 1.0168 (sqlite **+1.7%**, second independent run +2.2%); node RSS 466 vs 471 at 16 MiB.  Time is the hard constraint, so 16 MiB stays. | 8 MiB rejected |
+
+Still open from this round: a phase-reuse test (`mixpack` mode 1) shows v2
+retaining freed spans across a size-phase change (166 MB vs glibc 119 MB)
+until `FM_RELEASE_AGE_MS=0` releases them (118 MB); git does not respond to
+the same knob, so its +4 MiB is not dead spans.  Fragmentation under churn
+is *better* than glibc (709 vs 702 MB at 1M live), and simultaneous
+mixed-size packing is better (224 vs 237 MB), so the git gap is isolated
+to its pack/delta buffers, not the general small-object path.
+
+## Round 17: cross-class span recycling (2026-11-25)
+
+| id | branch | result | status |
+|---|---|---|---|
+| M5 | A/B | same branch (`exp/lcache16b-a`), node only, 11 reps, budget switched by `FM_LCACHE_MAX_BYTES`: 64 MiB = time +4.4% / RSS +10.1% vs glibc; 16 MiB = +7.3% / +6.0%.  The budget trades ~2.9 points of node time for 4.1 points of RSS; node is not green either way. | evidence |
+| P2 | `exp/adaptive-cache` | shrink the large-cache budget to 2 MiB when the observed hit rate is below 1/8 (`fm_lc_hits`/`fm_lc_misses`): legacy node 468164 KB, python 457608, gcc 374360, redis 6416 -- identical to the plain 16 MiB budget, so the branch never fires on these apps | rejected (no effect) |
+| P1 | `exp/span-pool` | a fully free span keeps its 64 KiB mapping (pages `MADV_DONTNEED`-ed) in a per-thread pool and any class re-carves it.  `strace -c` on the Lua workload: munmap 204 -> 9, madvise 54 -> 222, mmap 57 -> 51, syscall time 2.63 -> 1.10 ms.  RSS: git 23.9 -> 23.9, lua 16.2 -> 15.9, sqlite speedtest1 11.5 -> 12.3 MiB; runtime unchanged on all three. | rejected (RSS neutral/worse, time within noise) |
+
+The mechanism works as designed, but the measured residual is **partially
+free** spans, not dead ones: the census page purge is a no-op on
+git/lua/sqlite, and peak live bytes (11.81 vs glibc's 11.65 MiB on git)
+are already within 1.4%.  A true 4 KiB cross-class page list would need a
+page map and still cannot reclaim a page that holds one live block, which
+is why mimalloc (26.9), jemalloc (27.0) and tcmalloc (30.0) all lose to
+glibc's 22.6 MiB on the same git row.
+
+## Round 18: byte-granular shared-page prototype (2026-11-25)
+
+The residual RSS gap is page fragmentation **between size classes**, so a
+size-agnostic page heap was prototyped and measured against the same
+local workloads (lua churn, git rev-list, sqlite speedtest1).
+
+| id | what | result |
+|---|---|---|
+| S1 | trace simulation: ideal byte-granular packing of the recorded lua and git allocation traces (16 B units, 8 B headers, perfect coalescing) | ceiling is **9.04 MB (lua)** and **12.04 MB (git)** against glibc heaps of 9.18 and 11.1 MB: the best possible shared-page design is glibc-level RSS, not lower |
+| S2 | `/tmp/pm.c` prototype: 4 KiB pages, 8-byte chunk headers, size-agnostic free buckets with a non-empty bitmap, forward coalescing, glibc forwarding above 2032 B, tcache only for chunks <= 256 B | passes `test_basic`, `stress`, `rtest`, `valgrind`. **git 20.4 vs glibc 19.6 / v2 23.9 MiB at equal time; sqlite 8.5 vs 8.35 / 11.6 MiB at equal time; lua 11.9 vs 11.4 / 16.2 MiB but 0.72 s vs v2's 0.36 s** |
+| S3 | tcache size sweep on lua | no tcache 11.8 MB / 0.78 s; 8/bucket 15.8 / 0.81; 16/bucket 20.0 / 0.77; 32/bucket 27.6 / 1.03; restricted to chunks <= 256 B 11.9 / 0.72 |
+
+Conclusion: the shared-page design reaches glibc-level RSS on these apps
+and, on git and sqlite, does so at v2-equivalent time.  Lua needs the hot
+path optimised (its string churn hits the page heap 2x harder than v2's
+bins).  The next cycle should integrate S2's small path into v2 behind a
+flag and re-run the 11-rep matrices.
+
+## Round 20: page-heap integration rejected by the 11-rep matrix (2026-11-25)
+
+| id | branch | result | status |
+|---|---|---|---|
+| P3 | `exp/pageheap` | ADR 0086's 257-2032 B page heap, 11 reps: **micro 1.1844 (worst 1.559)**, jq 1.208 / RSS 262 -> 285 MiB, git 1.440, gcc 1.004 / RSS +2.4%, sort RSS +6.3%, sqlite RSS +3.2%.  Legacy 11 reps: **git 29.5 -> 26.7 MiB (-9.6%)** but node 471 -> 525, jq 368 -> 385, lua 16.6 -> 18.2, gcc 374 -> 379, sqlite 13.9 -> 14.0 | rejected (only git wins) |
+
+| P4 | `exp/purged-cache` | keep the VMA of a large block that misses the byte budget, `MADV_DONTNEED` its payload, and reuse it from a per-bucket list: node munmap 6931 -> 3296 (madvise 1263 -> 4771) at cap 1024, node time 1.18 -> 1.15 s but RSS 405 -> 409 MB because each cached block keeps its header page; cap 256 is time- and RSS-neutral. | rejected |
+
+Node's syscall profile (`strace -c -f` on `churn.js`): v2 does **6888
+munmap + 1118 mmap** against glibc's 1632 + 960, for 0.44 s vs 0.22 s of
+syscall time.  The freed sizes are overwhelmingly 64 KiB (4287), 128 KiB
+(1006) and 256 KiB (789), i.e. the medium blocks just above `SMALL_MAX`,
+which v2 carves from a 4 MiB slab and then `munmap`s one slice at a time.
+That is the source of node's time gap and of the lcache budget trade
+measured in Round 16.
+
+The local A/B on `bench/apps/work/real_suite` had shown git 23.9 -> 21.1 MiB
+at equal time and sqlite 11.6 -> 10.9, but both fixtures are much smaller
+in CI (`exp-bench` git is a 13 MiB process) and the page heap's chunk
+operations cost far more instructions than v2's bins: the micro geomean
+rose 18% and jq, whose string buffers land in the band, lost 21% of its
+time and 8.6% of its RSS.  Lesson: screen allocator-layout changes on the
+paired 11-rep matrix, never on a single local fixture.
+
+## Round 21: medium-block slab free-list (2026-11-25)
+
+| id | branch | result | status |
+|---|---|---|---|
+| S4 | `exp/slab-free` | freed 32-512 KiB slab slices and carved interior pieces go to a per-thread free list instead of `munmap` (cap sweep on node): cap 0 munmap 6888 / 1.04-1.09 s / 401-405 MiB; cap 128 6725 / ~1.05 s / ~405 MiB; cap 512 5399; cap 4096 **4690 / 0.99-1.02 s / 437-463 MiB** | rejected |
+
+The free-list does what it says -- node's 64 KiB munmap storm shrinks -- but
+every retained slice is a resident page range, so the change is the same
+RSS-for-time trade as the large-cache budget: cap 4096 buys ~5% of node's
+time for up to 58 MiB, cap 128 is neutral.  The residual munmaps are
+aligned allocations (V8 asks for `align=128` buffers) and dedicated
+mappings above the slab cutoff, which cannot join the slab list.
+
+## Round 22: selective large-cache retention (2026-11-25)
+
+| id | branch | result | status |
+|---|---|---|---|
+| C5 | selective + page purge | on the selective build, `FM_PAGE_PURGE=1 FM_PURGE_MIN_PAGES=1` with a 1 ms census and age 0: lua 14.74 -> 14.76 MB, git 23.88 -> 23.92 MB (and 15.3 with age 1000).  Fully-free pages are still not the residual. | rejected |
+| C4 | `exp/selective3` | warm bucket cap 4 -> 32 MiB (let node's 27 MB JSON payload in): node time +8.3% -> +6.0%, node RSS 454.6 -> 455.2 MiB, gcc RSS 358.2 -> 361.5, python unchanged.  The node time difference is inside run-to-run noise and the gcc cost is real. | rejected |
+| C3 | `exp/selective2` | relax the cold-bucket rule to one block of any size (protect xz's 8 MiB buffers): gcc 351.6 -> 361.8 MB, python 138.2 -> 140.9, xz unchanged at 57.7 MB | rejected |
+| C2 | `exp/selective-cache` | on top of the 16 MiB base (ADR 0083): warm buckets (a hit) may keep 4 MiB, cold buckets one block <= 256 KiB, exact per-bucket byte accounting.  11-rep legacy vs the 16 MiB build: python 446.9 -> **432.0** MiB, gcc 364.6 -> **358.2**, jq 358.9 -> **353.9**, node 460.2 -> **454.6**, lua 16.2 -> **14.7**, git 28.8 -> 28.2, redis 6.2 -> 6.3, sqlite 13.5 -> 13.7; time equal or better except node +8.3% | **PR #5** |
+
+The flat budget could not distinguish a reused JSON buffer (node) from a
+free-and-forget 1 MiB obmalloc arena (CPython); per-bucket warm/cold
+retention can, and it recovers RSS on python and lua without the node
+time cost that ADR 0083 traded away.
+
+## Round 23: quarter local batch for >= 2 KiB classes (2026-11-25)
+
+| id | branch | result | status |
+|---|---|---|---|
+| B2 | `exp/large-class-div` | RSS5: classes >= 2 KiB keep a quarter of the 64 KiB local byte budget (16 KiB).  11-rep legacy vs the selective build: gcc 366.8 -> 365.4 MiB, lua 15.0 -> 14.5, sqlite 14.0 -> 13.5, node 465.5 -> 461.4, redis 6.5 -> 6.2, python/git flat.  11-rep exp-bench: micro 1.0004/worst 1.0012, **jq paired 1.0291**, real paired 0.9958 | rejected as a stack (RSS win, but it costs the only green app 1.5-2.9% time) |
+
+The threshold of 2048 was chosen so `churn 1024` stays out of the change;
+the 1024 threshold measured gcc -2.8 MiB but moves that micro case.  The
+mechanism is real and broad-based (-3.3 MiB across five apps) but it
+narrows jq's lead, and jq is the only app that is green in both
+dimensions, so it is not stacked onto PR #5.
+
+## Round 24: the free-page reservoir is measured (2026-11-25)
+
+The campaign had repeatedly concluded "page purge is a no-op" from knob
+screens.  That was wrong: the purge was simply unreachable.  `strace -f`
+shows **zero** `MADV_DONTNEED` calls because (a) `page_purge` is off in
+the balanced preset and (b) `fm_release_maybe` returns early while a
+class's central depth is below `release_min_depth` (default 16).
+
+An instrumented build (`FM_DIAG_PURGE`) proves the census itself runs
+thousands of times per git run (`fm_trim_class` calls: 1595 and 8555 in
+the two processes) and, once made reachable
+(`FM_PAGE_PURGE=1 FM_PURGE_MIN_PAGES=1 FM_RELEASE_MIN_DEPTH=1
+FM_RELEASE_INTERVAL_MS=1 FM_RELEASE_AGE_MS=0`), the purge pass finds
+
+```
+DIAG trim=8582 cand=58 purged=58
+```
+
+i.e. **58 fully free 4 KiB pages = 232 KiB** in the whole git rev-list
+run, and the measured RSS moves by exactly that: 23.88 -> 23.71 MiB at
+unchanged time.
+
+So a per-page free list that lets fully-free 4 KiB pages return to a
+shared pool can recover at most ~0.2 MiB on git, not the 4 MiB gap.  The
+gap is pages that each still hold at least one live block, which neither
+a page-level free list nor a cross-class page pool can reclaim without
+moving live objects.  This closes the question for git/lua/sqlite/redis.
+
+## Round 25: allocation locality is not the lever (2026-11-25)
+
+The remaining git/lua gap was attributed to partial-page fragmentation, so
+the next hypothesis was allocation locality: regroup the central stacks
+into span-pure batches more often so a class's live blocks cluster on
+fewer pages.  The census is what does that regrouping, and its cadence is
+`FM_RELEASE_INTERVAL_MS`; running it 50x more often is the cheapest test.
+
+| case | default (50 ms) | 5 ms | 1 ms |
+|---|---:|---:|---:|
+| git rev-list | 23.94 MB / 0.04 s | 23.92 / 0.03 | 23.86 / 0.04 |
+| lua churn | 16.29 MB / 0.32 s | 16.38 / 0.32 | - |
+
+No effect at all.  Combined with Round 24 (only 58 fully free pages) and
+the live-bytes measurement (11.81 vs glibc's 11.65 MB), this isolates the
+residual to pages that each still hold at least one long-lived block:
+regrouping, purging, pooling or re-ordering cannot reclaim them, and
+moving live blocks is impossible without breaking user pointers.  The
+only architectural answer is byte-granular pages, which the 11-rep matrix
+rejected on the micro (Round 20).
+
+## Round 26b: medium-bucket cold cap (2026-11-25)
+
+| id | branch | result | status |
+|---|---|---|---|
+| C6 | `exp/selective7` | allow up to 512 KiB of cold retention in buckets 14-18 (16-512 KiB) to capture node's Buffer churn: local node munmap 7107 -> 6924, RSS and time unchanged | rejected |
+
+Node's 64 KiB churn does not reach the cache insertion: the hot-window
+gate (`FM_LCACHE_HOT_WINDOW` large frees since the bucket was last
+allocated from) or the free-path preconditions reject it, so widening the
+cold cap cannot help.  The remaining node time is the 27 MiB payload and
+the munmap/mmap pairs that the window refuses, neither of which is a cap
+tuning problem.
+
+## Round 26: exempting >= 16 MiB buckets from the caps (2026-11-25)
+
+Node's only time loss under the selective cache is its 27 MiB JSON payload
+(bucket 24), which the warm cap of 4 MiB refuses to keep.  A variant
+exempts buckets >= 24 from the warm/cold rule entirely, leaving the 16 MiB
+base budget as the only bound.  Locally it is a no-op on jq, sort and xz.
+11-rep exp-bench: micro 1.0002, jq RSS 252, real paired 0.9932 -- i.e.
+identical to the selective build, as the 16 MiB base still rejects the
+28.3 MiB block.  Legacy 11 reps: node 456.4 MiB / +7.3% time, i.e. the
+same as the selective build (454.6 / +8.3%), and the other apps unchanged.
+The variant that actually lets the payload in is `exp/selective6` (huge
+buckets get a 32 MiB budget): exp-bench flat (micro 1.0005, jq 252, paired
+0.9958), but its legacy is **worse than the selective build** -- node
+462.9 MiB / **+10.0%** time against 454.6 / +8.3%.  Keeping the 27 MiB
+payload buys 8 MiB of RSS and does not recover the time, so both huge-bucket
+variants are rejected and PR #5 keeps the selective build.
+
+## Round 27: bump-first refill ordering (2026-11-25)
+
+`fm_refill_class` takes a central batch before carving from the current
+span's bump remainder, so freed blocks from old spans are reused while
+those spans still hold live blocks -- exactly the shape that keeps pages
+partially occupied.  The variant carves from the bump remainder first and
+only falls back to central when the span is exhausted, so a class fills
+one span densely before touching older holes.
+
+| case | main | bump-first |
+|---|---:|---:|
+| git rev-list | 24.0 MB / 0.03 s | 23.9 / 0.04 |
+| lua churn (6 interleaved) | 16.2-16.6 MB / 0.31 s | 16.0-16.2 / 0.31-0.33 |
+
+Within noise on both, with a small time cost.  Recorded as a null result;
+the refill order does not change page residency enough to matter.
+
+## Round 28: the dense-extent THP hint is worth its RSS (2026-11-25)
+
+`fm_map_dense_span` applies `MADV_HUGEPAGE` after four warm extents.
+THP is madvise-mode on the runners, and a huge page commits 2 MiB, so the
+hypothesis was that removing the hint would cut git/lua RSS at no time
+cost.  Locally it did: git 23.9 -> 22.0 MiB, lua 16.5 -> 15.8, time
+equal on five fixtures.
+
+The paired 11-rep matrix says otherwise:
+
+| build | micro | jq time (paired) | jq RSS | other time |
+|---|---:|---:|---:|---|
+| no-dense-THP | **1.0000** | **1.0788** | 262 -> 261 | within noise |
+| selective + no-THP | 1.0002 | **1.1167** | 262 -> 251 | xz +3.3%, sort +2.9%, python +2.4% |
+
+The instruction-count micro is blind to THP, as expected, but the real
+apps are not: the dense extent's huge pages carry the TLB coverage for
+jq's pointer chasing, and losing them costs 8-12% of jq's time for 1 MiB
+of RSS.  Rejected; PR #5 keeps the selective cache with THP intact.
+The legacy runs were cancelled once the time cells were decisive.
+
+## Round 29: size-aware retention for Buffer-sized blocks (2026-11-25)
+
+The last node idea was to keep only the 16-512 KiB band (node's Buffer
+sizes) by widening its hot window from 8 to 64 large frees and its cold
+cap to 512 KiB, leaving the 27 MiB payload on the cold rule.
+
+| case | selective | size-aware |
+|---|---:|---:|
+| node munmap (strace) | 7139 | 7019 |
+| node RSS / time | 402-405 MB / 1.03-1.08 s | 404-405 / 1.03-1.04 |
+
+The munmap count barely moves, so node's freed buffers do not reach the
+cache insertion at all: the block's stored bucket is one above the
+allocation's search bucket (the slab rounds `bytes + header` up to 64 KiB,
+so a 64 KiB request lives in a 128 KiB slice), and the 16 MiB base budget
+is exhausted by ~128 such slices long before the churn's thousands of
+frees.  Neither a wider window nor a wider cap changes that.  Rejected;
+node's time remains a payload/budget trade.
+
+## Round 30: coarser 17-32 KiB classes (2026-11-25)
+
+| id | branch | result | status |
+|---|---|---|---|
+| G2 | `exp/coarse-large` | last class segment 17408..32768 step 1024 -> 18432..32768 step 2048 (145 -> 137 classes): git 23.9-24.0 -> 23.9-24.0 MiB, gcc 370.1 -> 369.1 (noise), sqlite unchanged; tests pass; the micro set never allocates above 1024 B so it is unaffected by construction | rejected (no RSS effect) |
+
+Size-class granularity in the 17-32 KiB band is not where gcc/node/sqlite
+lose their pages; the classes there are few and their spans are dense.
+
+## Round 31: hit-rate-aware warm buckets (2026-11-25)
+
+A bucket that hits once stays warm for the process, so one lucky reuse can
+pin 4 MiB in a bucket that never hits again (sqlite's temp b-tree blocks
+were the suspect).  The variant keeps per-bucket hit/insert counters and
+treats a bucket as warm only while `hits * 4 >= inserts`.
+
+| case | selective | hit-rate |
+|---|---:|---:|
+| sqlite speedtest1 | 10.98-11.17 MB / 2.37-2.41 s | 11.02-11.05 / 2.29-2.50 |
+| lua churn | 14.4-14.8 MB | 14.6-15.0 |
+| node churn | 403.9-405.1 MB | 401.6-404.8 |
+
+Neutral everywhere; rejected.  sqlite's 1.7 MiB of lcache0-removable
+retention is not in warm buckets.
+
+## Round 32: cold-cap sweep (2026-11-25)
+
+`FM_LCACHE_BUCKET_COLD` was added as a runtime knob (ADR 0087).  Sweeping
+it on sqlite speedtest1 shows the RSS step is entirely below 128 KiB:
+
+| cold cap | sqlite RSS | sqlite time |
+|---|---:|---:|
+| 0 | 9.37-9.44 MB | 2.68-2.71 s |
+| 64 KiB | 9.45-9.52 | 2.67-2.80 |
+| 128 KiB | 10.90-10.94 | 2.44-2.45 |
+| **256 KiB (default)** | 10.94-11.02 | **2.40-2.43** |
+
+Buying the 1.5 MiB costs 11% of sqlite's time, and sqlite currently ties
+glibc on time; the default stays at 256 KiB and the knob is the option
+for memory-first deployments.  git/lua/node are neutral at every value.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |
@@ -224,9 +538,10 @@ These are deliberately smaller and self-contained so the local
 | RSS7 | `exp/rss-close` | jq is within noise (tied); xz +0.68% is structural, every one-line knob is a no-op | jq tied, xz needs RSS8 |
 | FIX1 | `fix/foreign-mus` | Redis 8 + jemalloc crash in `malloc_usable_size`; magic-check + `dlsym(RTLD_NEXT)` fallback; merged as PR #2 | **merged** |
 
-The lesson so far: the RSS gap is **not** the large-cache byte cap.  It is
-resident pages of cold/huge mappings (cold purge works), plus structural
-startup mappings (smaller spans made it worse).  `RSS8` (per-app
+The lesson so far: for these apps the RSS gap is **not** the large-cache
+byte cap (Node later falsified this; see Round 16).  It is resident pages
+of cold/huge mappings (cold purge works), plus structural startup
+mappings (smaller spans made it worse).  `RSS8` (per-app
 smaps/massif decomposition) is the next measurement, and the size-band
 threshold on RSS0 is the next code step.
 

@@ -49,11 +49,13 @@
  *
  * Hot-path layout
  * ----------------
- * The thread-local state is split into parallel arrays rather than an array
- * of structs.  That matters: the head array has an 8-byte stride, so the
- * compiler folds the index into the addressing mode of a single
- * %fs:0x0(base,index,8) load.  An array of 32-byte structs cannot be
- * addressed that way and costs an extra shift and add on the critical path.
+ * The thread-local state is one array of 16-byte cells.  x86 has no
+ * 16-byte SIB scale, so the fast paths never form a class index: they work
+ * on the cell's byte offset, class * 16.  For arithmetic classes that is
+ * (size + 15) & -16, which costs the same one instruction as the
+ * (size + 15) >> 4 index did; free() folds the scaling into its large-block
+ * test.  An index-times-stride computation on the critical path (the
+ * problem ADR 0004 measured with 32-byte structs) is thereby avoided.
  */
 #ifndef FM_CORE_H
 #define FM_CORE_H
@@ -84,22 +86,62 @@
 
 static inline void *fm_malloc(size_t size);
 
-/* Hot thread-local free-list state grouped into one struct with parallel
- * arrays inside it: head sits at offset 0 so %fs:(base,cls,8) has zero
- * displacement in malloc/free, while cnt and tail share the SAME TLS base
- * register in free via constant SIB displacements (%fs:disp(base,cls,4/8))
- * instead of loading three separate GOT/tpoff values. */
+/* Hot thread-local free-list state of one class, packed into 16 bytes so
+ * that a class touches exactly one cache line (N33).  The list tail is a
+ * user-space address, so 48 bits hold it, and the flush countdown never
+ * exceeds 64 KiB / 16 B = 4096, so 16 bits hold that.  The tail is stored
+ * as two fields because writing it must not disturb cnt. */
+typedef struct FM_TlsCell {
+    void *head;
+    uint32_t tail_lo;
+    uint16_t tail_hi;
+    int16_t cnt;
+} FM_TlsCell;
+
+#define FM_CELL_SHIFT 4
+_Static_assert(sizeof(FM_TlsCell) == 1u << FM_CELL_SHIFT,
+               "fast paths address cells as class << FM_CELL_SHIFT");
+
 typedef struct FM_HotTls {
-    void *head[CLASS_COUNT];
-    int32_t cnt[CLASS_COUNT];
-    void *tail[CLASS_COUNT];
-} FM_HotTls;
+    FM_TlsCell cell[CLASS_COUNT];
+} __attribute__((aligned(16))) FM_HotTls;
 
 extern __thread FM_HotTls fm_tls __attribute__((tls_model("initial-exec")));
 extern __thread char *fm_bump_ptr[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 extern __thread char *fm_bump_end[CLASS_COUNT] __attribute__((tls_model("initial-exec")));
 /* Exit hook state: 0 = not armed, 1 = armed, 2 = destructor running (disarmed). */
 extern __thread int fm_exit_armed __attribute__((tls_model("initial-exec")));
+
+/* Cell at byte offset `off` (class << FM_CELL_SHIFT).  GCC lowers a 16-byte
+ * stride TLS access by materialising the thread pointer (two extra
+ * instructions and a GOT operand the TLS patcher does not recognise), so
+ * spell out the %fs:(tpoff,off) form; the mov is the one it patches. */
+#if defined(__x86_64__) && !defined(FM_DEBUG) && \
+    !defined(__SANITIZE_ADDRESS__) && !defined(__SANITIZE_THREAD__) && \
+    !defined(malloc)
+#define FM_TLS_ASM 1
+static inline intptr_t fm_tls_tpoff(void)
+{
+    intptr_t off;
+    __asm__("movq fm_tls@GOTTPOFF(%%rip), %0" : "=r"(off));
+    return off;
+}
+#define FM_CELL_AT(off) (*(FM_TlsCell __seg_fs *)(fm_tls_tpoff() + (intptr_t)(off)))
+#else
+#define FM_CELL_AT(off) (fm_tls.cell[(off) >> FM_CELL_SHIFT])
+#endif
+
+static inline void fm_cell_set_tail(uint32_t cls, void *t)
+{
+    fm_tls.cell[cls].tail_lo = (uint32_t)(uintptr_t)t;
+    fm_tls.cell[cls].tail_hi = (uint16_t)((uintptr_t)t >> 32);
+}
+
+static inline void *fm_cell_tail(uint32_t cls)
+{
+    return (void *)((uintptr_t)fm_tls.cell[cls].tail_lo |
+                    ((uintptr_t)fm_tls.cell[cls].tail_hi << 32));
+}
 
 typedef struct FM_Span {
     uint32_t cls;       /* size class, or LARGE_CLASS */
@@ -943,8 +985,8 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
             } else if (FM_CFG()->locality_sort && bh) {
                 bh = fm_regroup_by_span(bh, &bt);
             }
-            fm_tls.head[cls] = *(void **)bh;
-            fm_tls.tail[cls] = bt;
+            fm_tls.cell[cls].head = *(void **)bh;
+            fm_cell_set_tail(cls, bt);
             fm_batch_release(b);
             return bh;
         }
@@ -978,9 +1020,9 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
         for (uint32_t i = 0; i < keep0; i++)
             ((uint64_t *)(cur + (size_t)i * bs))[1] = 0xDEADDEADDEADDEADull;
 #endif
-        fm_tls.head[cls] = *(void **)head;
-        fm_tls.tail[cls] = t;
-        fm_tls.cnt[cls] = (int32_t)limit;
+        fm_tls.cell[cls].head = *(void **)head;
+        fm_cell_set_tail(cls, t);
+        fm_tls.cell[cls].cnt = (int16_t)limit;
 
         char *rest_cur = cur + (size_t)keep0 * bs;
         if (FM_CFG()->lazy_bump) {
@@ -1029,9 +1071,9 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
 #endif
     fm_bump_ptr[cls] = cur + (size_t)keep * bs;
 
-    fm_tls.head[cls] = *(void **)head;
-    fm_tls.tail[cls] = t;
-    fm_tls.cnt[cls] = (int32_t)limit;
+    fm_tls.cell[cls].head = *(void **)head;
+    fm_cell_set_tail(cls, t);
+    fm_tls.cell[cls].cnt = (int16_t)limit;
 
     return head;
 }
@@ -1044,7 +1086,7 @@ __attribute__((noinline)) static void fm_flush_bin(uint32_t cls)
         /* Walk the local list and verify every block belongs to a span of
          * this class, and that the list is a proper chain. */
         uint32_t n = 0;
-        void *q = fm_tls.head[cls];
+        void *q = fm_tls.cell[cls].head;
         while (q && n < 100000) {
             FM_Span *s2 = (FM_Span *)((uintptr_t)q & SPAN_MASK);
             uintptr_t off = (uintptr_t)q - ((uintptr_t)s2 + HEADER_SIZE);
@@ -1061,11 +1103,11 @@ __attribute__((noinline)) static void fm_flush_bin(uint32_t cls)
         (void)n;
     }
 #endif
-    void *h = fm_tls.head[cls];
-    void *t = fm_tls.tail[cls];
-    fm_tls.head[cls] = NULL;
-    fm_tls.tail[cls] = NULL;
-    fm_tls.cnt[cls] = (int32_t)fm_local_limit(cls);
+    void *h = fm_tls.cell[cls].head;
+    void *t = fm_cell_tail(cls);
+    fm_tls.cell[cls].head = NULL;
+    fm_cell_set_tail(cls, NULL);
+    fm_tls.cell[cls].cnt = (int16_t)fm_local_limit(cls);
     if (!h)
         return;
     /* Publish in O(1) without walking the scattered list (ADR 0014);
@@ -2167,6 +2209,17 @@ static inline size_t fm_class_of(size_t size)
     return LARGE_CLASS;
 }
 
+/* fm_class_of(size) << FM_CELL_SHIFT, the byte offset of the class's TLS
+ * cell, or LARGE_CLASS.  The arithmetic classes need no shift at all. */
+static inline size_t fm_cell_off_of(size_t size)
+{
+    if (__builtin_expect(size <= ARITH_MAX, 1))
+        return (size + 15) & ~(size_t)15;
+    if (__builtin_expect(size <= SMALL_MAX, 1))
+        return (size_t)kClassBig[(size + 15) >> 4] << FM_CELL_SHIFT;
+    return LARGE_CLASS;
+}
+
 /* ------------------------------------------------------------------ */
 /* large / aligned allocations                                         */
 /* ------------------------------------------------------------------ */
@@ -2539,7 +2592,7 @@ static inline int fm_is_aligned_ptr(const void *p)
 static void fm_thread_exit_flush(void)
 {
     for (uint32_t c = 0; c < CLASS_COUNT; c++) {
-        if (fm_tls.head[c])
+        if (fm_tls.cell[c].head)
             fm_flush_bin(c);
         char *cur = fm_bump_ptr[c];
         char *end = fm_bump_end[c];
@@ -2618,11 +2671,12 @@ static void fm_arm_thread_exit(void)
 
 static inline void *fm_malloc(size_t size)
 {
-    size_t cls = fm_class_of(size);
-    if (__builtin_expect(cls != LARGE_CLASS, 1)) {
-        void *p = fm_tls.head[cls];
+    size_t off = fm_cell_off_of(size);
+    if (__builtin_expect(off != LARGE_CLASS, 1)) {
+        void *p = FM_CELL_AT(off).head;
         if (__builtin_expect(p != NULL, 1)) {
 #ifdef FM_DEBUG
+            size_t cls = off >> FM_CELL_SHIFT;
             {
                 FM_Span *sp2 = (FM_Span *)((uintptr_t)p & SPAN_MASK);
                 uintptr_t off = (uintptr_t)p - ((uintptr_t)sp2 + HEADER_SIZE);
@@ -2662,10 +2716,10 @@ static inline void *fm_malloc(size_t size)
 #endif
             void *next = *(void **)p;
             __builtin_prefetch(next, 0, 1);
-            fm_tls.head[cls] = next;
+            FM_CELL_AT(off).head = next;
             return p;
         }
-        return fm_refill_class((uint32_t)cls);
+        return fm_refill_class((uint32_t)(off >> FM_CELL_SHIFT));
     }
     return fm_large_alloc(size);
 }
@@ -2681,61 +2735,64 @@ __attribute__((noinline, cold)) static void fm_free_aligned(const void *p)
     munmap((void *)sp->map_base, sp->map_size);
 }
 
-__attribute__((noinline)) static void fm_free_cnt_slow(uint32_t cls)
+__attribute__((noinline)) static void fm_free_cnt_slow(uint32_t off)
 {
-    if (__builtin_expect(fm_tls.cnt[cls] < 0, 0)) {
+    uint32_t cls = off >> FM_CELL_SHIFT;
+    if (__builtin_expect(fm_tls.cell[cls].cnt < 0, 0)) {
         /* First free on this thread/class (.tbss 0 decremented to -1). */
         fm_arm_thread_exit();
         uint32_t limit = fm_local_limit(cls);
         if (limit > 1) {
-            fm_tls.cnt[cls] = (int32_t)(limit - 1);
+            fm_tls.cell[cls].cnt = (int16_t)(limit - 1);
             return;
         }
     }
     fm_flush_bin(cls);
 }
 
-static inline void fm_tls_push_free(void *p, size_t cls)
+/* Push p on the local list of the class whose cell is at byte offset off. */
+static inline void fm_tls_push_free(void *p, size_t off)
 {
-#if defined(__x86_64__) && !defined(FM_DEBUG) && \
-    !defined(__SANITIZE_ADDRESS__) && !defined(__SANITIZE_THREAD__) && \
-    !defined(malloc)
+#ifdef FM_TLS_ASM
     intptr_t tp_off;
     void *old_h;
     _Bool le;
     __asm__(
-        "movq fm_tls@GOTTPOFF(%%rip), %[off]\n\t"
-        "movq %%fs:(%[off],%[cls],8), %[old]\n\t"
+        "movq fm_tls@GOTTPOFF(%%rip), %[tp]\n\t"
+        "movq %%fs:(%[tp],%[off]), %[old]\n\t"
         "movq %[old], (%[p])\n\t"
-        "movq %[p], %%fs:(%[off],%[cls],8)"
-        : [off] "=&r"(tp_off), [old] "=&r"(old_h)
-        : [cls] "r"(cls), [p] "r"(p)
+        "movq %[p], %%fs:(%[tp],%[off])"
+        : [tp] "=&r"(tp_off), [old] "=&r"(old_h)
+        : [off] "r"(off), [p] "r"(p)
         : "memory");
     if (__builtin_expect(!old_h, 0)) {
-        __asm__("movq %[p], %%fs:%c[toff](%[off],%[cls],8)"
+        __asm__("movl %k[p], %%fs:%c[lo](%[tp],%[off])\n\t"
+                "movw %w[hi], %%fs:%c[hio](%[tp],%[off])"
                 :
-                : [off] "r"(tp_off), [cls] "r"(cls), [p] "r"(p),
-                  [toff] "i"(offsetof(FM_HotTls, tail))
+                : [tp] "r"(tp_off), [off] "r"(off), [p] "r"(p),
+                  [hi] "r"((uintptr_t)p >> 32),
+                  [lo] "i"(offsetof(FM_TlsCell, tail_lo)),
+                  [hio] "i"(offsetof(FM_TlsCell, tail_hi))
                 : "memory");
     }
-    __asm__("subl $1, %%fs:%c[coff](%[off],%[cls],4)"
+    __asm__("subw $1, %%fs:%c[coff](%[tp],%[off])"
             : "=@ccle"(le)
-            : [off] "r"(tp_off), [cls] "r"(cls),
-              [coff] "i"(offsetof(FM_HotTls, cnt))
+            : [tp] "r"(tp_off), [off] "r"(off),
+              [coff] "i"(offsetof(FM_TlsCell, cnt))
             : "memory", "cc");
     if (__builtin_expect(le, 0))
-        fm_free_cnt_slow((uint32_t)cls);
+        fm_free_cnt_slow((uint32_t)off);
 #else
-    void *old_h = fm_tls.head[cls];
+    void *old_h = FM_CELL_AT(off).head;
     *(void **)p = old_h;
 #ifdef FM_DEBUG
     ((uint64_t *)p)[1] = 0xDEADDEADDEADDEADull;
 #endif
-    fm_tls.head[cls] = p;
+    FM_CELL_AT(off).head = p;
     if (__builtin_expect(!old_h, 0))
-        fm_tls.tail[cls] = p;
-    if (__builtin_expect(--fm_tls.cnt[cls] <= 0, 0))
-        fm_free_cnt_slow((uint32_t)cls);
+        fm_cell_set_tail((uint32_t)(off >> FM_CELL_SHIFT), p);
+    if (__builtin_expect(--FM_CELL_AT(off).cnt <= 0, 0))
+        fm_free_cnt_slow((uint32_t)off);
 #endif
 }
 
@@ -2761,29 +2818,41 @@ static inline void fm_free(void *p)
 #else
     sp = (FM_Span *)((uintptr_t)p & SPAN_MASK);
 #endif
-    uint32_t cls32 = sp->cls;
-    if (__builtin_expect(cls32 == LARGE_CLASS, 0)) {
+    /* Scale the class to its cell offset and test for LARGE_CLASS at once:
+     * shifting the all-ones sentinel carries out a 1, a real class a 0. */
+    size_t off = sp->cls;
+#if defined(__x86_64__)
+    _Bool large;
+    __asm__("shll %[sh], %k[off]"
+            : [off] "+r"(off), "=@ccc"(large)
+            : [sh] "I"(FM_CELL_SHIFT)
+            : "cc");
+#else
+    int large = off == LARGE_CLASS;
+    off <<= FM_CELL_SHIFT;
+#endif
+    if (__builtin_expect(large, 0)) {
         fm_free_slow_large(sp, p);
         return;
     }
-    size_t cls = cls32;
 #ifdef FM_DEBUG
     {
         /* The block must lie inside its span, at a block boundary of its
          * class.  If this ever fails the class mapping is inconsistent. */
         uintptr_t base = (uintptr_t)sp;
-        uintptr_t off = (uintptr_t)p - (base + HEADER_SIZE);
-        if (off % kClassSize[cls] != 0 || off / kClassSize[cls] >= sp->nblocks) {
+        size_t cls = sp->cls;
+        uintptr_t boff = (uintptr_t)p - (base + HEADER_SIZE);
+        if (boff % kClassSize[cls] != 0 || boff / kClassSize[cls] >= sp->nblocks) {
             fprintf(stderr,
                     "[fm] BAD BLOCK p=%p base=%p off=%lu cls=%zu bs=%u "
                     "nblocks=%u\n",
-                    p, (void *)base, (unsigned long)off, cls,
+                    p, (void *)base, (unsigned long)boff, cls,
                     kClassSize[cls], sp->nblocks);
             abort();
         }
     }
 #endif
-    fm_tls_push_free(p, cls);
+    fm_tls_push_free(p, off);
 }
 
 __attribute__((noinline, cold)) static void *fm_calloc_overflow(void)
@@ -2814,12 +2883,12 @@ static inline void *fm_calloc(size_t n, size_t sz)
         return fm_calloc_overflow();
 #ifndef FM_DEBUG
     if (__builtin_expect(total <= 64, 1)) {
-        size_t cls = (total + 15) >> 4;
-        void *p = fm_tls.head[cls];
+        size_t off = (total + 15) & ~(size_t)15;
+        void *p = FM_CELL_AT(off).head;
         if (__builtin_expect(p != NULL, 1)) {
             void *next = *(void **)p;
             __builtin_prefetch(next, 0, 1);
-            fm_tls.head[cls] = next;
+            FM_CELL_AT(off).head = next;
             if (total <= 16) {
                 __builtin_memset(p, 0, 16);
             } else if (total <= 32) {
@@ -3029,12 +3098,12 @@ static inline void *fm_operator_new(size_t size)
 {
 #ifndef FM_DEBUG
     if (__builtin_expect(size <= ARITH_MAX, 1)) {
-        size_t cls = (size + 15) >> 4;
-        void *p = fm_tls.head[cls];
+        size_t off = (size + 15) & ~(size_t)15;
+        void *p = FM_CELL_AT(off).head;
         if (__builtin_expect(p != NULL, 1)) {
             void *next = *(void **)p;
             __builtin_prefetch(next, 0, 1);
-            fm_tls.head[cls] = next;
+            FM_CELL_AT(off).head = next;
             return p;
         }
     }
@@ -3046,12 +3115,12 @@ static inline void *fm_operator_new_nothrow(size_t size)
 {
 #ifndef FM_DEBUG
     if (__builtin_expect(size <= ARITH_MAX, 1)) {
-        size_t cls = (size + 15) >> 4;
-        void *p = fm_tls.head[cls];
+        size_t off = (size + 15) & ~(size_t)15;
+        void *p = FM_CELL_AT(off).head;
         if (__builtin_expect(p != NULL, 1)) {
             void *next = *(void **)p;
             __builtin_prefetch(next, 0, 1);
-            fm_tls.head[cls] = next;
+            FM_CELL_AT(off).head = next;
             return p;
         }
     }
@@ -3065,13 +3134,12 @@ static inline void *fm_operator_new_aligned(size_t size, size_t align)
     if (__builtin_expect(align >= 16 && align <= 64 && (align & (align - 1)) == 0 &&
                          size <= ARITH_MAX, 1)) {
         size_t mask = align - 1;
-        size_t cls = ((size ? size : 1) + mask) & ~mask;
-        cls >>= 4;
-        void *p = fm_tls.head[cls];
+        size_t off = ((size ? size : 1) + mask) & ~mask;
+        void *p = FM_CELL_AT(off).head;
         if (__builtin_expect(p != NULL, 1)) {
             void *next = *(void **)p;
             __builtin_prefetch(next, 0, 1);
-            fm_tls.head[cls] = next;
+            FM_CELL_AT(off).head = next;
             return p;
         }
     }
@@ -3087,8 +3155,8 @@ static inline void fm_delete_sized_aligned(void *p, size_t size, size_t align)
     if (__builtin_expect(align >= 16 && align <= 64 && (align & (align - 1)) == 0 &&
                          size <= ARITH_MAX, 1)) {
         size_t mask = align - 1;
-        size_t cls = (((size ? size : 1) + mask) & ~mask) >> 4;
-        fm_tls_push_free(p, cls);
+        size_t off = ((size ? size : 1) + mask) & ~mask;
+        fm_tls_push_free(p, off);
         return;
     }
 #endif
@@ -3101,8 +3169,8 @@ static inline void fm_delete_sized(void *p, size_t size)
         return;
 #ifndef FM_DEBUG
     if (__builtin_expect(size <= ARITH_MAX, 1)) {
-        size_t cls = (size + 15) >> 4;
-        fm_tls_push_free(p, cls);
+        size_t off = (size + 15) & ~(size_t)15;
+        fm_tls_push_free(p, off);
         return;
     }
 #endif
@@ -3127,7 +3195,7 @@ static inline void fm_delete_sized(void *p, size_t size)
  * (R_X86_64_TPOFF64) before any code ran:
  *
  *     mov  disp32(%rip),%rdx        ; the GOT entry (the tpoff)
- *     mov  %fs:(%rdx,%rcx,8),%rax   ; head of the free list
+ *     mov  %fs:(%rdx,%rcx),%rax     ; head of the free list
  *
  * By constructor time the displacement is a constant of this process,
  * and this module's text is ours.  So: parse our own dynamic section

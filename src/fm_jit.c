@@ -25,7 +25,7 @@
  *          cmp  size, class_lo
  *          jbe  .L
  *          ...
- *          .L: mov  $tls_off + cls*8, %rcx
+ *          .L: mov  $tls_off + cls*16, %rcx
  *              mov  %fs:(%rcx), %rax    ; head of the free list
  *              test %rax, %rax
  *              jz   slow
@@ -183,17 +183,17 @@ static const char *p_gen;
 static void jit_init_offsets(void)
 {
     uintptr_t tp = (uintptr_t)__builtin_thread_pointer();
-    g_tls_head_off = (uintptr_t)&fm_tls.head[0] - tp;
+    g_tls_head_off = (uintptr_t)&fm_tls.cell[0].head - tp;
 
     /* Sanity check: the generated code reaches the thread-local array as
      * fs:[displacement].  Verify that by planting a sentinel and reading it
      * back. */
     void *sentinel = (void *)(uintptr_t)0x5A5A5A5A5A5A5A5Aull;
-    void *saved = fm_tls.head[0];
-    fm_tls.head[0] = sentinel;
+    void *saved = fm_tls.cell[0].head;
+    fm_tls.cell[0].head = sentinel;
     uintptr_t probe;
     __asm__ volatile("mov %%fs:(%1), %0" : "=r"(probe) : "r"(g_tls_head_off) : "memory");
-    fm_tls.head[0] = saved;
+    fm_tls.cell[0].head = saved;
     if (probe != (uintptr_t)sentinel) {
         fprintf(stderr, "[jit] TLS displacement mismatch (%p vs %p) -- JIT off\n",
                 (void *)probe, (void *)sentinel);
@@ -382,7 +382,7 @@ static void jit_compile(void)
             int32_t neg_lo = -(int32_t)lo[i];
             memcpy((void *)p_sub[i], &neg_lo, 4);
             memcpy((void *)p_cmp[i], &span[i], 4);
-            uint64_t disp = g_tls_head_off + (uint64_t)cls[i] * 8;
+            uint64_t disp = g_tls_head_off + ((uint64_t)cls[i] << FM_CELL_SHIFT);
             memcpy((void *)p_disp[i], &disp, 8);
         } else {
             /*
@@ -454,16 +454,16 @@ void *fm_generic_malloc(size_t n);
 /* The allocation fast path, shared by the generic and the profiling entry. */
 static inline void *fm_fast_path(size_t n)
 {
-    size_t cls = fm_class_of(n);
-    if (__builtin_expect(cls != LARGE_CLASS, 1)) {
-        void *p = fm_tls.head[cls];
+    size_t off = fm_cell_off_of(n);
+    if (__builtin_expect(off != LARGE_CLASS, 1)) {
+        void *p = FM_CELL_AT(off).head;
         if (__builtin_expect(p != NULL, 1)) {
             void *next = *(void **)p;
             __builtin_prefetch(next, 0, 1);
-            fm_tls.head[cls] = next;
+            FM_CELL_AT(off).head = next;
             return p;
         }
-        return fm_refill_class((uint32_t)cls);
+        return fm_refill_class((uint32_t)(off >> FM_CELL_SHIFT));
     }
     return fm_large_alloc(n);
 }

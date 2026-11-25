@@ -66,7 +66,7 @@ jit_pjbe_##n:                               \
  * free list.  The list address is a compile-time constant displacement, so
  * the leaf is one thread-local load plus one dependent load on the block:
  *
- *   mov  $tls_off + cls*8, %rcx
+ *   mov  $tls_off + cls*16, %rcx
  *   mov  %fs:(%rcx), %rax
  *   test %rax, %rax
  *   jz   .Lgeneric

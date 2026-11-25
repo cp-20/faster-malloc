@@ -524,7 +524,13 @@ stays resident.
 
 Local times were unusable (system load); the instruction count is
 1.0006-1.0008 by callgrind on three micro cases, since the change is in
-the large-free slow path only.  11-rep matrices are running.
+the large-free slow path only.
+
+11-rep exp-bench: micro **1.0003 / worst 1.0004**, real paired 1.0021,
+real worst 1.0061; the seven exp-bench fixtures are small enough that
+their cold blocks are few, so their RSS is flat (as expected).  The
+legacy matrix, where gcc/lua/sqlite have multi-MiB cold blocks, is
+running.
 
 ## Rejected (do not repeat without a materially different mechanism)
 

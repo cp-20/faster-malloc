@@ -52,6 +52,12 @@ def build():
         while v <= last:
             sizes.append(v)
             v += step
+    # Page-aligned payloads: payload + HEADER == a whole number of pages,
+    # so a span's blocks never spill into an extra page.
+    import bisect
+    for extra in (4032, 8128, 16320):
+        if extra not in sizes:
+            bisect.insort(sizes, extra)
     return sizes
 
 

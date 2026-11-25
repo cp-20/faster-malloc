@@ -525,6 +525,22 @@ between git's and lua's, so any threshold that drops git/lua drops jq too.
 This is the direct fix for Round 38's measured one-page spill, with no
 new lookup on any hot path.
 
+## Round 40: the smaller page-aligned classes add nothing (2026-11-25)
+
+The 32704 class (Round 39) removes the 32 KiB spill.  Extending the same
+"payload + 64 = a whole number of pages" rule to 4032, 8128 and 16320
+(149 classes) was tested locally against the 32704-only build:
+
+| build | gcc RSS |
+|---|---:|
+| 32704 only | 351.6-351.9 MB |
+| + 4032/8128/16320 | 351.7-351.8 MB |
+
+No additional gain: those classes hold 16, 8 and 4 blocks per span, so
+their one-page tail is already amortised (6%, 1.6%, 0.8%).  Only the
+32 KiB class, with one block per span, had a 12.5% spill worth fixing.
+The extra classes are not proposed.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

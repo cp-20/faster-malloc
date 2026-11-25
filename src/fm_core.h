@@ -3,11 +3,11 @@
  *
  * Design summary
  * --------------
- * A span is a 64 KiB-aligned region whose first 64 bytes are a header that
- * records the size class.  Every small allocation is carved out of a span
- * that serves exactly one size class, so free() recovers the class with one
- * AND and one load: there is no per-block metadata and nothing is stored in
- * front of the user's data.
+ * A span is a 64 KiB-aligned region whose header ends in a map from 256-byte
+ * granules to size classes, so free() recovers the class with one AND and
+ * one indexed load: there is no per-block metadata and nothing is stored in
+ * front of the user's data.  A span normally serves exactly one size class;
+ * only paged slots (N135), which hold each class's first runs, mix them.
  *
  * Each thread owns one free list per size class.  Allocation is a pop,
  * deallocation is a push, and neither touches shared state.
@@ -85,14 +85,21 @@
 static inline void *fm_malloc(size_t size);
 
 /* Hot thread-local free-list state grouped into one struct with parallel
- * arrays inside it: head sits at offset 0 so %fs:(base,cls,8) has zero
+ * arrays inside it: head sits at offset 0 so %fs:(base,slot,8) has zero
  * displacement in malloc/free, while cnt and tail share the SAME TLS base
- * register in free via constant SIB displacements (%fs:disp(base,cls,4/8))
- * instead of loading three separate GOT/tpoff values. */
+ * register in free via constant SIB displacements (%fs:disp(base,slot,4/8))
+ * instead of loading three separate GOT/tpoff values.
+ *
+ * N96 (N15): the arrays are indexed by the block's granule class byte, so
+ * 256 slots cover every class plus FM_LARGE_SLOT (0xff), the reserved slot
+ * whose head is always empty.  free() needs no class-to-index conversion:
+ * the granule byte is the index. */
+#define FM_TLS_SLOTS 256u
+#define FM_LARGE_SLOT 0xffu
 typedef struct FM_HotTls {
-    void *head[CLASS_COUNT];
-    int32_t cnt[CLASS_COUNT];
-    void *tail[CLASS_COUNT];
+    void *head[FM_TLS_SLOTS];
+    int32_t cnt[FM_TLS_SLOTS];
+    void *tail[FM_TLS_SLOTS];
 } FM_HotTls;
 
 extern __thread FM_HotTls fm_tls __attribute__((tls_model("initial-exec")));
@@ -104,7 +111,8 @@ extern __thread int fm_exit_armed __attribute__((tls_model("initial-exec")));
 typedef struct FM_Span {
     uint32_t cls;       /* size class, or LARGE_CLASS */
     uint32_t magic;
-    uint32_t nblocks;
+    uint16_t nblocks;       /* FM_PAGED_NBLOCKS for a paged slot (N135) */
+    uint16_t withheld_cnt;  /* ADR 0030, see below */
     _Atomic uint32_t dead_mark; /* ADR 0020: ms timestamp of the first census
                          * that found this span entirely free; 0 =
                          * unmarked.  A marked span is unmapped by the
@@ -135,8 +143,56 @@ typedef struct FM_Span {
      * it). */
     uint32_t purge_mark;
     uint16_t purged_mask;
-    uint16_t withheld_cnt;
+    uint8_t pad;
+    uint8_t gran[1]; /* N135 granule map, see below */
 } FM_Span;
+
+/* N135: in-band page map.  Byte FM_GRAN_OFF + (off >> 8) of every 64 KiB
+ * slot holds the size class of the block that starts in that 256-byte
+ * granule, or FM_LARGE_BYTE.  free() indexes it with bits 8..15 of the
+ * pointer (one movzbl of %ah) where it used to load sp->cls, so the lookup
+ * replaces the load instead of preceding it.  A small slot spends 255 more
+ * header bytes on the map and may then hold several classes ("paged
+ * slot"); a large block only ever needs the single byte of its own start,
+ * which always lies in front of the payload: byte 63, the last one of
+ * FM_Span, for the usual +64 payload, and 63 + (off >> 8) < off beyond. */
+#define FM_GRAN_SHIFT 8
+#define FM_GRAN_SIZE (1u << FM_GRAN_SHIFT)
+#define FM_GRAN_COUNT (SPAN_SIZE >> FM_GRAN_SHIFT)
+#define FM_GRAN_OFF (HEADER_SIZE - 1)
+#define FM_SMALL_HEADER (HEADER_SIZE + FM_GRAN_SIZE) /* small slots only */
+#define FM_LARGE_BYTE 0xFFu
+#define FM_PAGED_CLASS 0xFFFFFFFEu /* sp->cls of a paged slot */
+#define FM_PAGED_NBLOCKS 0xFFFFu   /* never equals a census count */
+_Static_assert(sizeof(FM_Span) == HEADER_SIZE &&
+               offsetof(FM_Span, gran) == FM_GRAN_OFF, "granule map position");
+_Static_assert(CLASS_COUNT < FM_LARGE_BYTE, "granule map stores classes in bytes");
+_Static_assert(FM_LARGE_SLOT == FM_LARGE_BYTE, "large free-list slot is the map sentinel");
+_Static_assert(FM_GRAN_OFF + FM_GRAN_COUNT <= FM_SMALL_HEADER &&
+               FM_SMALL_HEADER % 64 == 0, "map fits, blocks stay 64-aligned");
+
+static inline uint8_t *fm_gran_at(const FM_Span *sp, const void *p)
+{
+    return (uint8_t *)sp + FM_GRAN_OFF +
+           (((uintptr_t)p & (SPAN_SIZE - 1)) >> FM_GRAN_SHIFT);
+}
+
+#ifdef FM_DEBUG
+/* Is p a block boundary of class cls?  A paged slot does not record where
+ * its runs start, so there only the class of both end bytes is checked. */
+static inline int fm_block_ok(const FM_Span *sp, const void *p, uint32_t cls)
+{
+    size_t bs = kClassSize[cls];
+    uintptr_t off = (uintptr_t)p - (uintptr_t)sp;
+    if (off < FM_SMALL_HEADER || *fm_gran_at(sp, p) != cls)
+        return 0;
+    if (sp->cls == FM_PAGED_CLASS)
+        return off + bs <= SPAN_SIZE && off % 16 == 0 &&
+               *fm_gran_at(sp, (const char *)p + bs - 1) == cls;
+    off -= FM_SMALL_HEADER;
+    return sp->cls == cls && off % bs == 0 && off / bs < sp->nblocks;
+}
+#endif
 
 typedef struct FM_Batch FM_Batch;
 struct FM_Batch {
@@ -757,9 +813,12 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
      * while still drawing 64 KiB VA slots from the shared dense extent. */
     static _Atomic unsigned char started[CLASS_COUNT];
     bytes = atomic_exchange_explicit(&started[cls], 1, memory_order_relaxed)
-        ? SPAN_SIZE : FM_ALIGN_UP(HEADER_SIZE + (bs > 16320 ? bs : 16320), FM_PAGE_SIZE);
+        ? SPAN_SIZE
+        : FM_ALIGN_UP(FM_SMALL_HEADER + (bs > 16384 - FM_SMALL_HEADER
+                                             ? bs : 16384 - FM_SMALL_HEADER),
+                      FM_PAGE_SIZE);
 #endif
-    size_t n = (bytes - HEADER_SIZE) / bs;
+    size_t n = (bytes - FM_SMALL_HEADER) / bs;
     uintptr_t raw_base = 0;
     size_t raw_len = SPAN_SIZE;
     char *base;
@@ -780,7 +839,7 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
     FM_Span *sp = (FM_Span *)base;
     sp->cls = cls;
     sp->magic = FM_SPAN_MAGIC;
-    sp->nblocks = (uint32_t)n;
+    sp->nblocks = (uint16_t)n;
     sp->dead_mark = 0;
     sp->map_base = raw_base;
     sp->map_size = raw_len;
@@ -789,10 +848,83 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
     sp->purge_mark = 0;
     sp->purged_mask = 0;
     sp->withheld_cnt = 0;
+    memset(fm_gran_at(sp, base), (int)cls, FM_GRAN_COUNT);
 
     *count_out = (uint32_t)n;
     return base;
 }
+
+#ifdef FM_SMALL_FIRST_SPAN /* static build only, like ADR 0060/0061 */
+/* N135: carve the next startup run of cls from the process-wide paged slot,
+ * where the early blocks of different classes share pages.  A run is a
+ * third of what the class has received so far (at least 1 KiB), so the
+ * free-list tail that refill links but nobody uses stays a bounded share
+ * of demand instead of a flat 16 KiB per class.  At FM_PAGED_BUDGET the
+ * class graduates to whole spans, which the census can purge and release;
+ * the budget is below what FM_RELEASE_KEEP retains per class anyway.
+ * Returns the first block, or NULL when cls must use a span. */
+#define FM_PAGED_BUDGET (64u << 10)
+#define FM_PAGED_MIN_RUN 1024u
+static char *fm_paged_run(uint32_t cls, uint32_t *count_out)
+{
+    /* All three are protected by the central lock. */
+    static uint32_t given[CLASS_COUNT];
+    static char *slot;
+    static uint32_t cursor = SPAN_SIZE;
+
+    const uint32_t bs = kClassSize[cls];
+    if (bs > FM_PAGE_SIZE)
+        return NULL;
+    char *spare = NULL, *run = NULL;
+    fm_stack_exclusive();
+    while (given[cls] < FM_PAGED_BUDGET) {
+        uint32_t want = given[cls] / 3;
+        uint32_t n = (want > FM_PAGED_MIN_RUN ? want : FM_PAGED_MIN_RUN) / bs;
+        uint32_t len;
+        /* A run ends on a granule boundary: take the smallest one from
+         * the wanted size up that wastes at most 1/8 of its tail. */
+        for (n = n ? n : 1;; n++) {
+            len = (uint32_t)FM_ALIGN_UP(cursor + n * bs, FM_GRAN_SIZE) - cursor;
+            n = len / bs;
+            if ((len - n * bs) * 8 <= len)
+                break;
+        }
+        if (len <= SPAN_SIZE - cursor) {
+            run = slot + cursor;
+            *count_out = n;
+            /* The first run of a slot starts mid-granule; its map bytes
+             * cover the granules its blocks can start in. */
+            memset(fm_gran_at((FM_Span *)slot, run), (int)cls,
+                   ((cursor + len) >> FM_GRAN_SHIFT) - (cursor >> FM_GRAN_SHIFT));
+            given[cls] += len;
+            cursor += len;
+            break;
+        }
+        if (spare) {
+            FM_Span *sp = (FM_Span *)spare;
+            sp->cls = FM_PAGED_CLASS;
+            sp->magic = FM_SPAN_MAGIC;
+            sp->nblocks = FM_PAGED_NBLOCKS;
+            sp->map_base = (uintptr_t)spare;
+            sp->map_size = SPAN_SIZE;
+            slot = spare;
+            cursor = FM_SMALL_HEADER;
+            spare = NULL;
+            continue;
+        }
+        /* The mapper takes the same lock. */
+        fm_stack_resume();
+        spare = fm_map_dense_span();
+        if (!spare)
+            return NULL;
+        fm_stack_exclusive();
+    }
+    fm_stack_resume();
+    if (spare) /* another thread made it unnecessary */
+        munmap(spare, SPAN_SIZE);
+    return run;
+}
+#endif
 
 /* ------------------------------------------------------------------ */
 /* refill / flush                                                      */
@@ -958,10 +1090,16 @@ __attribute__((noinline, visibility("hidden"))) void *fm_refill_class(uint32_t c
     char *end = fm_bump_end[cls];
     if (cur >= end) {
         uint32_t total = 0;
-        char *base = fm_span_new(cls, &total);
-        if (!base)
-            return NULL;
-        cur = base + HEADER_SIZE;
+#ifdef FM_SMALL_FIRST_SPAN
+        cur = fm_paged_run(cls, &total);
+        if (!cur)
+#endif
+        {
+            char *base = fm_span_new(cls, &total);
+            if (!base)
+                return NULL;
+            cur = base + FM_SMALL_HEADER;
+        }
         end = cur + (size_t)total * bs;
         uint32_t avail0 = (uint32_t)((end - cur) / bs);
         uint32_t keep0 = limit < avail0 ? limit : avail0;
@@ -1047,8 +1185,8 @@ __attribute__((noinline)) static void fm_flush_bin(uint32_t cls)
         void *q = fm_tls.head[cls];
         while (q && n < 100000) {
             FM_Span *s2 = (FM_Span *)((uintptr_t)q & SPAN_MASK);
-            uintptr_t off = (uintptr_t)q - ((uintptr_t)s2 + HEADER_SIZE);
-            if (s2->cls != cls || off % kClassSize[cls] != 0) {
+            uintptr_t off = (uintptr_t)q - ((uintptr_t)s2 + FM_SMALL_HEADER);
+            if (!fm_block_ok(s2, q, cls)) {
                 fprintf(stderr, "[fm] LIST HAS FOREIGN BLOCK cls=%u q=%p "
                                 "span_cls=%u off=%lu bs=%u\n",
                         cls, q, s2->cls, (unsigned long)off,
@@ -1303,9 +1441,9 @@ static _Thread_local uint32_t fm_census_pg_waiting;
 static inline void fm_pg_cover(FM_CensusEnt *e, uintptr_t span, void *p,
                                size_t bs)
 {
-    uint32_t idx = (uint32_t)(((uintptr_t)p - span - HEADER_SIZE) / bs);
-    uint32_t fp = (uint32_t)((HEADER_SIZE + (size_t)idx * bs) / FM_PAGE_SIZE);
-    uint32_t lp = (uint32_t)((HEADER_SIZE + (size_t)(idx + 1) * bs - 1) /
+    uint32_t idx = (uint32_t)(((uintptr_t)p - span - FM_SMALL_HEADER) / bs);
+    uint32_t fp = (uint32_t)((FM_SMALL_HEADER + (size_t)idx * bs) / FM_PAGE_SIZE);
+    uint32_t lp = (uint32_t)((FM_SMALL_HEADER + (size_t)(idx + 1) * bs - 1) /
                              FM_PAGE_SIZE);
     for (uint32_t pg = fp; pg <= lp; pg++)
         e->page_free[pg]++;
@@ -1464,7 +1602,8 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             continue;
         }
         sp->dead_mark = 0;
-        if (!cfg->page_purge)
+        /* A paged slot is shared between classes: no purge arithmetic. */
+        if (!cfg->page_purge || nb == FM_PAGED_NBLOCKS)
             continue;
         /* ADR 0030 reclaim: a span whose withheld blocks are its
          * only free supply left (nothing of it circulates in
@@ -1488,9 +1627,9 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             e->pg_flags |= FM_PG_CANDIDATE;
             any_candidate = 1;
             for (uint32_t idx = 0; idx < nb; idx++) {
-                uint32_t fp = (uint32_t)((HEADER_SIZE + (size_t)idx * bs) /
+                uint32_t fp = (uint32_t)((FM_SMALL_HEADER + (size_t)idx * bs) /
                                          FM_PAGE_SIZE);
-                uint32_t lp = (uint32_t)((HEADER_SIZE +
+                uint32_t lp = (uint32_t)((FM_SMALL_HEADER +
                                           (size_t)(idx + 1) * bs - 1) /
                                          FM_PAGE_SIZE);
                 for (uint32_t pg = fp; pg <= lp; pg++)
@@ -1605,7 +1744,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             uint16_t new_withheld = 0;
             if (new_pages) {
                 for (uint32_t idx = 0; idx < nb; idx++) {
-                    uint32_t fp = (uint32_t)((HEADER_SIZE +
+                    uint32_t fp = (uint32_t)((FM_SMALL_HEADER +
                                               (size_t)idx * bs) /
                                              FM_PAGE_SIZE);
                     if (new_mask & (uint16_t)(1u << fp))
@@ -1678,11 +1817,11 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
         FM_Span *sp = (FM_Span *)e->span;
         uint32_t total = 0;
         for (uint32_t idx = 0; idx < sp->nblocks; idx++) {
-            uint32_t fp = (uint32_t)((HEADER_SIZE + (size_t)idx * bs) /
+            uint32_t fp = (uint32_t)((FM_SMALL_HEADER + (size_t)idx * bs) /
                                      FM_PAGE_SIZE);
             if (!(sp->purged_mask & (uint16_t)(1u << fp)))
                 continue;
-            void *blk = (void *)(e->span + HEADER_SIZE + (size_t)idx * bs);
+            void *blk = (void *)(e->span + FM_SMALL_HEADER + (size_t)idx * bs);
 #ifdef FM_DEBUG
             ((uint64_t *)blk)[1] = 0xDEADDEADDEADDEADull;
 #endif
@@ -2373,6 +2512,7 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
                         uintptr_t rem_addr = (uintptr_t)sp + carve;
                         FM_Span *rem = (FM_Span *)rem_addr;
                         rem->cls = LARGE_CLASS;
+                        rem->gran[0] = FM_LARGE_BYTE;
                         rem->magic = FM_SPAN_MAGIC;
                         rem->nblocks = 1;
                         rem->map_base = rem_addr;
@@ -2433,6 +2573,7 @@ static void *fm_large_alloc_map(size_t size, int *zeroed)
 #endif
     FM_Span *sp = (FM_Span *)base;
     sp->cls = LARGE_CLASS;
+    sp->gran[0] = FM_LARGE_BYTE;
     sp->magic = FM_SPAN_MAGIC;
     sp->nblocks = 1;
     sp->map_base = raw;
@@ -2460,9 +2601,9 @@ __attribute__((noinline)) static void *fm_aligned_alloc_impl(size_t align, size_
     if (align <= 64 && (align & (align - 1)) == 0 && size <= SMALL_MAX) {
         if (align <= 16)
             return fm_malloc(size);
-        /* Every small span is 64 KiB-aligned and HEADER_SIZE is 64:
-         * rounding up to 32 or 64 selects a class whose block size is a
-         * multiple of `align`, so base + 64 + idx * bs is naturally aligned. */
+        /* Every small run starts 64-byte aligned: rounding up to 32 or 64
+         * selects a class whose block size is a multiple of `align`, so
+         * run + idx * bs is naturally aligned. */
         size_t req = FM_ALIGN_UP(size ? size : 1, align);
         return fm_malloc(req);
     }
@@ -2489,6 +2630,7 @@ __attribute__((noinline)) static void *fm_aligned_alloc_impl(size_t align, size_
 
         FM_Span *sp = (FM_Span *)base;
         sp->cls = LARGE_CLASS;
+        *fm_gran_at(sp, (void *)user) = FM_LARGE_BYTE;
         sp->magic = FM_SPAN_MAGIC;
         sp->nblocks = 1;
         sp->map_base = (uintptr_t)base;
@@ -2625,8 +2767,8 @@ static inline void *fm_malloc(size_t size)
 #ifdef FM_DEBUG
             {
                 FM_Span *sp2 = (FM_Span *)((uintptr_t)p & SPAN_MASK);
-                uintptr_t off = (uintptr_t)p - ((uintptr_t)sp2 + HEADER_SIZE);
-                if (sp2->cls != cls || off % kClassSize[cls] != 0) {
+                uintptr_t off = (uintptr_t)p - ((uintptr_t)sp2 + FM_SMALL_HEADER);
+                if (!fm_block_ok(sp2, p, (uint32_t)cls)) {
                     fprintf(stderr,
                             "[fm] BAD HEAD cls=%zu p=%p span_cls=%u off=%lu "
                             "bs=%u\n",
@@ -2641,16 +2783,14 @@ static inline void *fm_malloc(size_t size)
                         "[fm] CORRUPT HEAD size=%zu cls=%zu bs=%u span_cls=%u "
                         "span_nblocks=%u off=%lu canary=%lx\n",
                         size, cls, kClassSize[cls], s3->cls, s3->nblocks,
-                        (unsigned long)((uintptr_t)p - ((uintptr_t)s3 + HEADER_SIZE)),
+                        (unsigned long)((uintptr_t)p - ((uintptr_t)s3 + FM_SMALL_HEADER)),
                         (unsigned long)((uint64_t *)p)[1]);
                 abort();
             }
             {
                 FM_Span *s3 = (FM_Span *)((uintptr_t)p & SPAN_MASK);
-                uintptr_t off = (uintptr_t)p - ((uintptr_t)s3 + HEADER_SIZE);
-                if (off % kClassSize[cls] != 0 ||
-                    off / kClassSize[cls] >= s3->nblocks ||
-                    s3->cls != cls) {
+                uintptr_t off = (uintptr_t)p - ((uintptr_t)s3 + FM_SMALL_HEADER);
+                if (!fm_block_ok(s3, p, (uint32_t)cls)) {
                     fprintf(stderr,
                             "[fm] BAD BLOCK size=%zu cls=%zu bs=%u p=%p "
                             "span_cls=%u off=%lu nblocks=%u\n",
@@ -2695,7 +2835,11 @@ __attribute__((noinline)) static void fm_free_cnt_slow(uint32_t cls)
     fm_flush_bin(cls);
 }
 
-static inline void fm_tls_push_free(void *p, size_t cls)
+/* `slot` is the block's granule class byte, used directly as the index of
+ * all three parallel TLS arrays.  FM_LARGE_SLOT (0xff) is that sentinel's
+ * byte; its head is always empty, so the large-free dispatch is folded into
+ * the empty-head branch below and costs no hot-path branch. */
+static inline void fm_tls_push_free(void *p, size_t slot)
 {
 #if defined(__x86_64__) && !defined(FM_DEBUG) && \
     !defined(__SANITIZE_ADDRESS__) && !defined(__SANITIZE_THREAD__) && \
@@ -2705,37 +2849,48 @@ static inline void fm_tls_push_free(void *p, size_t cls)
     _Bool le;
     __asm__(
         "movq fm_tls@GOTTPOFF(%%rip), %[off]\n\t"
-        "movq %%fs:(%[off],%[cls],8), %[old]\n\t"
+        "movq %%fs:(%[off],%[slot],8), %[old]\n\t"
         "movq %[old], (%[p])\n\t"
-        "movq %[p], %%fs:(%[off],%[cls],8)"
+        "movq %[p], %%fs:(%[off],%[slot],8)"
         : [off] "=&r"(tp_off), [old] "=&r"(old_h)
-        : [cls] "r"(cls), [p] "r"(p)
+        : [slot] "r"(slot), [p] "r"(p)
         : "memory");
     if (__builtin_expect(!old_h, 0)) {
-        __asm__("movq %[p], %%fs:%c[toff](%[off],%[cls],8)"
+        if (__builtin_expect(slot == FM_LARGE_SLOT, 0)) {
+            /* Undo the speculative push into the reserved empty slot and
+             * take the large/munmap path; never touch cnt or tail there. */
+            fm_tls.head[slot] = NULL;
+            fm_free_slow_large((FM_Span *)((uintptr_t)p & SPAN_MASK), p);
+            return;
+        }
+        __asm__("movq %[p], %%fs:%c[toff](%[off],%[slot],8)"
                 :
-                : [off] "r"(tp_off), [cls] "r"(cls), [p] "r"(p),
+                : [off] "r"(tp_off), [slot] "r"(slot), [p] "r"(p),
                   [toff] "i"(offsetof(FM_HotTls, tail))
                 : "memory");
     }
-    __asm__("subl $1, %%fs:%c[coff](%[off],%[cls],4)"
+    __asm__("subl $1, %%fs:%c[coff](%[off],%[slot],4)"
             : "=@ccle"(le)
-            : [off] "r"(tp_off), [cls] "r"(cls),
+            : [off] "r"(tp_off), [slot] "r"(slot),
               [coff] "i"(offsetof(FM_HotTls, cnt))
             : "memory", "cc");
     if (__builtin_expect(le, 0))
-        fm_free_cnt_slow((uint32_t)cls);
+        fm_free_cnt_slow((uint32_t)slot);
 #else
-    void *old_h = fm_tls.head[cls];
+    if (__builtin_expect(slot == FM_LARGE_SLOT, 0)) {
+        fm_free_slow_large((FM_Span *)((uintptr_t)p & SPAN_MASK), p);
+        return;
+    }
+    void *old_h = fm_tls.head[slot];
     *(void **)p = old_h;
 #ifdef FM_DEBUG
     ((uint64_t *)p)[1] = 0xDEADDEADDEADDEADull;
 #endif
-    fm_tls.head[cls] = p;
+    fm_tls.head[slot] = p;
     if (__builtin_expect(!old_h, 0))
-        fm_tls.tail[cls] = p;
-    if (__builtin_expect(--fm_tls.cnt[cls] <= 0, 0))
-        fm_free_cnt_slow((uint32_t)cls);
+        fm_tls.tail[slot] = p;
+    if (__builtin_expect(--fm_tls.cnt[slot] <= 0, 0))
+        fm_free_cnt_slow((uint32_t)slot);
 #endif
 }
 
@@ -2752,38 +2907,48 @@ static inline void fm_free(void *p)
         }
     }
     FM_Span *sp;
+    size_t slot;
 #if defined(__x86_64__)
     {
-        uintptr_t base = (uintptr_t)p;
-        __asm__("andq $-65536, %0" : "+r"(base) : : "cc");
+        /* N96: the granule class byte is also the free-list slot, so the
+         * explicit LARGE_CLASS compare moves into the empty-head branch of
+         * fm_tls_push_free.  The explicit zero-extending load saves the
+         * index extension that the compiler emits for a byte compare. */
+        uintptr_t base = (uintptr_t)p, gran;
+        __asm__("movzbl %h1, %k0\n\t"
+                "andq $-65536, %1" : "=&R"(gran), "+Q"(base) : : "cc");
         sp = (FM_Span *)base;
+        __asm__("movzbl %1, %k0" : "=r"(slot)
+                : "m"(((const uint8_t *)base)[FM_GRAN_OFF + gran]));
     }
 #else
     sp = (FM_Span *)((uintptr_t)p & SPAN_MASK);
+    slot = *fm_gran_at(sp, p);
 #endif
-    uint32_t cls32 = sp->cls;
-    if (__builtin_expect(cls32 == LARGE_CLASS, 0)) {
-        fm_free_slow_large(sp, p);
-        return;
-    }
-    size_t cls = cls32;
 #ifdef FM_DEBUG
     {
         /* The block must lie inside its span, at a block boundary of its
-         * class.  If this ever fails the class mapping is inconsistent. */
+         * class.  If this ever fails the class mapping is inconsistent.
+         * Debug builds keep the explicit large test: the checks below need
+         * a real class to index kClassSize. */
+        if (slot == FM_LARGE_BYTE) {
+            fm_free_slow_large(sp, p);
+            return;
+        }
         uintptr_t base = (uintptr_t)sp;
-        uintptr_t off = (uintptr_t)p - (base + HEADER_SIZE);
-        if (off % kClassSize[cls] != 0 || off / kClassSize[cls] >= sp->nblocks) {
+        uintptr_t off = (uintptr_t)p - (base + FM_SMALL_HEADER);
+        if (slot >= CLASS_COUNT || !fm_block_ok(sp, p, (uint32_t)slot)) {
             fprintf(stderr,
                     "[fm] BAD BLOCK p=%p base=%p off=%lu cls=%zu bs=%u "
                     "nblocks=%u\n",
-                    p, (void *)base, (unsigned long)off, cls,
-                    kClassSize[cls], sp->nblocks);
+                    p, (void *)base, (unsigned long)off, slot,
+                    kClassSize[slot], sp->nblocks);
             abort();
         }
     }
 #endif
-    fm_tls_push_free(p, cls);
+    (void)sp; /* the large path re-derives the span in fm_tls_push_free */
+    fm_tls_push_free(p, slot);
 }
 
 __attribute__((noinline, cold)) static void *fm_calloc_overflow(void)
@@ -2880,10 +3045,11 @@ static inline size_t fm_usable_size(void *p)
     }
     const FM_Span *sp = (const FM_Span *)(u & SPAN_MASK);
     if (__builtin_expect(sp->magic == FM_SPAN_MAGIC, 1)) {
-        if (sp->cls == LARGE_CLASS)
+        uint32_t cls = *fm_gran_at(sp, p);
+        if (cls == FM_LARGE_BYTE)
             return sp->user_size;
-        if (sp->cls < CLASS_COUNT)
-            return kClassSize[sp->cls];
+        if (cls < CLASS_COUNT)
+            return kClassSize[cls];
     }
     return fm_foreign_usable_size(p);
 }
@@ -2906,8 +3072,9 @@ __attribute__((noinline)) static void *fm_realloc_slow(void *p, size_t size)
         return q;
     }
     FM_Span *sp = (FM_Span *)((uintptr_t)p & SPAN_MASK);
-    if (sp->cls != LARGE_CLASS) {
-        size_t old = kClassSize[sp->cls];
+    uint32_t old_cls = *fm_gran_at(sp, p);
+    if (old_cls != FM_LARGE_BYTE) {
+        size_t old = kClassSize[old_cls];
         if (size <= old)
             return p;
         /* Incremental growth across the densely spaced medium classes
@@ -2954,8 +3121,8 @@ static inline void *fm_realloc(void *p, size_t size)
         return fm_malloc(size);
     if (__builtin_expect(((uintptr_t)p & (SPAN_SIZE - 1)) != 0 && size != 0, 1)) {
         FM_Span *sp = (FM_Span *)((uintptr_t)p & SPAN_MASK);
-        uint32_t cls = sp->cls;
-        if (__builtin_expect(cls != LARGE_CLASS, 1)) {
+        uint32_t cls = *fm_gran_at(sp, p);
+        if (__builtin_expect(cls != FM_LARGE_BYTE, 1)) {
             if (__builtin_expect(size <= kClassSize[cls], 1))
                 return p;
         } else if (sp->align == 0) {

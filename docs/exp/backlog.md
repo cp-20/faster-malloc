@@ -528,9 +528,15 @@ the large-free slow path only.
 
 11-rep exp-bench: micro **1.0003 / worst 1.0004**, real paired 1.0021,
 real worst 1.0061; the seven exp-bench fixtures are small enough that
-their cold blocks are few, so their RSS is flat (as expected).  The
-legacy matrix, where gcc/lua/sqlite have multi-MiB cold blocks, is
-running.
+their cold blocks are few, so their RSS is flat (as expected).
+
+11-rep legacy: **no app moves** (gcc 366,992 vs 366,840 KiB, redis
+-0.16, sqlite -0.15, jq/lua/python/node/git flat, all within noise).  The
+local gcc result (-18.1 MiB at +1.2% time, 11 paired reps) does not
+reproduce because the CI toolchain's gcc allocates in blocks above the
+256 KiB cold cap, so nothing is cold-cached to purge.  **Rejected**: the
+mechanism only fires where cold blocks exist, and the authoritative
+matrix has none.
 
 ## Rejected (do not repeat without a materially different mechanism)
 

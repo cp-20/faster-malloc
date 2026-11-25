@@ -648,3 +648,15 @@ exists; check `git ls-remote origin 'refs/heads/exp/*'`.
 | `exp/auto-n41` (N41) | micro 1.0737, micro worst 1.1332, paired 1.0211, paired worst 1.1263, RSS flat | REJECTED (atexit unmap costs time everywhere, no RSS gain) |
 | `exp/auto-n70` (N70) | micro 1.0000, paired 1.0059, paired worst 1.0625, sort paired 1.0000, sort RSS flat | REJECTED (8-16 MiB cold purge + warm-huge combination does not move sort) |
 | `exp/auto-n135` (N135) | no branch; legacy local worker died twice, second attempt left uncommitted changes only | RELAUNCHED via T3 Code (Claude Opus) this cycle |
+
+## Campaign harvest 2026-11-25 cycle 3 (T3 batch + N15 rerun + N135)
+
+| branch | CI | status |
+|---|---|---|
+| `exp/auto-n15` (N15) | 11-rep rerun run 45539376472: micro 0.9621, paired 1.0007, paired worst 1.0040, RSS flat | REJECTED (final: exact-Ir win does not translate to real apps; supersedes the cycle-2 INCONCLUSIVE entry) |
+| `exp/auto-n111` (N111) | micro 1.0000, worst 1.0001, paired 1.0043, worst 1.0119, RSS flat | REJECTED (header cache-line isolation is a no-op) |
+| `exp/auto-n71` (N71) | micro 1.0002, paired 0.9919, worst 1.0070 | REJECTED (paired fails the <=0.99 gate; RSS hints only at coarse MiB rounding) |
+| `exp/auto-n17` (N17) | micro 1.0247, worst 1.0667, paired 0.9968 | REJECTED (8-byte classes below 128B cost micro +2.5%; also touched gen_classes2.py/size_classes2.h outside gate scope) |
+| `exp/auto-n62` (N62) | micro 1.0000, paired 0.9923, worst 1.0000, RSS flat | REJECTED (N1+N24 combination is a no-op) |
+| `exp/auto-n33` (N33) | micro 0.9817, worst 0.9879, paired 0.9965, worst 1.0067 | INCONCLUSIVE (micro near-win, but real gate fails and diff touched fm_jit.c/jit_stubs.S outside allowed scope; follow-up must be confined to fm_core.h/fm_static.c) |
+| `exp/auto-n135` (N135) | run 45540416774 (3 reps): micro 1.0003, worst 1.0017, paired 0.9880, paired worst 1.0040, RSS ~-1 MiB on every app (coarse rounding); diff only src/fm_core.h | INCONCLUSIVE (micro gate fails by 0.0003 while paired passes; paired win is driven by the noisy 17 ms git row; 11-rep rerun dispatched, run 45541015077, tag n135-rerun11) |

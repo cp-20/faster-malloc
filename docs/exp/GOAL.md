@@ -100,6 +100,26 @@ Every residual has now been decomposed and bounded by measurement:
 * **node**: 27 MiB payload retention is the same trade; the knobs expose
   both ends (`FM_LCACHE_MAX_BYTES=67108864` restores time at +60 MiB).
 
+### Process correction: the stale baseline
+
+Several candidates in Rounds 35-40 appeared to win ~18 MiB on gcc locally
+and then changed nothing on the CI matrix.  The cause was found: the
+local worktree was still checked out at the pre-merge commit (ac6b631),
+so every local A/B measured the candidate against a *pre-PR#5* library.
+The apparent 18 MiB was the selective cache's own effect, already in
+main.  Re-measured against `origin/main` (920463f) on the same fixtures:
+
+| build | gcc RSS | lua RSS | sqlite RSS |
+|---|---:|---:|---:|
+| main (920463f) | 351.5-351.8 MB | 14.6-15.0 MB | 11.14-11.17 MB |
+| 32704 class | 351.5-351.8 | 14.8-15.0 | 10.90-11.13 |
+| cold purge on insert | 351.3-351.8 | 14.8-16.3 | 11.05-11.10 |
+| node, 2 MiB THP hint | 351.6-351.7 | - | - |
+
+All three are no-ops, exactly as the CI reported.  **Rule for future
+cycles: rebuild and assert the baseline from `origin/main` HEAD before
+any local A/B.**
+
 The standing candidate is therefore at the measured Pareto frontier of
 this architecture; the remaining options are explicit knobs
 (`FM_LCACHE_BUCKET_COLD=0`: sqlite 11.1 -> 9.4 MiB at +15% time;

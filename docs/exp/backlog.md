@@ -522,10 +522,25 @@ where the git/lua/sqlite gap lives.
 | sqlite speedtest1 | 11.5-11.6 MB / 2.20 s | **10.4-10.5 / 2.19** |
 | lua churn | 16.0-16.5 MB / 0.36 s | **14.9-15.4 / 0.34-0.37** |
 
-`test_basic`, `stress`, `rtest`, `valgrind` (all with the page heap on)
-and the JIT library's `test_basic` pass.  The 11-rep matrices are running;
-the only open question is whether the one extra range compare per
-allocation moves the micro geomean.
+## Verdict: rejected by the instruction count
+
+Local callgrind (the same measurement the CI micro uses) on that build:
+
+| micro case | main | page heap | ratio |
+|---|---:|---:|---:|
+| churn 64 | 4,459,346 | 5,163,041 | 1.1578 |
+| churn 8 | 4,429,483 | 5,133,192 | 1.1589 |
+| churn 1024 | 5,041,381 | 5,745,076 | 1.1396 |
+| churnmix | 5,683,448 | 6,387,143 | 1.1238 |
+| mixed | 6,415,769 | 6,979,490 | 1.0879 |
+| retain | 4,070,577 | 4,634,291 | 1.1385 |
+| cross | 4,169,398 | 4,733,112 | 1.1352 |
+
+Every case moves, including churn 8/64 which never enter the band: the
+routing costs ~7 instructions per malloc/free pair (the whole v2 pair is
+about 44 instructions), i.e. 12-16%.  No page-heap band can be
+micro-neutral while the free path has to distinguish its pointers by
+range.  The 11-rep runs were cancelled; the band idea is closed.
 
 ## Rejected (do not repeat without a materially different mechanism)
 

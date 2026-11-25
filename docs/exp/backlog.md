@@ -516,6 +516,15 @@ for memory-first deployments.  git/lua/node are neutral at every value.
 The hint cannot be made size-selective: jq's dense-extent demand sits
 between git's and lua's, so any threshold that drops git/lua drops jq too.
 
+## Round 39: the 32704-byte class (2026-11-25)
+
+| id | branch | result | status |
+|---|---|---|---|
+| G3 | `exp/class-32704` | add a 32704-byte class so payload+header is exactly 8 pages and a 64 KiB span holds 2 blocks (no spill): local gcc 370.2 -> **351.8 MB**, lua 16.5 -> 14.9, sqlite 11.5 -> 11.0, git neutral, all at unchanged time; callgrind micro 1.0006-1.0015; `test_basic`/`stress`/`rtest` pass | **candidate** (11-rep matrices running) |
+
+This is the direct fix for Round 38's measured one-page spill, with no
+new lookup on any hot path.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

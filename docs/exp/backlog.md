@@ -637,3 +637,14 @@ exists; check `git ls-remote origin 'refs/heads/exp/*'`.
 | `exp/cold-purge-on-insert` | micro 1.0003, paired 0.9862, worst 1.0000, RSS mixed (gxx -1.5 MiB, sort +0.2 MiB) | REJECTED (no legacy effect; local re-measure vs origin/main is a no-op) |
 | `exp/diag-sizes` | micro 1.0000, paired 0.9951, worst 1.0114 | INCONCLUSIVE (diagnostic branch, not a candidate) |
 | `exp/pageheap257` | micro 1.1319, paired 1.0815, worst 1.2182, RSS up | REJECTED (byte-granular page heap for 257-1023 B is micro-fatal) |
+
+## Campaign harvest 2026-11-25 cycle 2 (manager cycle, origin/main b931da9)
+
+| branch | CI (3 reps) | status |
+|---|---|---|
+| `exp/auto-n15` (N15) | micro 0.9621, micro worst 0.9753, paired 0.9996, paired worst 1.0078, RSS flat | INCONCLUSIVE (strong exact-Ir win does not translate to real apps at 3 reps; 11-rep rerun dispatched, tag n15-rerun11) |
+| `exp/auto-n22` (N22) | micro 1.0232, micro worst 1.1200, paired 0.9933, RSS git 13.5 -> 12.7 MiB, sqlite 13.6 -> 12.8 MiB | REJECTED (micro gate fails badly; RSS gain on small apps does not offset the fast-path cost) |
+| `exp/auto-n126` (N126) | micro 0.9997, paired 1.0007, paired worst 1.0058, RSS flat (git +0.2 MiB) | REJECTED (single-heap startup mechanism is a measured no-op; startup gap is not fewer mappings via this route) |
+| `exp/auto-n41` (N41) | micro 1.0737, micro worst 1.1332, paired 1.0211, paired worst 1.1263, RSS flat | REJECTED (atexit unmap costs time everywhere, no RSS gain) |
+| `exp/auto-n70` (N70) | micro 1.0000, paired 1.0059, paired worst 1.0625, sort paired 1.0000, sort RSS flat | REJECTED (8-16 MiB cold purge + warm-huge combination does not move sort) |
+| `exp/auto-n135` (N135) | no branch; legacy local worker died twice, second attempt left uncommitted changes only | RELAUNCHED via T3 Code (Claude Opus) this cycle |

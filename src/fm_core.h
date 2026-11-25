@@ -168,7 +168,11 @@ typedef struct FM_Central {
     _Atomic uint32_t interval_ms;
     /* Early placement scans are paced in flushes, separately from ageing. */
     _Atomic uint32_t prompt_mask;
-    char pad[64 - sizeof(_Atomic(FM_Batch *)) - 4 * sizeof(_Atomic uint32_t)];
+    /* Dead-span hint: oldest un-aged dead mark (ms) among the fully-free
+     * spans the last automatic census put back beyond the keep quota;
+     * 0 = none.  Written under fm_census_lock. */
+    _Atomic uint32_t dead_hint;
+    char pad[64 - sizeof(_Atomic(FM_Batch *)) - 5 * sizeof(_Atomic uint32_t)];
 } FM_Central;
 
 extern FM_Central fm_central[CLASS_COUNT];
@@ -314,6 +318,15 @@ extern __thread uint32_t fm_lbucket_seen[FM_LCACHE_BUCKETS]
 #define FM_RELEASE_AGE_MS 100u
 #define FM_RELEASE_INTERVAL_MS 10u
 #define FM_RELEASE_MAX_INTERVAL_MS 5000u
+/* Batches a hinted release may inspect under the central lock. */
+#define FM_HINT_WALK_MAX 128u
+
+/* Page-purge minimum (ADR 0030): two pages for classes up to
+ * FM_PURGE_SMALL_MAX bytes, whose free pages are hard to assemble,
+ * four for the rest.  Only the default is class-adaptive. */
+#define FM_PURGE_MIN_PAGES 4u
+#define FM_PURGE_MIN_PAGES_SMALL 2u
+#define FM_PURGE_SMALL_MAX 512u
 
 /* ADR 0024: in the census rebuild, a span needs at least this many
  * blocks in central to earn its own span-pure batch; smaller
@@ -395,7 +408,7 @@ static void fm_config_init(void)
     c.lbucket_warm = FM_LCACHE_BUCKET_WARM;
     c.lbucket_cold = FM_LCACHE_BUCKET_COLD;
     c.page_purge = 1;
-    c.purge_min_pages = 4;
+    c.purge_min_pages = FM_PURGE_MIN_PAGES;
     c.idle_release = 0;
     c.realloc_cache_search = 0;
     c.local_limit_div = 1;
@@ -1355,6 +1368,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
         pthread_mutex_lock(&fm_census_lock);
     int was_in_census = fm_in_census;
     fm_in_census = 1; /* the flush below must not re-trigger release */
+    atomic_store_explicit(&fm_central[cls].dead_hint, 0, memory_order_relaxed);
     fm_flush_bin(cls);
 
     /* Detach the whole central stack atomically.  Batches published
@@ -1427,7 +1441,11 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
      * previously withheld blocks) in the phases below. */
     const FM_Config *cfg = FM_CFG();
     const size_t bs = kClassSize[cls];
+    const uint32_t min_pages =
+        cfg->purge_min_pages == FM_PURGE_MIN_PAGES && bs <= FM_PURGE_SMALL_MAX
+            ? FM_PURGE_MIN_PAGES_SMALL : cfg->purge_min_pages;
     uint32_t now = instant ? 0 : fm_now_ms();
+    uint32_t hint = 0; /* oldest mark still ageing */
     fm_census_marked = 0;
     fm_census_waiting = 0;
     fm_census_purged = 0;
@@ -1455,11 +1473,16 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             } else if (!sp->dead_mark) {
                 sp->dead_mark = now ? now : 1;
                 fm_census_marked++;
+                if (!hint)
+                    hint = now ? now : 1;
             } else if ((uint32_t)(now - sp->dead_mark) >=
                        cfg->release_age_ms) {
                 e->dead = 1;
             } else {
+                uint32_t mark = sp->dead_mark;
                 fm_census_waiting++;
+                if (!hint || (int32_t)(mark - hint) < 0)
+                    hint = mark;
             }
             continue;
         }
@@ -1480,7 +1503,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
          * minimum-size purge run could exist.  The coverage pass
          * decides whether it really does. */
         if (e->cnt && (uint64_t)e->cnt * bs >=
-                          (uint64_t)(cfg->purge_min_pages - 1) * FM_PAGE_SIZE) {
+                          (uint64_t)(min_pages - 1) * FM_PAGE_SIZE) {
             memset(e->page_free, 0, sizeof(e->page_free));
             memset(e->page_tot, 0, sizeof(e->page_tot));
             memset(e->page_sfree, 0, sizeof(e->page_sfree));
@@ -1589,7 +1612,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             }
             uint16_t new_mask = 0;
             uint32_t new_pages = 0;
-            if (cand_pages >= cfg->purge_min_pages) {
+            if (cand_pages >= min_pages) {
                 unsigned char vec[16];
                 int have_vec = mincore((void *)e->span, sp->map_size, vec) == 0;
                 for (uint32_t pg = 1; pg < 16; pg++) {
@@ -1599,7 +1622,7 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
                         new_pages++;
                     }
                 }
-                if (new_pages < cfg->purge_min_pages)
+                if (new_pages < min_pages)
                     new_mask = 0, new_pages = 0;
             }
             uint16_t new_withheld = 0;
@@ -1639,8 +1662,8 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
      * keeps up to `keep` of the dead spans -- their blocks stay on
      * the central stack, immediately reusable -- and unmaps only
      * the excess.  malloc_trim passes keep == 0 and releases all. */
+    uint32_t kept = 0;
     if (keep) {
-        uint32_t kept = 0;
         for (size_t i = 0; i < cen.cap && kept < keep; i++) {
             FM_CensusEnt *e = &cen.ents[i];
             if (e->span && e->dead) {
@@ -1927,10 +1950,69 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
     while (stride <= flushes / 2 && stride < (1u << 30))
         stride *= 2;
     atomic_store_explicit(&fm_central[cls].prompt_mask, stride - 1, memory_order_relaxed);
+    if (hint && (size_t)kept + fm_census_marked + fm_census_waiting > keep)
+        atomic_store_explicit(&fm_central[cls].dead_hint, hint, memory_order_relaxed);
     fm_census_reset(&cen);
     fm_in_census = was_in_census;
     pthread_mutex_unlock(&fm_census_lock);
     return released;
+}
+
+/* Release one aged dead span between censuses, without a census.  The
+ * rebuild publishes a fully-free span as one span-pure batch, so a pure
+ * batch whose count plus the span's withheld blocks (ADR 0030) equals
+ * nblocks proves the span free: no block can be in a thread cache, a
+ * bump range or another batch.  Owning the census lock freezes marks,
+ * withheld counts and unmapping; unlinking under the stack lock takes
+ * the blocks out of every refill's reach.  The age gate and the keep
+ * quota are ADR 0020's: the first `keep` fully-free spans from the top
+ * (the next ones a refill takes) always stay. */
+__attribute__((noinline)) static void fm_hint_release(uint32_t cls)
+{
+    const FM_Config *cfg = FM_CFG();
+    FM_Central *c = &fm_central[cls];
+    if (pthread_mutex_trylock(&fm_census_lock) != 0)
+        return;
+    /* Sampled under the lock: no mark can be newer, so ages never wrap. */
+    uint32_t now = fm_now_ms();
+    uint32_t next_hint = 0;
+    uint32_t full = 0, hops = 0;
+    FM_Batch *victim = NULL, *prev = NULL;
+    FM_Span *vsp = NULL;
+    fm_stack_exclusive();
+    for (FM_Batch *b = atomic_load_explicit(&c->head, memory_order_relaxed);
+         b && hops < FM_HINT_WALK_MAX; prev = b, b = b->next, hops++) {
+        uint32_t cnt = b->count & FM_COUNT_MASK;
+        if (!cnt || !(b->count & FM_COUNT_PURE))
+            continue;
+        FM_Span *sp = (FM_Span *)((uintptr_t)b->head & SPAN_MASK);
+        if (cnt + sp->withheld_cnt != sp->nblocks || ++full <= cfg->release_keep)
+            continue;
+        uint32_t mark = sp->dead_mark;
+        if (!mark)
+            continue;
+        if ((uint32_t)(now - mark) < cfg->release_age_ms) {
+            if (!next_hint || (int32_t)(mark - next_hint) < 0)
+                next_hint = mark;
+            continue;
+        }
+        if (prev)
+            prev->next = b->next;
+        else
+            atomic_store_explicit(&c->head, b->next, memory_order_relaxed);
+        atomic_fetch_sub_explicit(&c->depth, 1, memory_order_relaxed);
+        victim = b;
+        vsp = sp;
+        next_hint = mark; /* look again next tick, one span at a time */
+        break;
+    }
+    fm_stack_resume();
+    if (victim) {
+        fm_batch_release(victim);
+        munmap((void *)vsp->map_base, vsp->map_size);
+    }
+    atomic_store_explicit(&c->dead_hint, next_hint, memory_order_relaxed);
+    pthread_mutex_unlock(&fm_census_lock);
 }
 
 /* Consider one class for automatic release (ADR 0020): census it
@@ -1957,6 +2039,11 @@ static void fm_release_maybe(uint32_t cls, uint32_t now, uint32_t flushed_cls)
     int time_ok = (!last || (uint32_t)(now - last) >=
                                (interval ? interval : cfg->release_interval_ms));
     if (!time_ok) {
+        /* The census interval can far exceed the dead-mark age; a hint
+         * lets aged spans go without paying for an early walk. */
+        uint32_t hint = atomic_load_explicit(&c->dead_hint, memory_order_relaxed);
+        if (hint && (int32_t)(now - hint) >= (int32_t)cfg->release_age_ms)
+            fm_hint_release(cls);
         /* Regroup promptly when uncharacterised batches pile up (the
          * historical trigger) or when the stack fragments into many
          * small span-pure batches: flush-time splitting (ADR 0024)

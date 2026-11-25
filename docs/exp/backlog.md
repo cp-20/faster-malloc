@@ -627,3 +627,13 @@ The campaign manager assigns the next IDs.  An implementation agent
 should use the branch name in the table, start from current `main`, and
 follow `docs/exp/README.md`.  Do not reuse a branch name that already
 exists; check `git ls-remote origin 'refs/heads/exp/*'`.
+
+## Campaign harvest 2026-11-25 (manager cycle, origin/main 06f21f6)
+
+| branch | CI (3 reps) | status |
+|---|---|---|
+| `exp/class-32704` | micro 1.0000, paired 1.0088, worst 1.0435, RSS flat | REJECTED (no-op vs origin/main; exact 32 KiB allocations, see GOAL.md frontier) |
+| `exp/class-minus64` | micro 1.0002, paired 1.0026, worst 1.0124 | REJECTED (neutral; smaller page-aligned classes add nothing) |
+| `exp/cold-purge-on-insert` | micro 1.0003, paired 0.9862, worst 1.0000, RSS mixed (gxx -1.5 MiB, sort +0.2 MiB) | REJECTED (no legacy effect; local re-measure vs origin/main is a no-op) |
+| `exp/diag-sizes` | micro 1.0000, paired 0.9951, worst 1.0114 | INCONCLUSIVE (diagnostic branch, not a candidate) |
+| `exp/pageheap257` | micro 1.1319, paired 1.0815, worst 1.2182, RSS up | REJECTED (byte-granular page heap for 257-1023 B is micro-fatal) |

@@ -537,6 +537,29 @@ slices trades RSS 1:1 (Round 21) and a purged cache only saves the mmap
 syscall (~0.2% of gcc's time, Round 26b), so neither shape offers a
 slow-path win.  The gap is the 32 KiB class's per-class pages.
 
+## Round 37: the large buckets are warm, not cold (2026-11-25)
+
+The extended `FM_DIAG_SIZES` build counts cache hits per large bucket
+(the insert counter did not get wired into the post-PR#5 insert block, so
+only hits are reported; hits still prove reuse).  CI, legacy fixtures:
+
+| app | 64 KiB bucket hits | 128 KiB bucket hits | 256 KiB bucket hits |
+|---|---:|---:|---:|
+| gcc | **22,459** | **12,341** | 294 |
+| sqlite | 395 | **5,641** | 16 |
+| git | 4 | 2 | - |
+
+gcc allocates 12,561 x 64 KiB and hits the 64 KiB bucket 22,459 times
+(other sizes 32-64 KiB also land in it), so the bucket is *warm*: the
+cache is serving real reuse and its 4 MiB retention is buying time.  The
+cold-purge variant (Round 35) therefore had nothing to purge in these
+apps, which is exactly what the legacy matrix showed.
+
+Conclusion: the dominant shapes -- the 32 KiB class (22,357 gcc
+allocations, span path) and the warm 64/128 KiB buckets -- are already at
+their measured Pareto point.  Any further RSS cut there is the same
+1 MiB-for-time trade the campaign has now measured four ways.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

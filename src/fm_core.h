@@ -363,6 +363,8 @@ typedef struct FM_Config {
     uint32_t regroup_min;
     uint32_t regroup_only_depth;
     uint64_t lcache_max_bytes;
+    uint32_t lbucket_warm;   /* per-bucket cap for a bucket that hits */
+    uint32_t lbucket_cold;   /* per-bucket cap for a bucket that never hits */
     uint32_t page_purge;
     uint32_t purge_min_pages;
     uint32_t idle_release;
@@ -389,6 +391,8 @@ static void fm_config_init(void)
     c.regroup_min = FM_REGROUP_MIN;
     c.regroup_only_depth = 32;
     c.lcache_max_bytes = FM_LCACHE_MAX_BYTES;
+    c.lbucket_warm = FM_LCACHE_BUCKET_WARM;
+    c.lbucket_cold = FM_LCACHE_BUCKET_COLD;
     c.page_purge = 1;
     c.purge_min_pages = 4;
     c.idle_release = 0;
@@ -414,6 +418,8 @@ static void fm_config_init(void)
             c.release_max_interval_ms = 30000;
             c.release_walk_div = 25;
             c.lcache_max_bytes = 256ull << 20;
+            c.lbucket_warm = 32u << 20;
+            c.lbucket_cold = 1u << 20;
             c.page_purge = 0;
             c.lcache_cold_purge = 0;
         } else if (!strcmp(prof, "shortlived")) {
@@ -451,6 +457,8 @@ static void fm_config_init(void)
         { "FM_REALLOC_CACHE_SEARCH", &c.realloc_cache_search, 0, 1 },
         { "FM_LOCAL_LIMIT_DIV", &c.local_limit_div, 1, 16 },
         { "FM_LCACHE_COLD_PURGE", &c.lcache_cold_purge, 0, 1 },
+        { "FM_LCACHE_BUCKET_WARM", &c.lbucket_warm, 0, 64u << 20 },
+        { "FM_LCACHE_BUCKET_COLD", &c.lbucket_cold, 0, 4u << 20 },
         { "FM_LAZY_BUMP", &c.lazy_bump, 0, 1 },
         { "FM_LOCALITY_SORT", &c.locality_sort, 0, 1 },
     };
@@ -2237,8 +2245,9 @@ static inline void fm_large_free(FM_Span *sp, void *p)
                     (void)madvise((void *)pstart, pend - pstart, MADV_DONTNEED);
             }
             int warm = (fm_lcache_warm_mask & (1ULL << b)) != 0;
-            int take = warm ? (fm_lbucket_bytes[b] + ms <= FM_LCACHE_BUCKET_WARM)
-                            : (fm_lbucket_bytes[b] == 0 && ms <= FM_LCACHE_BUCKET_COLD);
+            uint32_t cap = warm ? FM_CFG()->lbucket_warm : FM_CFG()->lbucket_cold;
+            int take = warm ? (fm_lbucket_bytes[b] + ms <= cap)
+                            : (fm_lbucket_bytes[b] == 0 && ms <= cap);
             if (take) {
                 sp->lnext = (uintptr_t)fm_lcache_head[b];
                 fm_lcache_head[b] = sp;

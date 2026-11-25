@@ -47,6 +47,18 @@ take = warm ? (bucket_bytes[b] + ms <= 4 MiB)
 Time is unchanged on every case; `test_basic`, `stress`, `rtest`,
 `valgrind` and `mtrepeat` pass.  The 11-rep CI matrices are running.
 
+## Configuration
+
+The trade-offs are runtime knobs, so a deployment can pick its point
+without rebuilding:
+
+| knob | default | effect |
+|---|---:|---|
+| `FM_LCACHE_MAX_BYTES` | 16 MiB | base budget; 64 MiB restores the pre-PR cache, which buys node ~6 points of time for ~60 MiB of RSS |
+| `FM_LCACHE_BUCKET_WARM` | 4 MiB | per-bucket cap once the bucket has hit; 0 disables warm retention |
+| `FM_LCACHE_BUCKET_COLD` | 256 KiB | per-bucket cap for a bucket that never hit; 0 disables cold retention (sqlite speedtest1 11.1 -> 9.4 MiB at +15% sqlite time) |
+| `FM_PROFILE` | balanced | `throughput` keeps 256 MiB and wide caps |
+
 ## Risks
 
 * The warm mask is sticky, so a bucket that hit once may retain up to

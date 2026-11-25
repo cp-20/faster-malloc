@@ -2236,14 +2236,21 @@ static inline void fm_large_free(FM_Span *sp, void *p)
             fm_lcache_bytes + ms <= fm_lcache_budget(b) &&
             fm_ltick - fm_lbucket_seen[b] <=
                 ((fm_lcache_warm_mask & (1ULL << b)) ? 64u : FM_LCACHE_HOT_WINDOW)) {
-            /* Only purge cold mappings large enough that the application is
-             * unlikely to reuse them soon (bucket b covers usable sizes in
-             * [2^b, 2^(b+1)), so b >= 24 means >= 16 MiB).  Medium buffers
-             * churned by jq/g++/Python stay resident when re-freed, while
-             * sort's one-shot merge buffers (>= 16 MiB) are still purged. */
+            /* Purge resident pages of mappings large enough that their
+             * payloads are unlikely to be reused soon (bucket b covers
+             * usable sizes in [2^b, 2^(b+1))).  Warm-huge: a >= 16 MiB
+             * payload (b >= 24) is worth dropping even on a warm bucket --
+             * V8 external/Buffer churn cycles many distinct huge buffers
+             * through a bucket marked warm on its first reuse, and the warm
+             * exemption otherwise keeps the whole warm budget resident.
+             * N45: the 8-16 MiB band (b == 23) is purged only while the bucket
+             * is still cold and the thread's cache budget is above 32 MiB --
+             * at 8 MiB (footprint) or 0 (shortlived) an 8 MiB block is the
+             * entire budget and stays resident for reuse.  Smaller medium
+             * buffers churned by jq/g++/Python stay resident when re-freed. */
             if (FM_CFG()->lcache_cold_purge &&
-                b >= 24 &&
-                !(fm_lcache_warm_mask & (1ULL << b))) {
+                (b >= 24 || (b == 23 && !(fm_lcache_warm_mask & (1ULL << b)) &&
+                             fm_lcache_budget(b) > (32ull << 20)))) {
                 uintptr_t pstart = (uintptr_t)sp + FM_PAGE_SIZE;
                 uintptr_t pend = (sp->map_base + sp->map_size) & ~(uintptr_t)(FM_PAGE_SIZE - 1);
                 if (pend > pstart)

@@ -42,7 +42,12 @@ nothing where there is nothing to purge.
 
 Local fixtures where cold blocks matter: gcc `-O1 -c sqlite3.c`
 370.1 -> 350.5 MB, lua 16.2-16.6 -> 14.7-15.0, sqlite speedtest1
-11.5-11.7 -> 11.07-11.14, git and node unchanged, time unchanged.
+11.5-11.7 -> 11.07-11.14, git and node unchanged.
+
+A paired 11-rep run of the exact legacy gcc workload (interleaved, medians):
+RSS 370,212 -> 351,680 KiB (**-18.1 MiB**) at a paired time ratio of
+**1.0123** (+1.2%).  gcc's legacy cell should therefore land near
+340 MiB against glibc's 342.3, i.e. below glibc for about 1% of time.
 
 `test_basic` (both libraries), `stress`, `rtest`, `valgrind`,
 `mtrepeat` and `abicheck` pass.

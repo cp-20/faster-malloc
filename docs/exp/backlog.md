@@ -507,6 +507,25 @@ Buying the 1.5 MiB costs 11% of sqlite's time, and sqlite currently ties
 glibc on time; the default stays at 256 KiB and the knob is the option
 for memory-first deployments.  git/lua/node are neutral at every value.
 
+## Round 35: purge a cold bucket's block on insert (2026-11-25)
+
+`FM_LCACHE_BUCKET_COLD` keeps one block per bucket that never hit.  That
+block is a guess, and Round 32 showed sqlite pays 1.7 MiB for it.  The
+variant keeps the mapping (so a later reuse still skips mmap) but
+`MADV_DONTNEED`s its payload pages at insert time; page 0 with the header
+stays resident.
+
+| case | main | cold purge on insert |
+|---|---:|---:|
+| gcc `-O1 -c sqlite3.c` | 370.1 MB | **350.5** |
+| lua churn | 16.2-16.6 MB | **14.7-15.0** |
+| sqlite speedtest1 | 11.5-11.7 MB | **11.07-11.14** |
+| git rev-list | 24.0 MB | 24.0 |
+
+Local times were unusable (system load); the instruction count is
+1.0006-1.0008 by callgrind on three micro cases, since the change is in
+the large-free slow path only.  11-rep matrices are running.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

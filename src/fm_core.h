@@ -529,6 +529,24 @@ static inline uint32_t fm_now_ms(void)
 /* batch pool                                                          */
 /* ------------------------------------------------------------------ */
 
+/* N126: one startup heap for the static build.  The FM_DIAG_RSS
+ * decomposition (exp/auto-n125) attributes short-process RSS almost
+ * entirely to small-class span pages; the other mappings (batch pages,
+ * large slab) are large in VA but near-zero resident.  Serve the first
+ * span of every class and the initial batch pages from ONE demand-paged
+ * static arena instead of opening a dense extent, a per-thread large slab
+ * and 4 KiB metadata VMAs.  All slots are 64 KiB-aligned and carry a normal
+ * FM_Span header, so every span-mask site (free, census, trim, usable_size,
+ * realloc) is unchanged; only the slow-path mapping source moves.  Slots
+ * are handed out atomically and never unmapped. */
+#ifdef FM_SMALL_FIRST_SPAN
+#define FM_BOOT_BATCH_SLOTS 8u /* 8 x 128 batch headers, then mmap fallback */
+static char fm_boot_heap[(CLASS_COUNT + FM_BOOT_BATCH_SLOTS) * SPAN_SIZE]
+    __attribute__((aligned(SPAN_SIZE)));
+static _Atomic unsigned fm_boot_span_slot;
+static _Atomic unsigned fm_boot_batch_slot;
+#endif
+
 static inline FM_Batch *fm_batch_alloc(void)
 {
     FM_Batch *b = fm_batch_pool;
@@ -549,10 +567,19 @@ static inline FM_Batch *fm_batch_alloc(void)
         b->next = NULL;
         return b;
     }
-    char *page = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
-                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (page == MAP_FAILED)
-        return NULL;
+    char *page = NULL;
+#ifdef FM_SMALL_FIRST_SPAN
+    unsigned bs = atomic_fetch_add_explicit(&fm_boot_batch_slot, 1,
+                                            memory_order_relaxed);
+    if (bs < FM_BOOT_BATCH_SLOTS)
+        page = fm_boot_heap + (size_t)(CLASS_COUNT + bs) * SPAN_SIZE;
+#endif
+    if (!page) {
+        page = mmap(NULL, 4096, PROT_READ | PROT_WRITE,
+                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (page == MAP_FAILED)
+            return NULL;
+    }
 
     FM_Batch *first = (FM_Batch *)page;
     for (int i = 0; i < 127; i++)
@@ -753,25 +780,48 @@ static inline char *fm_span_new(uint32_t cls, uint32_t *count_out)
     size_t bs = kClassSize[cls];
     size_t bytes = SPAN_SIZE;
 #ifdef FM_SMALL_FIRST_SPAN
+    unsigned first;
     /* ADR 0060: sparsely used startup classes cap initial carved blocks
      * while still drawing 64 KiB VA slots from the shared dense extent. */
     static _Atomic unsigned char started[CLASS_COUNT];
-    bytes = atomic_exchange_explicit(&started[cls], 1, memory_order_relaxed)
-        ? SPAN_SIZE : FM_ALIGN_UP(HEADER_SIZE + (bs > 16320 ? bs : 16320), FM_PAGE_SIZE);
+    first = !atomic_exchange_explicit(&started[cls], 1, memory_order_relaxed);
+    bytes = first
+        ? FM_ALIGN_UP(HEADER_SIZE + (bs > 16320 ? bs : 16320), FM_PAGE_SIZE)
+        : SPAN_SIZE;
 #endif
     size_t n = (bytes - HEADER_SIZE) / bs;
     uintptr_t raw_base = 0;
     size_t raw_len = SPAN_SIZE;
-    char *base;
-    if (bs <= FM_PAGE_SIZE) {
-        base = fm_map_dense_span();
-        raw_base = (uintptr_t)base;
-    } else {
-        base = fm_map_large_slab(SPAN_SIZE - HEADER_SIZE, &raw_base, &raw_len);
-        if (!base) {
-            base = fm_map_aligned(SPAN_SIZE - HEADER_SIZE);
+    char *base = NULL;
+#ifdef FM_SMALL_FIRST_SPAN
+    if (first) {
+        /* N126: the first span of each class comes from the one static
+         * startup heap.  No mmap/VMA, no THP commit, demand-paged only. */
+        unsigned slot = atomic_fetch_add_explicit(&fm_boot_span_slot, 1,
+                                                  memory_order_relaxed);
+        if (slot < CLASS_COUNT) {
+            base = fm_boot_heap + (size_t)slot * SPAN_SIZE;
+            raw_base = 0; /* static slot: the census must not munmap it */
+            raw_len = 0;
+            /* Withhold one block so the span is never fully free: a
+             * static span cannot be released, and a dead census entry
+             * would retire its blocks permanently. */
+            if (n > 1)
+                n--;
+        }
+    }
+#endif
+    if (!base) {
+        if (bs <= FM_PAGE_SIZE) {
+            base = fm_map_dense_span();
             raw_base = (uintptr_t)base;
-            raw_len = SPAN_SIZE;
+        } else {
+            base = fm_map_large_slab(SPAN_SIZE - HEADER_SIZE, &raw_base, &raw_len);
+            if (!base) {
+                base = fm_map_aligned(SPAN_SIZE - HEADER_SIZE);
+                raw_base = (uintptr_t)base;
+                raw_len = SPAN_SIZE;
+            }
         }
     }
     if (!base)
@@ -1591,7 +1641,10 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             uint32_t new_pages = 0;
             if (cand_pages >= cfg->purge_min_pages) {
                 unsigned char vec[16];
-                int have_vec = mincore((void *)e->span, sp->map_size, vec) == 0;
+                /* Static startup spans have map_size == 0 and no backing
+                 * mapping of their own; skip the mincore gate for them. */
+                int have_vec = sp->map_base &&
+                    mincore((void *)e->span, sp->map_size, vec) == 0;
                 for (uint32_t pg = 1; pg < 16; pg++) {
                     if ((cand_mask & (uint16_t)(1u << pg)) &&
                         (!have_vec || (vec[pg] & 1))) {
@@ -1834,7 +1887,9 @@ __attribute__((noinline)) static size_t fm_trim_class(uint32_t cls, uint32_t kee
             uintptr_t base = sp->map_base;
             size_t len = sp->map_size;
             released += len;
-            munmap((void *)base, len);
+            /* N126: static startup-span slots have no mapping to release. */
+            if (base)
+                munmap((void *)base, len);
         }
     }
 

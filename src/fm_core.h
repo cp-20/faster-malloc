@@ -80,6 +80,7 @@
 #define FM_SPAN_MAGIC 0x5A6E4C5Au
 #define FM_ALIGNED_MAGIC 0xA110CEDAu
 #define FM_PAGE_SIZE 4096u
+#define FM_CACHELINE 64u
 #define FM_ALIGN_UP(x, a) (((uintptr_t)(x) + (a)-1) & ~((uintptr_t)(a)-1))
 
 static inline void *fm_malloc(size_t size);
@@ -136,7 +137,19 @@ typedef struct FM_Span {
     uint32_t purge_mark;
     uint16_t purged_mask;
     uint16_t withheld_cnt;
-} FM_Span;
+} __attribute__((aligned(FM_CACHELINE))) FM_Span;
+
+/* The header owns exactly one cache line: the first block starts on the
+ * next one, so writes to user data never invalidate the line every free()
+ * reads cls from.  Every header lives either at a SPAN_SIZE-aligned base
+ * or HEADER_SIZE below a SPAN_SIZE-aligned user pointer, so these size
+ * checks are all the alignment claim above needs.  A new field must reuse
+ * existing bytes; growing the header moves every block. */
+_Static_assert(sizeof(FM_Span) == HEADER_SIZE, "span header must not grow");
+_Static_assert(HEADER_SIZE == FM_CACHELINE, "block 0 must start on its own line");
+_Static_assert(SPAN_SIZE % FM_CACHELINE == 0, "span bases must be line-aligned");
+_Static_assert(offsetof(FM_Span, withheld_cnt) + sizeof(uint16_t) == HEADER_SIZE,
+               "span header must be packed without tail padding");
 
 typedef struct FM_Batch FM_Batch;
 struct FM_Batch {

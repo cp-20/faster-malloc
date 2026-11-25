@@ -684,3 +684,9 @@ exists; check `git ls-remote origin 'refs/heads/exp/*'`.
 |---|---|---|
 | `exp/auto-n120` (N120) | 11-rep rerun run 45552689984: micro 0.9626, worst 0.9770, paired 0.9982, paired worst 1.0082, RSS down on every app again (jq 258.1->257.5, python 147.8->147.3, sort 35.9->34.5, gxx 206.1->204.5, git 13.6->12.5, sqlite 13.7->12.5 MiB) | REJECTED as a default (final: the paired gate <=0.99 fails at 11 reps, same pattern as N15/N135; the RSS reduction is consistent and real, but the stack's time is neutral, not a win. Supersedes the cycle-6 INCONCLUSIVE. Follow-up launched: N120b = N120 without the B2 quarter-budget component, whose own commit message records a 1.6-2.9% jq cost) |
 | `exp/auto-n96` (N96) | 3 reps: micro 0.9624, paired 0.9934 | REJECTED (final: paired fails the <=0.99 gate at 3 reps, cf. N62/N71/N114 rejected at paired 0.992-0.993; its mechanisms overlap N120/N120b, which carry the same RSS effect forward. Supersedes the cycle-6 INCONCLUSIVE) |
+
+## Campaign harvest 2026-11-25 cycle 10 (N120b)
+
+| branch | evidence | verdict |
+|---|---|---|
+| `exp/auto-n120b` (N120b) | run 45553899415 (3 reps): micro 0.9624, worst 0.9768, paired 0.9938, paired worst 1.0427, RSS down on every app (jq 258.1->257.6, python 147.8->146.7, sort 36.2->34.8, gxx 204.6->203.8, git 13.5->12.5, sqlite 13.6->12.5 MiB) | REJECTED (final: paired gate <=0.99 and paired-worst gate <=1.02 both fail at 3 reps — removing B2 did not restore the time win; same pattern as N120/N96. The RSS reduction is consistent but time is neutral, so not adoptable as a default) |

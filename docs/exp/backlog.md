@@ -581,8 +581,16 @@ measured that cost twice: a two-compare range check on the free path costs
 instruction-count micro moved to 1.12-1.16 (Round 34).  A page-map load is
 in the same class.
 
-For gcc, if ~3,000 32 KiB blocks are live at the peak, the spill alone is
-about 12 MiB of its 16 MiB gap -- the largest single explanation found for
+Measured directly (`/proc/self/statm`, 64 live 32 KiB blocks, whole
+payload touched):
+
+| allocator | bytes of RSS per block |
+|---|---:|
+| glibc | 34,752 |
+| v2 | **38,848** (+4,096 = one page, +11.8%) |
+
+For gcc, if ~3,000-4,000 32 KiB blocks are live at the peak, the spill is
+12-16 MiB of its 16 MiB gap -- the largest single explanation found for
 any app.  It cannot be removed without the micro-fatal lookup, so the
 32 KiB class is at its Pareto point too.
 

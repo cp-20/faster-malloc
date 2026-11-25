@@ -21,6 +21,10 @@ on:
         description: "Space-separated allocators"
         required: false
         default: "glibc v2 jemalloc mimalloc tcmalloc"
+      diag_sizes:
+        description: "1 = also dump allocation size histograms for sqlite/gcc/git"
+        required: false
+        default: "0"
       runtime_env:
         description: "Extra env inherited by every app (NAME=value ...)"
         required: false
@@ -66,6 +70,29 @@ jobs:
 
       - name: Build fixtures
         run: bash bench/apps/prep.sh
+
+      - name: Diagnose allocation sizes
+        if: ${{ inputs.diag_sizes == '1' }}
+        run: |
+          set -euo pipefail
+          make -j"$(nproc)" libfastmallocdiag.so
+          DIAG="$PWD/libfastmallocdiag.so"
+          WORK="$PWD/bench/apps/work"
+          rm -f /tmp/fm-diag-*.log
+          ( cd "$WORK" && LD_PRELOAD="$DIAG" ./speedtest1 st.db --size 30 >/dev/null 2>&1 || true )
+          ( LD_PRELOAD="$DIAG" gcc -O1 -I"$WORK/sqlite-amalgamation-3450100" -c "$WORK/sqlite-amalgamation-3450100/sqlite3.c" -o /tmp/diag-sqlite3.o >/dev/null 2>&1 || true )
+          rm -rf /tmp/gitdiag && cp -r "$WORK/gitfix" /tmp/gitdiag
+          ( cd /tmp/gitdiag && LD_PRELOAD="$DIAG" git rev-list --objects --all >/dev/null 2>&1 || true )
+          {
+            echo "## allocation size histogram (bytes count)"
+            for f in /tmp/fm-diag-*.log; do echo "-- $(basename "$f")"; sort -k2 -n "$f"; done
+          } | tee diag-sizes.txt
+          {
+            echo "## diag sizes"
+            echo '```'
+            cat diag-sizes.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Run legacy app matrix
         env:

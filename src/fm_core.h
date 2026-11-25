@@ -2616,8 +2616,32 @@ static void fm_arm_thread_exit(void)
 /* exported entry points                                               */
 /* ------------------------------------------------------------------ */
 
+#ifdef FM_DIAG_SIZES
+/* Diagnostic-only size histogram (separate library build): counts every
+ * malloc request by class for small sizes and by log2 bucket above
+ * SMALL_MAX, so the CI allocation shape of an app can be read directly. */
+#define FM_DIAG_SMALL (CLASS_COUNT)
+#define FM_DIAG_BIG 64
+static _Atomic uint64_t fm_diag_cnt[FM_DIAG_SMALL + FM_DIAG_BIG];
+static inline void fm_diag_count(size_t size)
+{
+    size_t i;
+    if (size <= SMALL_MAX)
+        i = fm_class_of(size);
+    else {
+        i = FM_DIAG_SMALL + (63 - __builtin_clzll((unsigned long long)size));
+        if (i >= FM_DIAG_SMALL + FM_DIAG_BIG)
+            i = FM_DIAG_SMALL + FM_DIAG_BIG - 1;
+    }
+    atomic_fetch_add_explicit(&fm_diag_cnt[i], 1, memory_order_relaxed);
+}
+#endif
+
 static inline void *fm_malloc(size_t size)
 {
+#ifdef FM_DIAG_SIZES
+    fm_diag_count(size);
+#endif
     size_t cls = fm_class_of(size);
     if (__builtin_expect(cls != LARGE_CLASS, 1)) {
         void *p = fm_tls.head[cls];

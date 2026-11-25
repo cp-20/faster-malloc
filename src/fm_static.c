@@ -11,6 +11,29 @@
 
 #define FM_SMALL_FIRST_SPAN /* ADR 0060; JIT guard rejected in ADR 0061. */
 #include "fm_core.h"
+#ifdef FM_DIAG_SIZES
+#include <fcntl.h>
+static void fm_diag_dump(void)
+{
+    char buf[128];
+    char path[64];
+    int n = snprintf(path, sizeof path, "/tmp/fm-diag-%d.log", (int)getpid());
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return;
+    for (size_t i = 0; i < FM_DIAG_SMALL + FM_DIAG_BIG; i++) {
+        uint64_t c = atomic_load_explicit(&fm_diag_cnt[i], memory_order_relaxed);
+        if (!c) continue;
+        size_t sz = i < FM_DIAG_SMALL ? (i < CLASS_COUNT ? 0 : 0) : 0;
+        /* report the class block size, or the bucket's lower bound */
+        if (i < FM_DIAG_SMALL) sz = kClassSize[i];
+        else sz = (size_t)1 << (i - FM_DIAG_SMALL);
+        n = snprintf(buf, sizeof buf, "DIAGSIZE %zu %llu\n", sz, (unsigned long long)c);
+        if (n > 0) { ssize_t w = write(fd, buf, (size_t)n); (void)w; }
+    }
+    close(fd);
+}
+__attribute__((constructor)) static void fm_diag_arm(void) { atexit(fm_diag_dump); }
+#endif
 
 FM_Config fm_cfg;
 pthread_once_t fm_cfg_once = PTHREAD_ONCE_INIT;

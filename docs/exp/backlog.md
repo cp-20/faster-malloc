@@ -491,6 +491,22 @@ treats a bucket as warm only while `hits * 4 >= inserts`.
 Neutral everywhere; rejected.  sqlite's 1.7 MiB of lcache0-removable
 retention is not in warm buckets.
 
+## Round 32: cold-cap sweep (2026-11-25)
+
+`FM_LCACHE_BUCKET_COLD` was added as a runtime knob (ADR 0087).  Sweeping
+it on sqlite speedtest1 shows the RSS step is entirely below 128 KiB:
+
+| cold cap | sqlite RSS | sqlite time |
+|---|---:|---:|
+| 0 | 9.37-9.44 MB | 2.68-2.71 s |
+| 64 KiB | 9.45-9.52 | 2.67-2.80 |
+| 128 KiB | 10.90-10.94 | 2.44-2.45 |
+| **256 KiB (default)** | 10.94-11.02 | **2.40-2.43** |
+
+Buying the 1.5 MiB costs 11% of sqlite's time, and sqlite currently ties
+glibc on time; the default stays at 256 KiB and the knob is the option
+for memory-first deployments.  git/lua/node are neutral at every value.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

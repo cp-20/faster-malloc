@@ -17,8 +17,11 @@ src/size_classes2.h: src/gen_classes2.py
 libfastmalloc.so: src/alloc_v1.c src/size_classes.h
 	$(CC) $(CFLAGS) -shared -o $@ src/alloc_v1.c $(LDFLAGS)
 
+libfastmalloc10.so: src/fm_static.c src/fm_core.h src/size_classes2.h
+	$(CC) $(CFLAGS) -DFM_PAGEHEAP -shared -Wl,-z,nodelete -o $@ src/fm_static.c $(LDFLAGS)
+
 libfastmalloc2.so: src/fm_static.c src/fm_core.h src/size_classes2.h
-	$(CC) $(CFLAGS) -shared -Wl,-z,nodelete -o $@ src/fm_static.c $(LDFLAGS)
+	$(CC) $(CFLAGS) -DFM_PAGEHEAP -shared -Wl,-z,nodelete -o $@ src/fm_static.c $(LDFLAGS)
 
 libjitmalloc.so: src/fm_jit.c src/jit_stubs.S src/fm_core.h src/size_classes2.h
 	$(CC) $(CFLAGS) -shared -Wl,-z,nodelete -o $@ src/fm_jit.c src/jit_stubs.S $(LDFLAGS)

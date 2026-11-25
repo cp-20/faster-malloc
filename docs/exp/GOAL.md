@@ -62,6 +62,49 @@ time cost.  Shrinking the first spans made git/sqlite worse; the startup
 gap needs a different mechanism (fewer mappings, not smaller ones).  The
 Redis 8 / jemalloc `malloc_usable_size` crash is fixed (PR #2).
 
+## Frontier after PR #5 / PR #6 (2026-11-25)
+
+Merged: ADR 0083 (16 MiB base budget), 0087 (selective warm/cold retention,
+runtime knobs), 0090 (dense-THP warmup knob).  11-rep legacy, MiB and
+time ratio against glibc:
+
+| app | v2 RSS | glibc | ratio | v2 time / glibc |
+|---|---:|---:|---:|---:|
+| jq | 353.9 | 370.4 | **0.955** | **0.740** |
+| python | 432.0 | 430.1 | 1.004 | 1.010 |
+| node | 454.6 | 438.3 | 1.037 | 1.083 |
+| gcc | 358.2 | 342.3 | 1.046 | 0.989 |
+| lua | 14.7 | 11.6 | 1.260 | 0.716 |
+| git | 28.2 | 22.1 | 1.276 | 0.980 |
+| sqlite | 13.7 | 11.7 | 1.170 | 0.999 |
+| redis | 6.3 | 5.6 | 1.131 | 0.897 |
+
+Every residual has now been decomposed and bounded by measurement:
+
+* **32 KiB class (gcc's dominant shape)**: a 32768-byte payload plus the
+  64-byte header cannot fit eight pages, and a 64 KiB span holds one
+  block, so each live block touches nine pages: 38,848 B of RSS against
+  glibc's 34,752 (+11.8%, measured with `/proc/self/statm`).  A 32704
+  class fixes it only for requests <= 32704; the CI toolchain allocates
+  exact 32 KiB (Round 39).  Out-of-band headers need a page map: 16
+  `& SPAN_MASK` sites and a lookup on every free, whose cost proxy (a
+  two-compare range check, 7 of 44 instructions) measured micro
+  1.12-1.16.
+* **Warm 64/128 KiB buckets (gcc, sqlite)**: the cache serves 22,459 and
+  12,341 hits in one gcc run, so its retention is buying time; cutting it
+  is the measured RSS-for-time trade (ADR 0083 A/B: 4.1 points of RSS for
+  2.9 points of time).
+* **git / lua / sqlite / redis small-process gap**: fully-free pages are
+  only 58 pages (232 KiB), census frequency and refill order are no-ops,
+  and byte-granular packing costs the micro 1.12-1.16.
+* **node**: 27 MiB payload retention is the same trade; the knobs expose
+  both ends (`FM_LCACHE_MAX_BYTES=67108864` restores time at +60 MiB).
+
+The standing candidate is therefore at the measured Pareto frontier of
+this architecture; the remaining options are explicit knobs
+(`FM_LCACHE_BUCKET_COLD=0`: sqlite 11.1 -> 9.4 MiB at +15% time;
+`FM_DENSE_THP_WARMUP=0`: git -1.9 / lua -2.0 MiB at jq +7.9%).
+
 ## Baseline
 
 The campaign starts from whatever is on `main`.  Accepted mechanisms so

@@ -516,6 +516,27 @@ for memory-first deployments.  git/lua/node are neutral at every value.
 The hint cannot be made size-selective: jq's dense-extent demand sits
 between git's and lua's, so any threshold that drops git/lua drops jq too.
 
+## Round 36: the CI allocation shapes (2026-11-25)
+
+`FM_DIAG_SIZES` (a diagnostic-only library build) histograms every malloc
+by class (<= 32 KiB) or log2 bucket, writing `/tmp/fm-diag-<pid>.log`.
+The first CI run of sqlite/gcc/git on the legacy fixtures gives:
+
+| app | dominant requests (count) | other |
+|---|---|---|
+| gcc | **32 KiB x 22,357** (class path), **64 KiB x 12,561** (large) | 16 KiB x 4,730, 128 KiB x 240, 256 KiB x 152, 512 KiB x 10, 1 MiB x 6 |
+| sqlite | **64 KiB x 5,345** (large), 16 KiB x 1,829, 32 KiB x 715 | 128 KiB x 8 |
+| git | 16 KiB x 4, 64 KiB x 2 | - |
+
+This falsifies the hypothesis behind the next planned mechanism ("gcc's
+CI blocks live above the 256 KiB cold cap"): they do not.  The dominant
+shapes are 32 KiB (a small class, span path, untouched by the lcache)
+and 64 KiB (large slab slices, of which the cold cap keeps exactly one,
+so 12,560 of gcc's 12,561 frees are munmapped).  Caching more 64 KiB
+slices trades RSS 1:1 (Round 21) and a purged cache only saves the mmap
+syscall (~0.2% of gcc's time, Round 26b), so neither shape offers a
+slow-path win.  The gap is the 32 KiB class's per-class pages.
+
 ## Rejected (do not repeat without a materially different mechanism)
 
 | id | hypothesis | branch | result |

@@ -520,10 +520,19 @@ between git's and lua's, so any threshold that drops git/lua drops jq too.
 
 | id | branch | result | status |
 |---|---|---|---|
-| G3 | `exp/class-32704` | add a 32704-byte class so payload+header is exactly 8 pages and a 64 KiB span holds 2 blocks (no spill): local gcc 370.2 -> **351.8 MB**, lua 16.5 -> 14.9, sqlite 11.5 -> 11.0, git neutral, all at unchanged time; callgrind micro 1.0006-1.0015; `test_basic`/`stress`/`rtest` pass | **candidate** (11-rep matrices running) |
+| G3 | `exp/class-32704` | add a 32704-byte class so payload+header is exactly 8 pages and a 64 KiB span holds 2 blocks (no spill): local gcc 370.2 -> **351.8 MB** at paired time 1.0000 (11 reps), lua 16.5 -> 14.9, sqlite 11.5 -> 11.0, node neutral; 11-rep exp-bench micro **1.0000 / worst 1.0000**; **11-rep legacy: no app improves** (gcc 367,228 vs 366,840, lua 15,916 vs 15,028, others flat) | rejected |
 
 This is the direct fix for Round 38's measured one-page spill, with no
 new lookup on any hot path.
+
+**Why it did not transfer to CI:** the new class only serves requests up
+to 32704; requests of exactly 32768 keep the old one-block class and its
+nine pages.  The local gcc allocates 30-31 KiB buffers (fine histogram),
+so it moved; the CI toolchain's gcc allocates exact 32 KiB and did not.
+A 32768-byte payload can only use eight pages if its header lives outside
+the payload's pages, i.e. in shared metadata -- the page map that costs
+2-3 instructions on every free (measured as micro 1.12-1.16 for a
+two-compare variant).
 
 ## Rejected (do not repeat without a materially different mechanism)
 
